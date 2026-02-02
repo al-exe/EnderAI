@@ -1,0 +1,6 @@
+enderai_chat_*
+application.mdc
+meta/
+
+# macOS
+.DS_Store

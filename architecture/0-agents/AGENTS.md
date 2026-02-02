@@ -5,7 +5,7 @@ Last updated: 2026-02-02 07:05 UTC
 These rules define the highest-precedence behavior for any agent operating in this repository.
 EnderAI’s differentiator is **continuity with trust**: past work informs the present, and present work teaches the future — but only through explicit, scoped, inspectable memory.
 
-Optional overrides (if present): `architecture/0-agents/agents.override`.
+Optional overrides (if present): `architecture/0-agents/agents.override` (template: `architecture/0-agents/agents.override.example`).
 
 ## Memory Layers (Canonical)
 - **Layer 0 — Rules Context:** `AGENTS.md` (this file)
@@ -28,6 +28,7 @@ Optional overrides (if present): `architecture/0-agents/agents.override`.
      - the key output/error (verbatim snippets)
      - the current hypothesis + next check
      - a clearly labeled **BREAKTHROUGH** entry when something starts working (what changed + exact command + observed result)
+   - **Commit message style:** use short, imperative, Title Case summaries (e.g. “Add…”, “Update…”, “Document…”) and never include secrets.
 
 3) **Layer 1 first; Layer 2 only after completion; Layer 3 during execution**
    - Before starting a user-defined task/ticket, consult `architecture/1-ground-truth/`; if it’s missing or stale, add new ground truth or mark older entries as superseded.
