@@ -1,0 +1,75 @@
+# Demo App Runbook — Full Stack FastAPI Template (Local Dev)
+
+Created: 2026-02-02 07:05 UTC  
+Last reviewed: 2026-02-02 07:05 UTC
+
+This runbook is the “ground truth” for starting the vendored demo app from scratch.
+
+## App Location
+- `demo/full-stack-fastapi-template/`
+
+## Default local start (Docker Compose)
+From the app root:
+```sh
+cd demo/full-stack-fastapi-template
+docker compose watch
+```
+
+If you don’t need live file watching:
+```sh
+cd demo/full-stack-fastapi-template
+docker compose up --build
+```
+
+## What to open
+See `demo/full-stack-fastapi-template/development.md`.
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+- Adminer: `http://localhost:8080`
+- Traefik UI: `http://localhost:8090`
+- Mailcatcher: `http://localhost:1080`
+
+## Default login (development)
+From `demo/full-stack-fastapi-template/.env`:
+- Email: `admin@example.com`
+- Password: `changethis`
+
+To use a different login locally, edit `demo/full-stack-fastapi-template/.env` and restart with a fresh DB:
+```sh
+cd demo/full-stack-fastapi-template
+docker compose down -v
+docker compose up --build
+```
+
+## Troubleshooting: `docker compose watch` lock path error (Linux)
+Symptom:
+```text
+cannot take exclusive lock for project "...": open /run/user/<uid>/snap.docker/<project>.pid: no such file or directory
+```
+
+Fix options:
+1) Create the missing runtime dir (common when Docker is installed via Snap):
+```sh
+# Note: `snap.docker` here is a directory name, not a command to run.
+mkdir -p /run/user/$(id -u)/snap.docker
+docker compose watch
+```
+
+2) If `/run/user/$(id -u)` doesn’t exist (common in WSL/non-systemd shells), set `XDG_RUNTIME_DIR`:
+```sh
+export XDG_RUNTIME_DIR="$HOME/.xdg-runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
+docker compose watch
+```
+
+3) Fallback without watch:
+```sh
+docker compose up --build
+```
+
+## Source references (vendored docs)
+- `demo/full-stack-fastapi-template/development.md`
+- `demo/full-stack-fastapi-template/backend/README.md`
+- `demo/full-stack-fastapi-template/frontend/README.md`

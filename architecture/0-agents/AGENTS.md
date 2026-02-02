@@ -1,11 +1,11 @@
 # EnderAI — Layer 0 Agent Rules (Repo-Wide)
 
-Last updated: 2026-02-02 05:46 UTC
+Last updated: 2026-02-02 07:05 UTC
 
 These rules define the highest-precedence behavior for any agent operating in this repository.
 EnderAI’s differentiator is **continuity with trust**: past work informs the present, and present work teaches the future — but only through explicit, scoped, inspectable memory.
 
-Optional overrides (if present): `level-0-agents/agents.override` (takes precedence over this file).
+Optional overrides (if present): `architecture/0-agents/agents.override`.
 
 ## Memory Layers (Canonical)
 - **Layer 0 — Rules Context:** `AGENTS.md` (this file)
@@ -23,12 +23,18 @@ Optional overrides (if present): `level-0-agents/agents.override` (takes precede
    - Don’t guess: if an answer matters, anchor it in ground truth (code, tests, tool output, or recorded Layer 1 artifacts).
    - Capture enough evidence to replay the work: commands tried, key outputs/errors, and code pointers (file paths + important symbols).
    - Timestamp any notes/artifacts you create or materially update (prefer UTC).
+   - **Debugging requirement:** when troubleshooting live with a user (errors/logs/commands), continuously update a Layer 3 `.mdc` working log with:
+     - the exact command(s) run
+     - the key output/error (verbatim snippets)
+     - the current hypothesis + next check
+     - a clearly labeled **BREAKTHROUGH** entry when something starts working (what changed + exact command + observed result)
 
 3) **Layer 1 first; Layer 2 only after completion; Layer 3 during execution**
    - Before starting a user-defined task/ticket, consult `architecture/1-ground-truth/`; if it’s missing or stale, add new ground truth or mark older entries as superseded.
    - Use `architecture/2-knowledge-base/` to accelerate execution, but treat it as non-authoritative and overrideable.
    - Do not write to `architecture/2-knowledge-base/` while a task is in progress; only update the knowledge base after the user confirms the task/ticket is completed.
    - During the task, write `.mdc` notes in `architecture/3-task-context/` as needed to unblock progress (code pointers, workarounds, commands tried, what worked, what failed, and why).
+   - **During debug loops:** prefer updating the same Layer 3 file incrementally after each attempt (don’t batch-write a summary at the end).
 
 4) **Freshness and pruning (7-day TTL for Layer 2/3)**
    - For `.mdc` files in `architecture/2-knowledge-base/` and `architecture/3-task-context/`, include `Created` and `Last used` (or `Last reviewed`) dates.

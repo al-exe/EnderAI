@@ -1,10 +1,11 @@
 # Demo App — Full Stack FastAPI Template (Provenance)
 
 Created: 2026-02-02 06:03 UTC  
-Last reviewed: 2026-02-02 06:03 UTC
+Last reviewed: 2026-02-02 07:05 UTC
 
 ## What’s in-repo
 - Vendored app lives at: `demo/full-stack-fastapi-template/`
+- Local-dev runbook: `architecture/1-ground-truth/demo-app-full-stack-fastapi-template-local-dev.mdc`
 
 ## Upstream source (open internet)
 - Upstream repo: `https://github.com/fastapi/full-stack-fastapi-template`

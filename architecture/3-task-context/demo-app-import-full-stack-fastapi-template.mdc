@@ -1,7 +1,7 @@
 # Demo App Import — Full Stack FastAPI Template
 
 Created: 2026-02-02 06:03 UTC  
-Last used: 2026-02-02 06:03 UTC
+Last used: 2026-02-02 07:05 UTC
 
 ## Goal
 Vendor `fastapi/full-stack-fastapi-template` into this repo as a React + Python demo app.
@@ -17,6 +17,37 @@ cd demo/full-stack-fastapi-template
 git rev-parse HEAD
 # 1c6d656482d9ab7d885138d4fd27cf0fdd9ea2fa
 rm -r .git
+```
+
+## Troubleshooting (Linux): `docker compose watch` lock path error
+Observed on a Linux host (prompt showed `alexlee@OMEN`) when running:
+```sh
+docker compose watch
+```
+
+Error:
+```text
+cannot take exclusive lock for project "full-stack-fastapi-template": open /run/user/1000/snap.docker/full-stack-fastapi-template.pid: no such file or directory
+```
+
+Fix options:
+1) Create the missing runtime dir (common when Docker is installed via Snap):
+```sh
+# Note: `snap.docker` here is a directory name, not a command to run.
+mkdir -p /run/user/$(id -u)/snap.docker
+docker compose watch
+```
+
+2) If `/run/user/$(id -u)` doesn’t exist (common in WSL/non-systemd shells), point `XDG_RUNTIME_DIR` somewhere you own:
+```sh
+export XDG_RUNTIME_DIR="$HOME/.xdg-runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
+docker compose watch
+```
+
+3) If you don’t need file watching, use plain compose:
+```sh
+docker compose up --build
 ```
 
 ## Pointers
