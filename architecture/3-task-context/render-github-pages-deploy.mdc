@@ -1,0 +1,21 @@
+---
+Title: Render Backend + GitHub Pages Frontend Deploy
+Created: 2026-02-02
+Last used: 2026-02-02
+---
+
+## Goal
+Deploy FastAPI backend on Render and host frontend on GitHub Pages, wiring CORS and VITE_API_URL.
+
+## Progress Log
+- 2026-02-02: Added Render Postgres (enderai-db) and collected hostname/port/db/user/password in Render UI.
+- 2026-02-02: Set backend env vars in Render service (ENVIRONMENT, PROJECT_NAME, SECRET_KEY, FIRST_SUPERUSER, FIRST_SUPERUSER_PASSWORD, FRONTEND_HOST, BACKEND_CORS_ORIGINS, POSTGRES_*).
+- 2026-02-02: Render service URL confirmed: https://enderai.onrender.com
+- 2026-02-02: Committed and pushed GitHub Pages workflow (`demo/full-stack-fastapi-template/.github/workflows/deploy-frontend-pages.yml`) to main.
+- 2026-02-02: Moved Pages workflow to repo root `.github/workflows/deploy-frontend-pages.yml` (GitHub only detects root workflows) and pushed to main.
+- 2026-02-02: Pages workflow failed because `frontend` directory path was wrong for this repo layout; updating workflow to use `demo/full-stack-fastapi-template/frontend`.
+
+## Next Steps
+- Trigger Render deploy and confirm service URL + health endpoint `/api/v1/utils/health-check/`.
+- Set GitHub repo variable `VITE_API_URL` to the Render service base URL.
+- Confirm Pages build succeeds and frontend can reach backend.
