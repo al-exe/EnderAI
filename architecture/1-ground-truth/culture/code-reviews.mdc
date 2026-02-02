@@ -1,0 +1,45 @@
+# Culture — Code Reviews (Author + Reviewer)
+
+Created: 2026-02-02 05:40 UTC  
+Last reviewed: 2026-02-02 05:44 UTC
+
+EnderAI’s north star is high-trust shipping: reviews should make code better without turning into a tax.
+
+## As the Author
+- Make the PR easy to review:
+  - small scope, clear title
+  - good PR body (context, approach, verification, risk)
+  - obvious navigation: start with the entrypoint file(s)
+- Pre-empt common review questions:
+  - edge cases, error handling, rollbacks
+  - test coverage
+  - observability changes (logs/metrics)
+- Respond promptly and precisely:
+  - “Done in <commit>” with a short explanation
+  - if disagreeing, explain the tradeoff and propose an alternative
+
+## As the Reviewer
+- Optimize for clarity and safety, not personal style.
+- Use a consistent comment taxonomy:
+  - `Blocking:` correctness, security, data loss, reliability
+  - `Suggestion:` improvements that are optional
+  - `Question:` clarify intent, edge cases, expected behavior
+- Prefer explaining principles (“this increases coupling”) over preferences (“I don’t like it”).
+- If you request changes, be concrete:
+  - what to change
+  - why it matters
+  - what “done” looks like
+
+## What to Look For (Heuristics)
+- Correctness: does it match the ticket?
+- Tests: would this have caught the bug?
+- Failure modes: what happens on timeouts/errors?
+- Performance: any obvious hot paths?
+- Maintainability: are names and boundaries clear?
+- Risk: can we roll back safely?
+
+## When to Approve
+Approve when:
+- the change is correct and tested
+- risk is understood and mitigated
+- any remaining improvements are non-blocking and can be ticketed

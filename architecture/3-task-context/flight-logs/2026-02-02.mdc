@@ -1,0 +1,25 @@
+# Flight Log — 2026-02-02 (UTC)
+
+Created: 2026-02-02 06:03 UTC  
+Last used: 2026-02-02 06:07 UTC
+
+## Summary
+- 05:40–05:44: Wrote baseline task-tracking guidance (now: `architecture/1-ground-truth/flight-logs.mdc`).
+- 05:53: Imported React+FastAPI demo app and captured provenance (`architecture/1-ground-truth/demo-app-react-fastapi-todo.mdc`).
+- 06:03: Converted TODO guidance into Flight Logs; added 7-day auto-archive rule + examples.
+
+## Future (Next)
+- 2026-02-03: Add “evidence bundle” output that’s audit-friendly for the demo.
+- 2026-02-04: Run 3 quick demo user sessions; capture time-to-first-PR + trust blockers.
+
+## Present (In Progress)
+- (none)
+
+## Past (Done)
+- 06:03: Created Flight Log canon + archive rule (`architecture/1-ground-truth/flight-logs.mdc`).
+- 06:03: Added archive automation (`scripts/archive_flight_logs.py`).
+
+## Evidence / Links
+- Flight log canon: `architecture/1-ground-truth/flight-logs.mdc`
+- Active logs: `architecture/3-task-context/flight-logs/`
+- Archive location: `architecture/1-ground-truth/flight-logs/archive/`

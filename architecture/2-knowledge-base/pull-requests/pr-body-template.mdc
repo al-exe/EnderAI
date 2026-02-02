@@ -1,0 +1,31 @@
+# Pull Requests — Body Template
+
+Created: 2026-02-02 05:37 UTC  
+Last reviewed: 2026-02-02 05:37 UTC
+
+```md
+## Summary
+- <what changed in 1–3 bullets>
+
+## Context
+- Ticket: <link>
+- User impact: <who/what>
+
+## Changes
+- <key change 1>
+- <key change 2>
+
+## Verification
+- `...` (unit tests)
+- `...` (integration/e2e)
+- Screenshots / recordings: <if UI>
+- Evidence bundle: <link or path>
+
+## Risk / Rollout
+- Risk: <low/med/high> — <why>
+- Mitigation: <feature flag, monitoring, revert plan>
+
+## Notes
+- <tradeoffs, follow-ups>
+```
+

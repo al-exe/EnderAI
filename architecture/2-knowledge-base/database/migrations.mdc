@@ -1,0 +1,23 @@
+# Database — Migrations (Safe Workflow)
+
+Created: 2026-02-02 05:37 UTC  
+Last reviewed: 2026-02-02 05:37 UTC
+
+Schema migrations are high-risk and should be treated as gated actions.
+
+## Principles
+- Prefer additive changes (new columns/tables) over destructive changes.
+- Backfill in batches for large tables.
+- Separate deploy steps: “add column” → “write new path” → “read new path” → “cleanup old”.
+
+## Typical Migration Checklist
+- Name is descriptive and reversible where possible.
+- Includes an index strategy if adding new query paths.
+- Includes a backfill plan (batch size, expected runtime).
+- Includes rollback notes.
+
+## “Never Do This Blind”
+- `DROP COLUMN`, `DROP TABLE`, `TRUNCATE`
+- unbounded backfills on production
+- long-running locks on hot tables
+

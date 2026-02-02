@@ -1,0 +1,25 @@
+# AWS — RDS + DB Tunnels (Example)
+
+Created: 2026-02-02 05:37 UTC  
+Last reviewed: 2026-02-02 05:37 UTC
+
+## Preferred Safety Defaults
+- Use read-only DB users for production.
+- Enforce timeouts and row limits.
+- Avoid direct connections from laptops unless the org explicitly allows it.
+
+## Common Connection Patterns
+- VPN + security group allowlist
+- Bastion host (SSH tunnel)
+- SSM port-forwarding
+
+Example SSH tunnel:
+```sh
+ssh -N -L 5432:<rds-endpoint>:5432 ec2-user@<bastion-host>
+psql "postgres://readonly@localhost:5432/app"
+```
+
+## Operational Gotchas
+- If queries are slow, stop and add predicates/limits instead of “waiting it out”.
+- If you need `EXPLAIN`, confirm it’s allowed in prod and capture results as evidence.
+

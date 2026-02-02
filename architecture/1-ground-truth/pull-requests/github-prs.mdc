@@ -1,0 +1,49 @@
+# Pull Requests — Creating GitHub PRs (UI + `gh`)
+
+Created: 2026-02-02 05:40 UTC  
+Last reviewed: 2026-02-02 05:44 UTC
+
+This is a practical guide to opening PRs in GitHub with good defaults.
+
+## Before You Open the PR
+- Ensure branch is pushed:
+```sh
+git push -u origin HEAD
+```
+- Confirm the diff is what you expect:
+```sh
+git diff origin/main...HEAD
+```
+
+## Create a PR in the GitHub UI
+1) Push your branch.
+2) Open the repo on GitHub → “Compare & pull request”.
+3) Fill title/body (use `architecture/2-knowledge-base/pull-requests/pr-body-template.mdc`).
+4) Add:
+   - reviewers
+   - labels
+   - linked issue (if applicable)
+5) If it’s not ready for review, create as **Draft**.
+
+## Create a PR with `gh`
+```sh
+gh pr create --fill
+```
+
+Common options:
+```sh
+gh pr create --draft --fill
+gh pr create --title "Fix checkout spinner on API error" --body-file - < pr-body.md
+gh pr view --web
+```
+
+## Link Issues
+Use auto-closing keywords when appropriate:
+- “Fixes #123”
+- “Closes #123”
+
+If you don’t want auto-close, just link the issue URL.
+
+## After Opening
+- Watch CI and link results in the PR if CI isn’t automatically visible.
+- If you pushed follow-up commits, keep the PR updated with a short summary.

@@ -1,0 +1,23 @@
+# Flight Log — 2026-01-20 (UTC) (Example / Synthetic)
+
+Created: 2026-01-20 09:00 UTC  
+Last used: 2026-01-20 11:30 UTC
+
+## Summary
+- 09:00–09:15: Planned demo narrative + success criteria.
+- 10:00–10:45: Investigated connector scope; decided “GitHub-only first”.
+- 11:00–11:30: Wrote next-step ticket list with acceptance criteria.
+
+## Future (Next)
+- 2026-01-21: Draft evidence bundle schema (inputs, outputs, redaction rules).
+- 2026-01-22: Implement first “log → evidence bundle” export.
+
+## Present (In Progress)
+- 10:15: Writing demo script draft; collecting screenshots.
+
+## Past (Done)
+- 09:10: Chose demo scope: GitHub-only connector for first cut.
+- 10:30: Created follow-up tickets (synthetic placeholders).
+
+## Evidence / Links
+- (example only)

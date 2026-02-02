@@ -1,0 +1,25 @@
+# Demo App — React + FastAPI Todo (Provenance)
+
+Created: 2026-02-02 05:53 UTC  
+Last reviewed: 2026-02-02 05:53 UTC
+
+## What’s in-repo
+- Vendored app lives at: `demo/react-fastapi-todo/`
+
+## Upstream source (open internet)
+- Upstream repo: `https://github.com/testdrivenio/fastapi-react`
+- Upstream commit pinned at import time: `e01168769ad3713454e35a1e2b560d185dc805de`
+- Upstream license: MIT (see `demo/react-fastapi-todo/LICENSE`)
+
+## Import evidence (commands + outputs)
+```sh
+git clone --depth 1 https://github.com/testdrivenio/fastapi-react.git demo/react-fastapi-todo
+cd demo/react-fastapi-todo
+git rev-parse HEAD
+# e01168769ad3713454e35a1e2b560d185dc805de
+```
+
+## Local modifications after vendoring
+- Added Python deps file: `demo/react-fastapi-todo/backend/requirements.txt`
+- Made venv instructions match `.gitignore`: `demo/react-fastapi-todo/README.md`
+- Ignored common venv folder names: `demo/react-fastapi-todo/.gitignore`

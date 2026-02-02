@@ -1,0 +1,24 @@
+# Demo App Import — Full Stack FastAPI Template
+
+Created: 2026-02-02 06:03 UTC  
+Last used: 2026-02-02 06:03 UTC
+
+## Goal
+Vendor `fastapi/full-stack-fastapi-template` into this repo as a React + Python demo app.
+
+## Chosen upstream
+- Canonical upstream: `https://github.com/fastapi/full-stack-fastapi-template`
+  - Note: user-provided link included `utm_source=chatgpt.com`; import used the canonical repo URL.
+
+## Import steps + key outputs
+```sh
+git clone --depth 1 https://github.com/fastapi/full-stack-fastapi-template.git demo/full-stack-fastapi-template
+cd demo/full-stack-fastapi-template
+git rev-parse HEAD
+# 1c6d656482d9ab7d885138d4fd27cf0fdd9ea2fa
+rm -r .git
+```
+
+## Pointers
+- App root: `demo/full-stack-fastapi-template/`
+- Provenance (Layer 1): `architecture/1-ground-truth/demo-app-full-stack-fastapi-template.mdc`

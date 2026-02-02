@@ -1,0 +1,17 @@
+# EnderAI — Agent Overrides (Optional)
+#
+# Created: 2026-02-02 05:46 UTC
+# Last reviewed: 2026-02-02 05:46 UTC
+#
+# Purpose:
+# - A place to record repo-wide overrides or environment-specific addenda to Layer 0 rules.
+# - Keep this file free of secrets (no tokens, passwords, private URLs, or customer data).
+#
+# Suggested uses:
+# - Local environment quirks (OS, shell, tool versions)
+# - Temporary rules during a migration (with an expiry date)
+# - Extra “do/don’t” guardrails for a demo run
+#
+# Notes:
+# - If you add a rule here, consider whether it should be promoted into `AGENTS.md`.
+

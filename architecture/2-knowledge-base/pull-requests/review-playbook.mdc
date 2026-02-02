@@ -1,0 +1,28 @@
+# Pull Requests — Review Playbook
+
+Created: 2026-02-02 05:37 UTC  
+Last reviewed: 2026-02-02 05:37 UTC
+
+## Responding to Review
+- Reply to each actionable comment (even if “done in <commit>”).
+- Prefer small follow-up commits; squash later if desired.
+- If you disagree, explain tradeoffs and propose an alternative.
+
+## Keeping Review Fast
+- Keep PRs small and narrative-driven.
+- Avoid mixing refactors with behavior changes unless necessary.
+- Add targeted tests for the bug/feature.
+
+## Suggested “Review Notes” Section
+If reviewers frequently ask the same questions, include a short section:
+- assumptions
+- edge cases
+- rollout plan
+- telemetry/alerts to watch
+
+## PR Creation via `gh` (Optional)
+```sh
+gh pr create --fill
+gh pr view --web
+```
+
