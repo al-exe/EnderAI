@@ -20,6 +20,9 @@ Deploy FastAPI backend on Render and host frontend on GitHub Pages, wiring CORS 
 - 2026-02-02: `EnderAI-frontend` Pages workflow succeeded after setting `VITE_API_URL=https://enderai.onrender.com`.
 - 2026-02-02: **BREAKTHROUGH** Pages build succeeded; frontend available at `https://al-exe.github.io/EnderAI-frontend/` after setting `VITE_API_URL` and enabling Pages with GitHub Actions.
 - 2026-02-02: User requested removing unused `demo/` directory from main repo; cleanup in progress.
+- 2026-02-02 08:34 UTC: Render deploy failed during `pip install .` with `error: resolution-too-deep` while resolving dependencies.
+- 2026-02-02 08:39 UTC: Restored backend-only demo path `demo/full-stack-fastapi-template/backend` from commit `2ce53f5`.
+- 2026-02-02 08:44 UTC: Generated `demo/full-stack-fastapi-template/backend/uv.lock` for deterministic Docker builds.
 
 ## Next Steps
 - Decide whether to make main repo public or create a separate public frontend-only repo for Pages.

@@ -1,0 +1,99 @@
+---
+Title: Render Deploy Debug Log
+Created: 2026-02-02 08:34 UTC
+Last used: 2026-02-02 08:36 UTC
+---
+
+## Context
+Render deploy for backend fails during dependency resolution.
+
+## Logs (verbatim snippets)
+2026-02-02T08:28:59.165202055Z error: resolution-too-deep
+2026-02-02T08:28:59.165225905Z × Dependency resolution exceeded maximum depth
+2026-02-02T08:28:59.165229366Z
+
+2026-02-02T08:29:14.242905411Z ==> Root directory "backend" does not exist. Verify the Root Directory configured in your service settings.
+2026-02-02T08:29:24.122920391Z builder.sh: line 51: cd: /opt/render/project/src/demo/full-stack-fastapi-template/backend: No such file or directory
+
+## Hypothesis
+Pip resolver is backtracking across wide dependency ranges for `fastapi[standard]` and related extras; constraints or lockfile needed.
+Render is deploying commit `e807952` where `/demo` was removed, so the configured root directory no longer exists.
+
+## Evidence (commands + outputs)
+2026-02-02 08:40 UTC:
+```sh
+rg --files demo/full-stack-fastapi-template/backend -g 'pyproject.toml' -g 'requirements*.txt' -g 'uv.lock' -g 'poetry.lock' -g 'Pipfile*'
+```
+Output:
+```text
+demo/full-stack-fastapi-template/backend/pyproject.toml
+```
+
+2026-02-02 08:40 UTC:
+```sh
+sed -n '1,200p' demo/full-stack-fastapi-template/backend/pyproject.toml
+```
+Output: PEP 621 deps with wide ranges; no lockfile present.
+
+2026-02-02 08:40 UTC:
+```sh
+sed -n '1,200p' demo/full-stack-fastapi-template/backend/Dockerfile
+```
+Output: Dockerfile uses `uv sync --frozen` and expects `uv.lock` in the backend dir.
+
+2026-02-02 08:41 UTC:
+```sh
+uv lock
+```
+Output:
+```text
+/bin/bash: line 1: uv: command not found
+```
+
+2026-02-02 08:42 UTC:
+```sh
+python3 -m pip install uv
+```
+Output:
+```text
+error: externally-managed-environment
+```
+
+2026-02-02 08:42 UTC:
+```sh
+pipx --version
+```
+Output:
+```text
+/bin/bash: line 1: pipx: command not found
+```
+
+2026-02-02 08:43 UTC:
+```sh
+python3 -m venv /tmp/enderai-uv-venv
+/tmp/enderai-uv-venv/bin/pip install uv
+/tmp/enderai-uv-venv/bin/uv lock
+```
+Output (summary):
+```text
+Successfully installed uv-0.9.28
+Resolved 80 packages in 1.82s
+```
+
+2026-02-02 08:43 UTC:
+```sh
+ls -a demo/full-stack-fastapi-template/backend | rg 'uv.lock|pyproject.toml'
+```
+Output:
+```text
+pyproject.toml
+uv.lock
+```
+
+## Next Checks
+- Configure Render root dir to `demo/full-stack-fastapi-template/backend` and build with Dockerfile.
+- Confirm Render build command uses Dockerfile (no `pip install .`).
+- Deploy a commit that includes `demo/full-stack-fastapi-template/backend` and `uv.lock`.
+
+## Update
+- 2026-02-02 08:36 UTC: User asked for safest/best-practice path; need repo files to choose lockfile strategy.

@@ -1,7 +1,7 @@
 # Flight Log — 2026-02-02 (UTC)
 
 Created: 2026-02-02 06:03 UTC  
-Last used: 2026-02-02 06:07 UTC
+Last used: 2026-02-02 08:44 UTC
 
 ## Summary
 - 05:40–05:44: Wrote baseline task-tracking guidance (now: `architecture/1-ground-truth/flight-logs.mdc`).
@@ -13,7 +13,15 @@ Last used: 2026-02-02 06:07 UTC
 - 2026-02-04: Run 3 quick demo user sessions; capture time-to-first-PR + trust blockers.
 
 ## Present (In Progress)
-- (none)
+- 08:29: Clarifying request to integrate GitHub Issues across repos (scope + target repos).
+- 08:34: Investigating Render deploy failure (`error: resolution-too-deep` during `pip install .`).
+- 08:36: User asked for safest/best-practice remediation path.
+- 08:39: Restoring backend-only demo path from prior commit.
+- 08:40: Found backend `pyproject.toml` and Dockerfile; need `uv.lock` for safe deploy.
+- 08:41: Attempted `uv lock`; `uv` not installed.
+- 08:42: `pip install uv` blocked by externally-managed env; `pipx` not available.
+- 08:43: Created venv, installed `uv`, generated `demo/full-stack-fastapi-template/backend/uv.lock`.
+- 08:44: Render error confirms root directory missing on deployed commit; need deploy commit that includes backend path.
 
 ## Past (Done)
 - 06:03: Created Flight Log canon + archive rule (`architecture/1-ground-truth/flight-logs.mdc`).
