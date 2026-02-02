@@ -1,0 +1,49 @@
+---
+Title: Render Backend + GitHub Pages Frontend (Separate Repo)
+Created: 2026-02-02 08:12 UTC
+Last used: 2026-02-02 08:12 UTC
+---
+
+## Summary
+Deploy FastAPI backend on Render and host the frontend on GitHub Pages in a separate public repo (`EnderAI-frontend`). Connect them via `VITE_API_URL` and CORS.
+
+## Repos + URLs (current example)
+- Backend (Render): `https://enderai.onrender.com`
+- Frontend (Pages): `https://al-exe.github.io/EnderAI-frontend/`
+- Frontend repo: `git@github.com:al-exe/EnderAI-frontend.git`
+
+## Backend (Render) — Setup
+1) Create Render Postgres (same region as web service).
+2) Create Render Web Service:
+   - Root directory (if not using Docker): `demo/full-stack-fastapi-template/backend`
+   - Start command (if not using Docker): `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - Health check: `/api/v1/utils/health-check/`
+3) Required env vars (values from Render Postgres + app config):
+   - `ENVIRONMENT=production`
+   - `PROJECT_NAME=EnderAI`
+   - `SECRET_KEY=<random-long-string>`
+   - `FIRST_SUPERUSER=<email>`
+   - `FIRST_SUPERUSER_PASSWORD=<strong-password>`
+   - `POSTGRES_SERVER=<render-hostname>`
+   - `POSTGRES_PORT=5432`
+   - `POSTGRES_DB=<db-name>`
+   - `POSTGRES_USER=<db-user>`
+   - `POSTGRES_PASSWORD=<db-password>`
+   - `FRONTEND_HOST=https://al-exe.github.io/EnderAI-frontend`
+   - `BACKEND_CORS_ORIGINS=https://al-exe.github.io/EnderAI-frontend`
+
+## Frontend (GitHub Pages) — Separate Repo
+1) New repo `EnderAI-frontend` contains only frontend app.
+2) Workflow location must be repo root: `.github/workflows/deploy-frontend-pages.yml`.
+3) GitHub repo variables:
+   - `VITE_API_URL=https://enderai.onrender.com`
+4) Pages settings:
+   - `Settings → Pages → Source = GitHub Actions`
+5) Actions:
+   - Run workflow: **Deploy Frontend to GitHub Pages**.
+
+## Common Failures + Fixes
+- **Workflow not detected**: Ensure `.github/workflows` is at repo root.
+- **Build fails: missing VITE_API_URL**: Add repo variable (not secret) `VITE_API_URL`.
+- **Pages configure step fails (Not Found)**: Enable Pages and set Source to GitHub Actions.
+- **CORS errors in browser**: Update `FRONTEND_HOST` and `BACKEND_CORS_ORIGINS` to the Pages URL and redeploy backend.
