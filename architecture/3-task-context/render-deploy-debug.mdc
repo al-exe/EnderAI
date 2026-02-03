@@ -118,3 +118,5 @@ uv.lock
 - 2026-02-03 UTC: Backend login 500 traced to DB error: `psycopg.errors.UndefinedTable: relation "user" does not exist` (migrations not applied / wrong DB). Need `alembic upgrade head` against target Postgres.
 - 2026-02-03 UTC: User requested code change to run `alembic upgrade head` on container startup because Render free tier lacks shell and pre-deploy is locked.
 - 2026-02-03 UTC: Added backend `entrypoint.sh` to run `alembic upgrade head` then start app; Dockerfile updated to copy and use entrypoint.
+- 2026-02-03 UTC: Deploy failed running alembic in entrypoint: `ModuleNotFoundError: No module named 'app'` from `/app/backend/app/alembic/env.py`. Need to set PYTHONPATH to `/app/backend` (or run from that cwd) before alembic.
+- 2026-02-03 UTC: Updated entrypoint to set `PYTHONPATH=/app/backend` before running alembic.
