@@ -1,7 +1,7 @@
 # Flight Log — 2026-02-02 (UTC)
 
 Created: 2026-02-02 06:03 UTC  
-Last used: 2026-02-02 08:44 UTC
+Last used: 2026-02-02 09:50 UTC
 
 ## Summary
 - 05:40–05:44: Wrote baseline task-tracking guidance (now: `architecture/1-ground-truth/flight-logs.mdc`).
@@ -22,6 +22,18 @@ Last used: 2026-02-02 08:44 UTC
 - 08:42: `pip install uv` blocked by externally-managed env; `pipx` not available.
 - 08:43: Created venv, installed `uv`, generated `demo/full-stack-fastapi-template/backend/uv.lock`.
 - 08:44: Render error confirms root directory missing on deployed commit; need deploy commit that includes backend path.
+- 08:45: Committed and pushed backend restore + `uv.lock` (commit `16a2d45`).
+- 08:47: Scoping GitHub Issues/Projects board across multiple repos.
+- 08:51: Proceeding with auto-add workflows for the Project board.
+- 08:59: User requested `gh`; CLI not installed.
+- 09:01: Installed `gh` to `/tmp` and started device login flow.
+- 09:02: Device login not completed; re-issued login code.
+- 09:04: Auth still not detected after user confirmation.
+- 09:06: Confirmed `gh` auth and created test issue in `al-exe/EnderAI-frontend`.
+- 09:07: Deleted test issue in `al-exe/EnderAI-frontend`.
+- 09:33: Added Layer 1 doc with `gh` issue create/close/delete commands.
+- 09:44: Recorded latest Render `resolution-too-deep` build failure logs and hypothesis.
+- 09:50: User ending session; next step is switching Render service to Docker runtime (new service if needed) with root dir `demo/full-stack-fastapi-template/backend`.
 
 ## Past (Done)
 - 06:03: Created Flight Log canon + archive rule (`architecture/1-ground-truth/flight-logs.mdc`).
@@ -31,3 +43,4 @@ Last used: 2026-02-02 08:44 UTC
 - Flight log canon: `architecture/1-ground-truth/flight-logs.mdc`
 - Active logs: `architecture/3-task-context/flight-logs/`
 - Archive location: `architecture/1-ground-truth/flight-logs/archive/`
+- 2026-02-03: User provided current Render settings (Python runtime, root dir `demo/full-stack-fastapi-template/backend`, build `pip install .`), and latest logs show `resolution-too-deep` during pip dependency resolution.

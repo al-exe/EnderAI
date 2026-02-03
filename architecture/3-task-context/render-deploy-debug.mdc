@@ -15,9 +15,15 @@ Render deploy for backend fails during dependency resolution.
 2026-02-02T08:29:14.242905411Z ==> Root directory "backend" does not exist. Verify the Root Directory configured in your service settings.
 2026-02-02T08:29:24.122920391Z builder.sh: line 51: cd: /opt/render/project/src/demo/full-stack-fastapi-template/backend: No such file or directory
 
+2026-02-02T09:39:24.165971595Z error: resolution-too-deep
+2026-02-02T09:39:24.165994745Z × Dependency resolution exceeded maximum depth
+2026-02-02T09:39:24.166010095Z Link: https://pip.pypa.io/en/stable/topics/dependency-resolution/#handling-resolution-too-deep-errors
+2026-02-02T09:39:24.584526518Z ==> Build failed 😞
+
 ## Hypothesis
 Pip resolver is backtracking across wide dependency ranges for `fastapi[standard]` and related extras; constraints or lockfile needed.
 Render is deploying commit `e807952` where `/demo` was removed, so the configured root directory no longer exists.
+Render is still using `pip install .` instead of Dockerfile/`uv.lock`, so the resolver error persists.
 
 ## Evidence (commands + outputs)
 2026-02-02 08:40 UTC:
@@ -94,6 +100,16 @@ uv.lock
 - Configure Render root dir to `demo/full-stack-fastapi-template/backend` and build with Dockerfile.
 - Confirm Render build command uses Dockerfile (no `pip install .`).
 - Deploy a commit that includes `demo/full-stack-fastapi-template/backend` and `uv.lock`.
+ - If existing service UI can’t switch to Docker runtime, create a new Docker web service or use render.yaml/API to change runtime.
 
 ## Update
 - 2026-02-02 08:36 UTC: User asked for safest/best-practice path; need repo files to choose lockfile strategy.
+
+## Log
+- 2026-02-03 UTC: Resuming Render backend deploy fix; checked for render.yaml in repo (none found). Need current Render service settings and latest deploy logs before proceeding.
+
+## Log
+- 2026-02-03 UTC: User provided Render settings: runtime Python 3, root dir `demo/full-stack-fastapi-template/backend`, build command `pip install .`, start command `alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+- 2026-02-03 UTC: Latest deploy log shows `error: resolution-too-deep` during `pip install .` dependency resolution.
+- 2026-02-03 UTC: User opened Render "New Web Service" form with Docker runtime; needs root directory and Dockerfile path values for backend service.
+- 2026-02-03 UTC: Updated backend Dockerfile COPY paths to match Render root dir `demo/full-stack-fastapi-template/backend` (removed `./backend/` prefixes) to fix missing path errors.
