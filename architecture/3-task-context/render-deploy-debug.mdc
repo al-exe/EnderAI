@@ -113,3 +113,8 @@ uv.lock
 - 2026-02-03 UTC: Latest deploy log shows `error: resolution-too-deep` during `pip install .` dependency resolution.
 - 2026-02-03 UTC: User opened Render "New Web Service" form with Docker runtime; needs root directory and Dockerfile path values for backend service.
 - 2026-02-03 UTC: Updated backend Dockerfile COPY paths to match Render root dir `demo/full-stack-fastapi-template/backend` (removed `./backend/` prefixes) to fix missing path errors.
+- 2026-02-03 UTC: Deploy log shows server starts then child workers repeatedly die (Uvicorn child process exits). Need error trace around child exit to diagnose (likely startup exception in app or DB connection failure).
+- 2026-02-03 UTC: Frontend login POST to `https://enderai-backend.onrender.com/api/v1/login/access-token` returning 500. Need backend logs/traceback for root cause.
+- 2026-02-03 UTC: Backend login 500 traced to DB error: `psycopg.errors.UndefinedTable: relation "user" does not exist` (migrations not applied / wrong DB). Need `alembic upgrade head` against target Postgres.
+- 2026-02-03 UTC: User requested code change to run `alembic upgrade head` on container startup because Render free tier lacks shell and pre-deploy is locked.
+- 2026-02-03 UTC: Added backend `entrypoint.sh` to run `alembic upgrade head` then start app; Dockerfile updated to copy and use entrypoint.

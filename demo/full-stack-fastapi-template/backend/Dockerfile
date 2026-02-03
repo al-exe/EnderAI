@@ -42,4 +42,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 WORKDIR /app/backend/
 
-CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
+COPY ./entrypoint.sh /app/backend/entrypoint.sh
+
+CMD ["/app/backend/entrypoint.sh"]
