@@ -44,3 +44,4 @@ Last used: 2026-02-02 09:50 UTC
 - Active logs: `architecture/3-task-context/flight-logs/`
 - Archive location: `architecture/1-ground-truth/flight-logs/archive/`
 - 2026-02-03: User provided current Render settings (Python runtime, root dir `demo/full-stack-fastapi-template/backend`, build `pip install .`), and latest logs show `resolution-too-deep` during pip dependency resolution.
+- 2026-02-03: Rewrote commit messages on main to sentence case and prepared force-push.
