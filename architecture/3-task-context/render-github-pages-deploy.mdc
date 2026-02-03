@@ -23,6 +23,7 @@ Deploy FastAPI backend on Render and host frontend on GitHub Pages, wiring CORS 
 - 2026-02-02 08:34 UTC: Render deploy failed during `pip install .` with `error: resolution-too-deep` while resolving dependencies.
 - 2026-02-02 08:39 UTC: Restored backend-only demo path `demo/full-stack-fastapi-template/backend` from commit `2ce53f5`.
 - 2026-02-02 08:44 UTC: Generated `demo/full-stack-fastapi-template/backend/uv.lock` for deterministic Docker builds.
+- 2026-02-02 08:45 UTC: Committed and pushed backend restore + `uv.lock` (commit `16a2d45`).
 
 ## Next Steps
 - Decide whether to make main repo public or create a separate public frontend-only repo for Pages.

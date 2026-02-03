@@ -120,3 +120,6 @@ uv.lock
 - 2026-02-03 UTC: Added backend `entrypoint.sh` to run `alembic upgrade head` then start app; Dockerfile updated to copy and use entrypoint.
 - 2026-02-03 UTC: Deploy failed running alembic in entrypoint: `ModuleNotFoundError: No module named 'app'` from `/app/backend/app/alembic/env.py`. Need to set PYTHONPATH to `/app/backend` (or run from that cwd) before alembic.
 - 2026-02-03 UTC: Updated entrypoint to set `PYTHONPATH=/app/backend` before running alembic.
+- 2026-02-03 UTC: Login request returns 400 with body `{\"detail\":\"Method Not Allowed\"}`; route exists as POST `/api/v1/login/access-token`. Hypothesis: request path/method mismatch due to redirect or proxy; need to reproduce via `/docs` login or curl and capture response/headers.
+- 2026-02-03 UTC: Frontend signup failing due to CORS preflight (OPTIONS 400) and `Not authenticated`; likely BACKEND_CORS_ORIGINS/FRONTEND_HOST not set to GitHub Pages domain.
+- 2026-02-03 UTC: **BREAKTHROUGH** Signup works after updating CORS env vars on Render backend (`FRONTEND_HOST=https://al-exe.github.io`, `BACKEND_CORS_ORIGINS=https://al-exe.github.io,https://al-exe.github.io/EnderAI-frontend`) and redeploying.
