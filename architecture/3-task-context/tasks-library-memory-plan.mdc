@@ -1,11 +1,12 @@
 # Plan — Tasks + Library + Memory (FastAPI Demo)
 
 Created: 2026-02-04 06:16 UTC  
-Last used: 2026-02-04 10:02 UTC
+Last used: 2026-02-04 10:06 UTC
 
 ## Progress (Timestamped)
 - 2026-02-04 08:08 UTC: Added sidebar tabs + placeholder routes for `Tasks` and `Library` in `/home/alexlee/dev/EnderAI-frontend` (see ground truth: `architecture/1-ground-truth/tasks-library-memory-frontend-tabs.mdc`).
 - 2026-02-04 10:02 UTC: Added `workflow_bucket` (human-readable bucket names) and updated the Library UI to group and search by bucket name.
+- 2026-02-04 10:06 UTC: Made the sticky top bar opaque (no scroll bleed-through) in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout.tsx`.
 
 ## Goal
 Ship a YC-demoable loop that makes EnderAI's compounding value obvious:
