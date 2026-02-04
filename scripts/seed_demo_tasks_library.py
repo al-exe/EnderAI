@@ -169,6 +169,35 @@ def upsert_library_item(cur, row: dict[str, Any]) -> None:
     )
 
 
+def humanize_workflow_key(workflow_key: str) -> str:
+    parts = workflow_key.strip().split("_")
+    words: list[str] = []
+    for part in parts:
+        lower = part.lower()
+        if lower == "github":
+            words.append("GitHub")
+        elif lower == "api":
+            words.append("API")
+        elif lower == "db":
+            words.append("DB")
+        else:
+            words.append(part.capitalize())
+    return " ".join(words) if words else workflow_key
+
+
+def upsert_workflow_bucket(cur, *, workflow_key: str, bucket_name: str) -> None:
+    cur.execute(
+        """
+        insert into public.workflow_bucket (workflow_key, bucket_name)
+        values (%s, %s)
+        on conflict (workflow_key) do update set
+          bucket_name=excluded.bucket_name,
+          updated_at=now()
+        """,
+        (workflow_key, bucket_name),
+    )
+
+
 def link_run_library(cur, *, run_id: uuid.UUID, library_item_id: uuid.UUID, relation: str, created_at: datetime) -> None:
     cur.execute(
         """
@@ -598,6 +627,13 @@ def main() -> int:
 
             for r in runs:
                 upsert_run(cur, r)
+
+            for li in library_items:
+                upsert_workflow_bucket(
+                    cur,
+                    workflow_key=li["workflow_key"],
+                    bucket_name=humanize_workflow_key(li["workflow_key"]),
+                )
 
             for li in library_items:
                 upsert_library_item(cur, li)

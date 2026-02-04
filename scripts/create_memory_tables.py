@@ -104,6 +104,16 @@ DDL_STATEMENTS: list[str] = [
     """,
     "create index if not exists idx_library_item_workflow_key_kind on public.library_item (workflow_key, kind)",
     "create index if not exists idx_library_item_superseded_by_id on public.library_item (superseded_by_id)",
+    # Workflow buckets: human-readable labels for workflow_key.
+    """
+    create table if not exists public.workflow_bucket (
+      workflow_key text primary key,
+      bucket_name text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+    """,
+    "create index if not exists idx_workflow_bucket_bucket_name on public.workflow_bucket (bucket_name)",
     # Link table: how a run used/created/promoted/superseded memory.
     """
     create table if not exists public.run_library_link (
@@ -148,4 +158,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

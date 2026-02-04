@@ -13,11 +13,28 @@ from app.models import (
     LibraryItemPublic,
     LibraryItemsPublic,
     LibraryItemUpdate,
+    WorkflowBucket,
     WorkflowKeyCount,
     WorkflowKeysPublic,
 )
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+def _humanize_workflow_key(workflow_key: str) -> str:
+    parts = workflow_key.strip().split("_")
+    words: list[str] = []
+    for part in parts:
+        lower = part.lower()
+        if lower == "github":
+            words.append("GitHub")
+        elif lower == "api":
+            words.append("API")
+        elif lower == "db":
+            words.append("DB")
+        else:
+            words.append(part.capitalize())
+    return " ".join(words) if words else workflow_key
 
 
 @router.get("/workflow-keys", response_model=WorkflowKeysPublic)
@@ -30,16 +47,29 @@ def read_library_workflow_keys(
     Retrieve distinct library workflow keys ("buckets") with counts.
     """
 
-    statement = (
-        select(LibraryItem.workflow_key, func.count(LibraryItem.id))
-        .group_by(LibraryItem.workflow_key)
-        .order_by(func.count(LibraryItem.id).desc())
+    statement = select(
+        LibraryItem.workflow_key,
+        WorkflowBucket.bucket_name,
+        func.count(LibraryItem.id),
+    ).select_from(LibraryItem)
+    statement = statement.outerjoin(
+        WorkflowBucket,
+        WorkflowBucket.workflow_key == LibraryItem.workflow_key,
     )
+    statement = statement.group_by(LibraryItem.workflow_key, WorkflowBucket.bucket_name)
+    statement = statement.order_by(func.count(LibraryItem.id).desc())
     if current_only:
         statement = statement.where(LibraryItem.superseded_by_id.is_(None))
 
     rows = session.exec(statement).all()
-    data = [WorkflowKeyCount(workflow_key=row[0], count=row[1]) for row in rows]
+    data = [
+        WorkflowKeyCount(
+            workflow_key=row[0],
+            bucket_name=row[1] or _humanize_workflow_key(row[0]),
+            count=row[2],
+        )
+        for row in rows
+    ]
     return WorkflowKeysPublic(data=data)
 
 
@@ -68,14 +98,31 @@ def read_library_items(
         filters.append(LibraryItem.superseded_by_id.is_(None))
     if q:
         like = f"%{q}%"
-        filters.append(or_(LibraryItem.title.ilike(like), LibraryItem.body_mdc.ilike(like)))
+        filters.append(
+            or_(
+                LibraryItem.title.ilike(like),
+                LibraryItem.body_mdc.ilike(like),
+                LibraryItem.workflow_key.ilike(like),
+                WorkflowBucket.bucket_name.ilike(like),
+            )
+        )
 
     count_statement = select(func.count()).select_from(LibraryItem)
+    if q:
+        count_statement = count_statement.outerjoin(
+            WorkflowBucket,
+            WorkflowBucket.workflow_key == LibraryItem.workflow_key,
+        )
     if filters:
         count_statement = count_statement.where(*filters)
     count = session.exec(count_statement).one()
 
     statement = select(LibraryItem).order_by(LibraryItem.created_at.desc()).offset(skip).limit(limit)
+    if q:
+        statement = statement.outerjoin(
+            WorkflowBucket,
+            WorkflowBucket.workflow_key == LibraryItem.workflow_key,
+        )
     if filters:
         statement = statement.where(*filters)
     items = session.exec(statement).all()
@@ -106,6 +153,14 @@ def create_library_item(
     """
     get_current_active_superuser(current_user)
     item = LibraryItem.model_validate(item_in)
+    bucket = session.get(WorkflowBucket, item.workflow_key)
+    if bucket is None:
+        session.add(
+            WorkflowBucket(
+                workflow_key=item.workflow_key,
+                bucket_name=_humanize_workflow_key(item.workflow_key),
+            )
+        )
     session.add(item)
     session.commit()
     session.refresh(item)
@@ -145,6 +200,14 @@ def update_library_item(
         promotion_mode=update.get("promotion_mode", existing.promotion_mode),
         last_used_at=existing.last_used_at,
     )
+    bucket = session.get(WorkflowBucket, new_item.workflow_key)
+    if bucket is None:
+        session.add(
+            WorkflowBucket(
+                workflow_key=new_item.workflow_key,
+                bucket_name=_humanize_workflow_key(new_item.workflow_key),
+            )
+        )
 
     existing.superseded_by_id = new_item.id
     session.add(new_item)

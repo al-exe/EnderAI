@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -172,8 +172,24 @@ class LibraryItemsPublic(SQLModel):
     count: int
 
 
+class WorkflowBucket(SQLModel, table=True):
+    __tablename__ = "workflow_bucket"
+
+    workflow_key: str = Field(primary_key=True, sa_type=Text)  # type: ignore[arg-type]
+    bucket_name: str = Field(sa_type=Text)  # type: ignore[arg-type]
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 class WorkflowKeyCount(SQLModel):
     workflow_key: str
+    bucket_name: str
     count: int
 
 

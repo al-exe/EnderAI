@@ -1,7 +1,7 @@
 # Tasks + Library + Memory Diff (FastAPI + Vite) - Implementation Runbook
 
 Created: 2026-02-04 07:34 UTC  
-Last reviewed: 2026-02-04 07:34 UTC
+Last reviewed: 2026-02-04 10:02 UTC
 
 ## Scope
 Implement the "Tasks" + "Library" UI and backend APIs to support a YC demo.
@@ -96,6 +96,12 @@ These tables were created directly in the Render Postgres database (not via Alem
 - promotion_mode: text default `auto` (`auto|user`)
 - superseded_by_id: uuid nullable
 
+`workflow_bucket`
+- workflow_key: text (primary key)
+- bucket_name: text
+- created_at: timestamptz default `now()`
+- updated_at: timestamptz default `now()`
+
 `run_library_link`
 - run_id: uuid
 - library_item_id: uuid
@@ -138,7 +144,7 @@ As of 2026-02-04 07:10 UTC, seed script produced:
    - Never delete; supersede via `superseded_by_id` and/or `relation='superseded'`.
 
 Search v1:
-- simple `ILIKE` for title/body (enough for demo)
+- simple `ILIKE` for title/body/workflow key/bucket name (enough for demo)
 
 ## Backend Implementation (Status: Library API wired)
 As of 2026-02-04 08:55 UTC, the backend has a first-pass `Library` API implemented (read + create + supersede-update):
@@ -153,11 +159,11 @@ Endpoints:
 - `GET /api/v1/library/` (auth required)
   - `workflow_key` (optional)
   - `kind` (optional)
-  - `q` (optional; `ILIKE` on `title` or `body_mdc`)
+  - `q` (optional; `ILIKE` on `title`, `body_mdc`, `workflow_key`, or bucket name)
   - `current_only` (default true; filters `superseded_by_id is null`)
   - `skip`/`limit`
 - `GET /api/v1/library/workflow-keys` (auth required)
-  - Distinct `workflow_key` values + counts (supports bucket grouping UI)
+  - Distinct `workflow_key` values + `bucket_name` + counts (supports bucket grouping UI)
 - `GET /api/v1/library/{id}` (auth required)
 - `POST /api/v1/library/` (**superuser required**)
 - `PUT /api/v1/library/{id}` (**superuser required**)
