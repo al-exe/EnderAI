@@ -118,6 +118,25 @@ uv.lock
 - 2026-02-03 UTC: Backend login 500 traced to DB error: `psycopg.errors.UndefinedTable: relation "user" does not exist` (migrations not applied / wrong DB). Need `alembic upgrade head` against target Postgres.
 - 2026-02-03 UTC: User requested code change to run `alembic upgrade head` on container startup because Render free tier lacks shell and pre-deploy is locked.
 - 2026-02-03 UTC: Added backend `entrypoint.sh` to run `alembic upgrade head` then start app; Dockerfile updated to copy and use entrypoint.
+
+## 2026-02-04 09:28 UTC — Deploy crash: Alembic import fails on `LibraryItem`
+
+### Symptom (Render logs)
+- `TypeError: issubclass() arg 1 must be a class`
+- Stack: `app/alembic/env.py` -> `from app.models import SQLModel` -> `class LibraryItem(...)` -> `sqlmodel.main.get_sqlalchemy_type`
+
+### Hypothesis
+- `LibraryItemBase.kind` / `promotion_mode` used `typing.Literal[...]` types, which are not classes; SQLModel calls `issubclass()` when building the table model.
+
+### Fix
+- Keep the table model fields as primitives (`str`) and constrain values via API schemas instead.
+- Patch: `demo/full-stack-fastapi-template/backend/app/models.py`
+  - `LibraryItemBase.kind: str` and `promotion_mode: str`
+  - `LibraryItemCreate` and `LibraryItemPublic` override with `Literal[...]` constraints
+
+### Evidence
+- Command: `/home/alexlee/dev/EnderAI/.venv/bin/python -m py_compile demo/full-stack-fastapi-template/backend/app/models.py`
+- Result: exit 0
 - 2026-02-03 UTC: Deploy failed running alembic in entrypoint: `ModuleNotFoundError: No module named 'app'` from `/app/backend/app/alembic/env.py`. Need to set PYTHONPATH to `/app/backend` (or run from that cwd) before alembic.
 - 2026-02-03 UTC: Updated entrypoint to set `PYTHONPATH=/app/backend` before running alembic.
 - 2026-02-03 UTC: Login request returns 400 with body `{\"detail\":\"Method Not Allowed\"}`; route exists as POST `/api/v1/login/access-token`. Hypothesis: request path/method mismatch due to redirect or proxy; need to reproduce via `/docs` login or curl and capture response/headers.

@@ -118,16 +118,19 @@ PromotionMode = Literal["auto", "user"]
 
 class LibraryItemBase(SQLModel):
     workflow_key: str = Field(min_length=1)
-    kind: LibraryItemKind = Field(min_length=1)
+    # NOTE: keep table-safe primitive types here; constrain via API schemas below.
+    # SQLModel's table model creation will choke on `typing.Literal[...]`.
+    kind: str = Field(min_length=1)
     title: str = Field(min_length=1)
     body_mdc: str = Field(min_length=1)
     tags: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
     source_refs: list[Any] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
-    promotion_mode: PromotionMode = "auto"
+    promotion_mode: str = "auto"
 
 
 class LibraryItemCreate(LibraryItemBase):
-    pass
+    kind: LibraryItemKind = Field(min_length=1)
+    promotion_mode: PromotionMode = "auto"
 
 
 class LibraryItemUpdate(SQLModel):
@@ -157,6 +160,8 @@ class LibraryItem(LibraryItemBase, table=True):
 
 class LibraryItemPublic(LibraryItemBase):
     id: uuid.UUID
+    kind: LibraryItemKind
+    promotion_mode: PromotionMode
     created_at: datetime | None = None
     last_used_at: datetime | None = None
     superseded_by_id: uuid.UUID | None = None
