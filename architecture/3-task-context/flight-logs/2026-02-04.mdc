@@ -1,0 +1,59 @@
+# Flight Log — 2026-02-04 (UTC)
+
+Created: 2026-02-04 06:16 UTC  
+Last used: 2026-02-04 08:08 UTC
+
+## Summary
+- 06:16: Planned Tasks+Library UI and minimal memory data model for YC demo (focus: Created vs Utilized across Run 1/Run 2).
+- 06:23: User requested creating the Tasks/Library tables in Render Postgres; preparing DDL + apply steps.
+- 06:24: Added DB DDL script (env-driven, no secrets): `scripts/create_memory_tables.py`.
+- 06:25: **BREAKTHROUGH** — created memory tables in Render Postgres successfully.
+- 06:26: Verified tables exist: `task`, `run`, `run_event`, `library_item`, `run_library_link`.
+- 07:08: Added retroactive seed script to populate Tasks/Runs/Library from our recent work: `scripts/seed_demo_tasks_library.py`.
+- 07:09: Seeded Render Postgres tables successfully (3 tasks, 5 runs, 14 run events, 5 library items, 15 links).
+- 07:19: User requested continuous memory/log capture while we build the app (Tasks/Library UX + local FE + cloud BE workflow).
+- 07:20: Captured current Render CORS settings and planned update to allow local Vite (`http://localhost:5173`).
+- 07:24: Created local frontend env file to point Vite at Render backend: `/home/alexlee/dev/EnderAI-frontend/.env.local` (no secrets).
+- 07:26: Local frontend start failed: `vite: command not found` when running `bun run dev` (deps not installed / missing `node_modules`).
+- 07:28: **BREAKTHROUGH** — local frontend runs after installing deps (`bun install` -> `bun run dev`). Recorded in DB as Task/Run + promoted Library recipe.
+- 07:35: Wrote next-agent runbook for implementing Tasks/Library UI + backend APIs; added `scripts/archive_flight_logs.py` wrapper to match docs.
+- 07:38: Updated `AGENTS.md` to require (when user-enabled) DB-backed memory logging (tasks/runs/run_events/library links) with UTC timestamps.
+- 08:08: Added frontend sidebar tabs + placeholder pages for `Tasks` and `Library` in `/home/alexlee/dev/EnderAI-frontend` (see: `architecture/1-ground-truth/tasks-library-memory-frontend-tabs.mdc`).
+- 08:08: Added idempotent DB memory logger for this frontend step: `scripts/log_tasks_library_frontend_progress.py` (dry-run by default; `--apply` to write).
+- 08:21: Replaced FastAPI logo with text “EnderAI” in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Logo.tsx`.
+- 08:24: Increased “EnderAI” logo text size (~50%) in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Logo.tsx`.
+- 08:25: Removed footer text “Full Stack FastAPI Template - {year}” in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Footer.tsx`.
+- 08:26: Removed “FastAPI Cloud” from route/page titles across `/home/alexlee/dev/EnderAI-frontend/src/routes/`.
+- 08:49: Removed trailing periods from Tasks/Library placeholder copy in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/tasks.tsx` and `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`.
+- 08:55: Added backend `Library` CRUD-ish APIs (create + supersede-update; no delete) and registered router:
+  - `demo/full-stack-fastapi-template/backend/app/api/routes/library.py`
+  - `demo/full-stack-fastapi-template/backend/app/api/main.py`
+  - `demo/full-stack-fastapi-template/backend/app/models.py`
+
+## Future (Next)
+- Implement minimal tables/endpoints to represent Task -> Run -> Run events + Library links.
+- Update demo script to match the customer data cleanup story (UUID1/UUID2/UUID3).
+
+## Present (In Progress)
+- Aligning on minimal model and UX that makes compounding memory visually obvious.
+- Tables created and seeded; next is wiring API/UI to read/write tasks/runs/library and render Memory Diff.
+- Next: run local Vite frontend against Render FastAPI backend; ensure CORS allows `http://localhost:5173`.
+- Next: run `/home/alexlee/dev/EnderAI-frontend` dependency install (`bun install` or `npm install`) and retry `bun run dev`.
+- Next: verify Render backend CORS includes `http://localhost:5173` to avoid preflight errors in local dev.
+
+## Past (Done)
+- None yet.
+
+## Evidence / Links
+- Plan + data model: `architecture/3-task-context/tasks-library-memory-plan.mdc`
+- Created tables script: `scripts/create_memory_tables.py`
+- Seed script: `scripts/seed_demo_tasks_library.py`
+- Local FE + cloud BE notes: `architecture/3-task-context/frontend-local-fe-cloud-be.mdc`
+- Next-agent runbook: `architecture/1-ground-truth/tasks-library-memory-implementation.mdc`
+- Updated agent rules: `AGENTS.md`
+- Flight log archive wrapper: `scripts/archive_flight_logs.py` (canonical impl: `architecture/1-ground-truth/scripts/archive_flight_logs.py`)
+- 2026-02-04 06:25 UTC: `create_memory_tables.py` output: `OK: memory tables are present (create-if-not-exists).`
+- 2026-02-04 06:26 UTC: `information_schema.tables` check returned: `['library_item', 'run', 'run_event', 'run_library_link', 'task']`
+- 2026-02-04 07:09 UTC: `seed_demo_tasks_library.py` output: `OK: seeded Tasks/Runs/Library demo data.`
+- 2026-02-04 07:10 UTC: Counts: `task=3`, `run=5`, `run_event=14`, `library_item=5`, `run_library_link=15` (created/promoted/used all 5).
+- 2026-02-04 07:28 UTC: Recorded in Render Postgres: `task.workflow_key=frontend_local_cloud_backend`, `run.status=success`, `run_event.type=breakthrough`, and Library recipe “Local Vite Frontend + Render Backend Setup”.

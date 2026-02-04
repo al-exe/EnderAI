@@ -1,0 +1,25 @@
+# Tasks/Library Backend (FastAPI) — Working Log
+
+Created: 2026-02-04 08:55 UTC  
+Last used: 2026-02-04 08:55 UTC
+
+## 2026-02-04 (UTC)
+
+### Goal
+Wire the backend to expose Library items from the existing Postgres tables so the frontend `Library` tab can query real data.
+
+### Implementation (Library APIs)
+- Added SQLModel models/schemas for `library_item` in:
+  - `demo/full-stack-fastapi-template/backend/app/models.py`
+- Added Library router:
+  - `demo/full-stack-fastapi-template/backend/app/api/routes/library.py`
+- Registered router:
+  - `demo/full-stack-fastapi-template/backend/app/api/main.py`
+
+### Endpoints (current)
+- `GET /api/v1/library/` (authenticated)
+  - filters: `workflow_key`, `kind`, `q`, `current_only`, `skip`, `limit`
+- `GET /api/v1/library/{id}` (authenticated)
+- `POST /api/v1/library/` (superuser)
+- `PUT /api/v1/library/{id}` (superuser)
+  - **supersede semantics**: creates a new row and sets `superseded_by_id` on the previous row (never mutates content in-place)

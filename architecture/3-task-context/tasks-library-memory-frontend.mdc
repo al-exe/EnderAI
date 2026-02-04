@@ -1,0 +1,65 @@
+# Tasks/Library Frontend - Working Log
+
+Created: 2026-02-04 (UTC)  
+Last used: 2026-02-04 (UTC)
+
+## 2026-02-04 (UTC)
+
+### Recon (sidebar + routes)
+- Command: `rg -n "\\bHome\\b" -S /home/alexlee/dev/EnderAI-frontend/src | head -n 50`
+  - Found sidebar nav: `/home/alexlee/dev/EnderAI-frontend/src/components/Sidebar/AppSidebar.tsx`
+  - Current nav items include:
+    - `Dashboard` (path `/`)
+    - `Items` (path `/items`)
+- Command: `ls -la /home/alexlee/dev/EnderAI-frontend/src/routes`
+  - Routes are TanStack Router file-based under `src/routes/`
+  - Existing layout routes include `/items` at `src/routes/_layout/items.tsx`
+
+### Hypothesis
+- Add two new layout routes:
+  - `src/routes/_layout/tasks.tsx` (path `/tasks`)
+  - `src/routes/_layout/library.tsx` (path `/library`)
+- Add sidebar links (tabs) under `Dashboard` and `Items` in `AppSidebar.tsx`:
+  - `Tasks`
+  - `Library`
+
+### Implementation (tabs + placeholder routes)
+- Generated patch (from `diff -u`) at: `/tmp/enderai_frontend_tasks_library_tabs.patch`
+- Attempted apply (blocked by sandbox perms):
+  - Command: `git -C /home/alexlee/dev/EnderAI-frontend apply /tmp/enderai_frontend_tasks_library_tabs.patch`
+  - Error: `Permission denied` writing `src/components/Sidebar/AppSidebar.tsx`
+- Applied successfully with escalated permission:
+  - Command: `git -C /home/alexlee/dev/EnderAI-frontend apply /tmp/enderai_frontend_tasks_library_tabs.patch`
+  - Result: added routes + updated sidebar nav
+
+Code touched (frontend repo):
+- `/home/alexlee/dev/EnderAI-frontend/src/components/Sidebar/AppSidebar.tsx`
+- `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/tasks.tsx`
+- `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`
+
+### UI tweak
+- 2026-02-04 (UTC): Updated Library tab icon to `BookOpen` in `/home/alexlee/dev/EnderAI-frontend/src/components/Sidebar/AppSidebar.tsx`.
+
+### Copy tweak
+- 2026-02-04 08:19 UTC: Updated Tasks placeholder copy to “Track the state of your work.” in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/tasks.tsx`.
+- 2026-02-04 08:22 UTC: Updated Tasks placeholder copy to “The state of all of your work.” in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/tasks.tsx`.
+- 2026-02-04 08:20 UTC: Updated Library placeholder copy to “Your reusable memory entries and workflows.” in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`.
+- 2026-02-04 08:20 UTC: Updated Dashboard greeting copy to “Welcome back, nice to see you again!” in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/index.tsx`.
+- 2026-02-04 08:21 UTC: Replaced FastAPI logo assets with text “EnderAI” in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Logo.tsx`.
+- 2026-02-04 08:24 UTC: Increased “EnderAI” logo text size (~50%) in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Logo.tsx`.
+- 2026-02-04 08:25 UTC: Removed footer text “Full Stack FastAPI Template - {year}” in `/home/alexlee/dev/EnderAI-frontend/src/components/Common/Footer.tsx`.
+- 2026-02-04 08:26 UTC: Removed “FastAPI Cloud” suffix from route/page titles (document tab title) across `/home/alexlee/dev/EnderAI-frontend/src/routes/`.
+- 2026-02-04 08:49 UTC: Removed trailing periods from Tasks/Library placeholder copy in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/tasks.tsx` and `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`.
+
+### Checks
+- TypeScript ok:
+  - Command: `npx tsc -p tsconfig.build.json --noEmit`
+  - Result: exit 0
+- Full Vite build blocked in this environment:
+  - Command: `npm run build`
+  - Error: Vite requires Node `20.19+` (current Node was `18.19.1`)
+
+### DB Memory Logging (script added)
+- Script: `scripts/log_tasks_library_frontend_progress.py`
+  - Purpose: create/update Task + Run, append run events, and create/supersede Library items for this frontend step.
+  - Safety: defaults to dry-run; requires `--apply` to write.

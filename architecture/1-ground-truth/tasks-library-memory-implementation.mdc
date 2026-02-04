@@ -1,0 +1,210 @@
+# Tasks + Library + Memory Diff (FastAPI + Vite) - Implementation Runbook
+
+Created: 2026-02-04 07:34 UTC  
+Last reviewed: 2026-02-04 07:34 UTC
+
+## Scope
+Implement the "Tasks" + "Library" UI and backend APIs to support a YC demo.
+
+Demo goal: make compounding value visible and auditable:
+- Run 1 creates memory (Created/Promoted).
+- Run 2 uses memory (Used) with minimal prompting.
+
+## Repos (Current Layout)
+- Backend (FastAPI): `demo/full-stack-fastapi-template/backend/`
+- Frontend (Vite React): sibling repo (local path in this environment: `/home/alexlee/dev/EnderAI-frontend`)
+
+Frontend points to backend via `VITE_API_URL`:
+- `EnderAI-frontend/src/main.tsx` sets `OpenAPI.BASE = import.meta.env.VITE_API_URL`
+- Create `EnderAI-frontend/.env.local` for local dev.
+
+## Local Frontend + Cloud Backend (Render)
+Goal: run Vite locally while calling Render backend.
+
+Frontend:
+1) Create `/home/alexlee/dev/EnderAI-frontend/.env.local`:
+   ```env
+   VITE_API_URL=https://enderai-backend.onrender.com
+   ```
+2) Install and run:
+   ```sh
+   cd /home/alexlee/dev/EnderAI-frontend
+   bun install
+   bun run dev
+   ```
+   If `vite: command not found`, dependencies are missing; re-run `bun install` (or use `npm install` + `npm run dev`).
+
+Backend (Render env vars):
+- `FRONTEND_HOST=https://al-exe.github.io`
+- `BACKEND_CORS_ORIGINS` must include local dev origin:
+  - `https://al-exe.github.io,https://al-exe.github.io/EnderAI-frontend,http://localhost:5173`
+
+Backend code pointers:
+- CORS middleware wiring: `demo/full-stack-fastapi-template/backend/app/main.py`
+- CORS config fields: `demo/full-stack-fastapi-template/backend/app/core/config.py`
+
+## Memory Data Model (Minimal)
+Relationships:
+- `task` (1) -> (N) `run`
+- `run` (1) -> (N) `run_event` (append-only)
+- `run` (N) <-> (N) `library_item` via `run_library_link` (Used/Created/Promoted/Superseded)
+- `library_item.superseded_by_id` links to a newer version (never delete; supersede)
+
+### Tables (Existing in Render Postgres)
+These tables were created directly in the Render Postgres database (not via Alembic yet).
+
+`task`
+- id: uuid (no DB default; app must generate)
+- title: text
+- workflow_key: text
+- goal: text
+- acceptance_criteria: text
+- systems_touched: jsonb default `{}`
+- risk_level: text default `read_only`
+- status: text default `open`
+- created_at: timestamptz default `now()`
+- last_touched_at: timestamptz default `now()`
+
+`run`
+- id: uuid (no DB default)
+- task_id: uuid
+- targets: jsonb default `[]`
+- started_at: timestamptz default `now()`
+- ended_at: timestamptz nullable
+- status: text default `aborted`
+- summary: text
+
+`run_event` (append-only)
+- id: bigint identity via `run_event_id_seq`
+- run_id: uuid
+- ts: timestamptz default `now()`
+- type: text (`note|cmd|sql|error|breakthrough|link`)
+- message: text
+- data: jsonb default `{}`
+- supersedes_event_id: bigint nullable
+
+`library_item`
+- id: uuid (no DB default)
+- workflow_key: text
+- kind: text (`recipe|pitfall|decision|checklist`)
+- title: text
+- body_mdc: text
+- tags: jsonb default `{}`
+- source_refs: jsonb default `[]`
+- created_at: timestamptz default `now()`
+- last_used_at: timestamptz nullable
+- promotion_mode: text default `auto` (`auto|user`)
+- superseded_by_id: uuid nullable
+
+`run_library_link`
+- run_id: uuid
+- library_item_id: uuid
+- relation: text (`used|created|promoted|superseded`)
+- created_at: timestamptz default `now()`
+
+## DB DDL + Seed Scripts (This Repo)
+Create tables (idempotent):
+- `scripts/create_memory_tables.py`
+
+Seed demo data (idempotent):
+- `scripts/seed_demo_tasks_library.py`
+
+Both scripts:
+- read DB connection from `DATABASE_URL` (preferred) or `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD`
+- must not store secrets in repo docs/files
+
+## Current Demo Seed State (Timestamped)
+As of 2026-02-04 07:10 UTC, seed script produced:
+- tasks: 3
+- runs: 5
+- run_events: 14
+- library_items: 5
+- run_library_link: 15 (created/promoted/used each 5)
+
+## Backend Implementation (Next Agent)
+1) Add models for `task/run/run_event/library_item/run_library_link`:
+   - Option A (recommended short-term): SQLAlchemy Core / plain SQL for these tables (avoid Alembic churn while schema is experimental).
+   - Option B: SQLModel models + Alembic migration with create-if-not-exists logic (requires careful rollout because tables already exist in prod DB).
+2) Add read-only APIs first (safe):
+   - `GET /api/v1/tasks?workflow_key=&q=&status=&...`
+   - `GET /api/v1/tasks/{task_id}`
+   - `GET /api/v1/tasks/{task_id}/runs`
+   - `GET /api/v1/runs/{run_id}`
+   - `GET /api/v1/runs/{run_id}/events`
+   - `GET /api/v1/library?workflow_key=&q=&current_only=true`
+   - `GET /api/v1/library/{library_item_id}`
+3) Add write APIs once UI exists:
+   - Create task/run, append run_event, link run<->library relations.
+   - Never delete; supersede via `superseded_by_id` and/or `relation='superseded'`.
+
+Search v1:
+- simple `ILIKE` for title/body (enough for demo)
+
+## Backend Implementation (Status: Library API wired)
+As of 2026-02-04 08:55 UTC, the backend has a first-pass `Library` API implemented (read + create + supersede-update):
+- Models/schemas:
+  - `demo/full-stack-fastapi-template/backend/app/models.py` (`LibraryItem*`)
+- Routes:
+  - `demo/full-stack-fastapi-template/backend/app/api/routes/library.py`
+- Router registration:
+  - `demo/full-stack-fastapi-template/backend/app/api/main.py`
+
+Endpoints:
+- `GET /api/v1/library/` (auth required)
+  - `workflow_key` (optional)
+  - `kind` (optional)
+  - `q` (optional; `ILIKE` on `title` or `body_mdc`)
+  - `current_only` (default true; filters `superseded_by_id is null`)
+  - `skip`/`limit`
+- `GET /api/v1/library/{id}` (auth required)
+- `POST /api/v1/library/` (**superuser required**)
+- `PUT /api/v1/library/{id}` (**superuser required**)
+  - Creates a new row and sets `superseded_by_id` on the old row (never edits content in place)
+
+## Frontend Implementation (Next Agent)
+Add two sidebar tabs:
+- Tasks
+- Library
+
+Tasks view:
+- Tasks list + filters (workflow_key, status, date, has_breakthrough, touched_db)
+- Task detail: goal + acceptance criteria + runs list
+
+Run detail (core demo screen):
+- Memory Diff sections (color-coded):
+  - Used (links to Library items, updates last_used_at)
+  - Created
+  - Promoted
+  - Superseded
+- Append-only run log timeline (events)
+- Evidence links (files/issues/commands) as text links
+
+Library view:
+- Default: show current items (where `superseded_by_id is null`)
+- Detail: show body + tags + last_used + history chain
+
+## DB-Backed “What We Did” Logging (App Development)
+For ongoing app development, capture progress in the DB-backed memory tables:
+- `task`/`run` for the unit of work
+- `run_event` for append-only evidence (commands/errors/links)
+- `library_item` for reusable knowledge; update by superseding (never delete)
+
+Script (this repo):
+- `scripts/log_tasks_library_frontend_progress.py`
+  - Default: dry-run (read-only)
+  - Write mode: pass `--apply`
+
+## Demo Narrative (Customer Data Cleanup)
+User is an engineer/technician doing recurring customer data cleanup.
+- Run 1: user explains everything -> memory is Created/Promoted.
+- Run 2: support ticket arrives with UUID1/UUID2/UUID3 -> system Utilizes memory; links show exactly what was reused.
+
+## Guardrails
+- Never store secrets in repo docs (DB URLs, tokens, passwords); use env vars.
+- Do not delete memory entries; supersede instead to preserve trust.
+- Keep run_event append-only; corrections should supersede prior event, not rewrite history.
+
+## Related Notes (Layer 3)
+- Plan: `architecture/3-task-context/tasks-library-memory-plan.mdc`
+- Local FE + cloud BE notes: `architecture/3-task-context/frontend-local-fe-cloud-be.mdc`
+- Flight logs: `architecture/3-task-context/flight-logs/`

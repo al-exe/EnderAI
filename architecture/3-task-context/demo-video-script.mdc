@@ -1,0 +1,86 @@
+# Demo Video Script — EnderAI (FastAPI App)
+
+Created: 2026-02-03 09:14 UTC  
+Last used: 2026-02-03 09:15 UTC
+
+## Version
+- Draft v0.2 (YC-focused walkthrough)
+
+## Length Target
+- 3–5 minutes
+
+## Audience
+- Y Combinator partners + early-stage operators evaluating leverage and execution velocity.
+
+## Core Promise
+- EnderAI turns messy work-in-motion into a tight, auditable ship loop and builds reusable memory so future workflows run faster with less user input.
+
+## Demo Narrative (Beats)
+1) **Hook: Founder Speed (0:00–0:30)**
+   - “Teams lose days to missing tickets and stale boards. EnderAI closes those gaps automatically.”
+   - Show FastAPI items UI + Kanban board side by side.
+
+2) **Work in Motion (0:30–1:15)**
+   - Show items list in the FastAPI app (real data).
+   - Show the Kanban board with existing issues in flight.
+   - Call out: “Everything is wired — GitHub Issues, board automation, repos, and deploys.”
+
+3) **Memory in Action (1:15–2:00)**
+   - Highlight “memory used” from prior tickets (known patterns, prior decisions, commands).
+   - Note: “We don’t start from zero; EnderAI reuses proven context.”
+
+4) **The Gap (2:00–3:00)**
+   - Move a task on the board and notice missing frontend ticket for archived items UI.
+   - Ask EnderAI to create it from context.
+   - Show the issue appear in GitHub and auto‑land in the right column.
+
+5) **Execution Loop (3:00–4:00)**
+   - Open frontend repo, point to the created issue.
+   - Mention auto‑deploys for frontend + backend.
+   - Close the issue; show the board update.
+
+6) **Trust + Auditability (4:00–4:40)**
+   - Open today’s Flight Log and show the audit trail (requests → commands → outcomes).
+   - Emphasize: “No guessing, no lost context. You can audit the work.”
+
+7) **Wrap: Repeatable Outcomes (4:40–5:00)**
+   - “EnderAI compresses coordination overhead into minutes and makes outcomes repeatable.”
+   - “Memory used, memory created, and memory promoted → faster future workflows.”
+
+## Shot List (Concrete Screens)
+- FastAPI demo app (items list)
+- GitHub Issues (frontend repo)
+- Kanban board (issues auto‑added)
+- Render deploys (frontend + backend)
+- DB query output (items/users)
+- Flight Log entry (today)
+
+## Script (Talk Track)
+- Hook: “Every team has the same problem: missing tickets and stale boards. EnderAI closes those gaps automatically.”
+- Setup: “We’ve wired GitHub Issues, a Kanban workflow, repos, auto‑deploys, and a live Postgres DB.”
+- Gap: “We’re moving work… and notice there’s no frontend ticket for archived items UI.”
+- Ask EnderAI: “Create the missing frontend ticket for archived items UI.”
+- Confirm: “Issue created and auto‑added to the board.”
+- Execution: “As we close it, the board updates instantly.”
+- Trust: “Flight Logs capture the full trail — requests, commands, outcomes.”
+- Memory: “EnderAI reuses proven context from past tickets and captures new decisions as reusable memory.”
+- Wrap: “This is a tighter ship loop: fewer misses, faster shipping, repeatable outcomes.”
+
+## Required Artifacts
+- Stable test data in DB (users/items)
+- Kanban board configured to auto‑add new issues
+- GitHub issue template for frontend features (optional)
+- Flight Log updated during demo
+- Example memory snippet to show “used” + “created”
+
+## Risks + Mitigations
+- Board automation delay → buffer in script with “refresh board” step.
+- Rate limits/permissions → confirm tokens + device auth ahead of time.
+- Deploy lag → pre‑warm deployments, or note “already deployed.”
+
+## Callouts (On-screen)
+- “Auto-added to Kanban”
+- “Issue created from context”
+- “Flight Log evidence captured”
+- “Faster ship loop”
+- “Memory used → Memory created → Repeatable outcomes”

@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Literal
 
 from pydantic import EmailStr
 from sqlalchemy import DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -105,6 +107,63 @@ class ItemPublic(ItemBase):
 
 class ItemsPublic(SQLModel):
     data: list[ItemPublic]
+    count: int
+
+
+# --- Tasks/Library/Memory models (demo) ---
+
+LibraryItemKind = Literal["recipe", "pitfall", "decision", "checklist"]
+PromotionMode = Literal["auto", "user"]
+
+
+class LibraryItemBase(SQLModel):
+    workflow_key: str = Field(min_length=1)
+    kind: LibraryItemKind = Field(min_length=1)
+    title: str = Field(min_length=1)
+    body_mdc: str = Field(min_length=1)
+    tags: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
+    source_refs: list[Any] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    promotion_mode: PromotionMode = "auto"
+
+
+class LibraryItemCreate(LibraryItemBase):
+    pass
+
+
+class LibraryItemUpdate(SQLModel):
+    workflow_key: str | None = Field(default=None, min_length=1)
+    kind: LibraryItemKind | None = Field(default=None, min_length=1)
+    title: str | None = Field(default=None, min_length=1)
+    body_mdc: str | None = Field(default=None, min_length=1)
+    tags: dict[str, Any] | None = None
+    source_refs: list[Any] | None = None
+    promotion_mode: PromotionMode | None = None
+
+
+class LibraryItem(LibraryItemBase, table=True):
+    __tablename__ = "library_item"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    last_used_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    superseded_by_id: uuid.UUID | None = Field(default=None, foreign_key="library_item.id")
+
+
+class LibraryItemPublic(LibraryItemBase):
+    id: uuid.UUID
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
+    superseded_by_id: uuid.UUID | None = None
+
+
+class LibraryItemsPublic(SQLModel):
+    data: list[LibraryItemPublic]
     count: int
 
 

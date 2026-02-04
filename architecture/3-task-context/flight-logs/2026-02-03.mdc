@@ -1,0 +1,76 @@
+# Flight Log — 2026-02-03 (UTC)
+
+Created: 2026-02-03 08:57 UTC  
+Last used: 2026-02-04 03:58 UTC
+
+## Summary
+- 08:57–08:59: Started planning demo video narrative + scope for capabilities showcase.
+- 08:58: New request: set up a Render Postgres connection that I can query.
+- 09:00: User provided Render Postgres connection details and requested write access; captured with secrets redacted.
+- 09:01: Attempted external psql smoke test; `psql` not installed in this environment.
+- 09:01: Attempted to install `postgresql-client`; blocked by `sudo` password requirement.
+- 09:02: Installed `pgcli` + `psycopg2-binary` in repo venv for CLI access without sudo.
+- 09:03: Connected to Render Postgres via Python (psycopg2) and ran temp-table smoke test successfully.
+- 09:04: Listed tables in Render Postgres (public.alembic_version, public.item, public.user).
+- 09:04: Queried `public.user` and `public.item` rows for user request.
+- 09:05: **BREAKTHROUGH** — DB connection confirmed and queries working via psycopg2.
+- 09:07: Checked related items for `alexl@gmail.com`; none found (0 items).
+- 09:07: Deleted user `alexl@gmail.com` from Render Postgres.
+- 09:08: Re-queried users/items; only `alexlee4190@gmail.com` remains with 5 items.
+- 09:09: User confirmed current capabilities inventory (DB, GitHub Issues + workflows, repo connections, auto-deploys, memory architecture).
+- 09:10: Listed frontend repo issues for archive feature; found “[Feature] Archived items list UI” (#5).
+- 09:11: Retrieved issue #5 description and deleted the issue per user request.
+- 09:13: User provided demo flow narrative (missing frontend ticket created automatically; kanban flow; flight logs capture everything).
+- 09:14: Drafted demo video script + shot list for FastAPI app workflow.
+- 09:15: Rewrote demo script for YC audience (shorter, speed/loop focus).
+- 2026-02-04 03:58: Updated demo script + YC application to emphasize memory used/created for repeatable outcomes.
+
+## Future (Next)
+- Draft demo outline (problem → product → trust/continuity → proof) and pick 2–3 concrete feature walkthroughs.
+- Identify any required artifacts (screenshots, clips, logs) and owners.
+
+## Present (In Progress)
+- 08:57: Aligning on demo video goals, audience, length, and timeline.
+- 08:58: Gathering requirements for Render Postgres connection and safe access method.
+- 09:00: Need confirmation before any external access; will avoid storing DB secrets in repo.
+- 09:01: Blocked on missing `psql`; need approval to install client or alternate access method.
+- 09:01: Need user to install `psql` locally or provide a passwordless install path.
+- 09:02: Ready to connect via `pgcli` and run smoke test.
+- 09:03: Need to confirm preferred CLI workflow (pgcli vs psql) and rotate exposed DB password.
+- 09:04: Ready for further DB queries; recommend rotating password after session.
+- 09:04: User requested saving DB credentials to disk; blocked by policy (no secrets in repo).
+- 09:05: Need to record non-secret connection reference only; credentials should be rotated after exposure.
+- 09:07: Awaiting confirmation to delete `alexl@gmail.com` user (no related items).
+- 09:07: Deletion complete; ready for follow-up queries.
+- 09:08: Ready for further DB queries.
+- 09:09: Need to align next milestone (demo narrative vs product polish vs infra hardening).
+- 09:10: Awaiting next step after identifying archive UI issue.
+- 09:11: Issue cleanup complete; awaiting next request.
+- 09:13: Need to turn demo flow into a scripted outline and artifact checklist.
+- 09:14: Script draft ready; awaiting review/edits.
+- 09:15: YC-focused script ready; awaiting feedback.
+- 2026-02-04 03:58: Memory emphasis added; awaiting review.
+
+## Past (Done)
+- None yet.
+
+## Evidence / Links
+- Ground truth demo notes: `architecture/1-ground-truth/flight-logs/archive/2026-01/2026-01-20.mdc`
+- Render Postgres details provided by user (redacted): host `dpg-d6058pkhg0os73a2fli0-a` (internal), external host `dpg-d6058pkhg0os73a2fli0-a.oregon-postgres.render.com`, db `enderai`, user `alexlee`.
+- 2026-02-03 09:01 UTC: `psql` attempt failed: `/bin/bash: line 1: psql: command not found`.
+- 2026-02-03 09:01 UTC: `sudo apt-get install postgresql-client` failed: `sudo: a password is required`.
+- 2026-02-03 09:02 UTC: `pip install pgcli psycopg2-binary` in `.venv` succeeded.
+- 2026-02-03 09:03 UTC: Ran psycopg2 smoke test with temp table; output `inserted: (1, 'ok')`, `count: 1`. (Command used env vars; password redacted.)
+- 2026-02-03 09:04 UTC: Listed tables via psycopg2: `public.alembic_version`, `public.item`, `public.user`.
+- 2026-02-03 09:04 UTC: Queried users/items via psycopg2; results provided to user (no secrets stored).
+- 2026-02-03 09:05 UTC: BREAKTHROUGH — psycopg2 connection + queries succeeded (see prior commands). Credentials not written to disk per policy.
+- 2026-02-03 09:07 UTC: Related items check for `alexl@gmail.com` returned `items: 0`.
+- 2026-02-03 09:07 UTC: Deleted user via SQL `delete from public.user where email = 'alexl@gmail.com'` (returned id `22400760-ddab-4fe7-9e83-364f9a5510a3`).
+- 2026-02-03 09:08 UTC: Re-queried users/items via psycopg2; results provided to user.
+- 2026-02-03 09:09 UTC: Capabilities summary confirmed by user (verbal confirmation).
+- 2026-02-03 09:10 UTC: `gh issue list -R al-exe/EnderAI-frontend -S "archive"` output includes issue #5 “[Feature] Archived items list UI”.
+- 2026-02-03 09:11 UTC: `gh issue view 5` captured description; `gh issue delete 5` executed.
+- 2026-02-03 09:13 UTC: Demo flow narrative confirmed by user (verbal).
+- 2026-02-03 09:14 UTC: Demo script draft: `architecture/3-task-context/demo-video-script.mdc`.
+- 2026-02-03 09:15 UTC: Updated script for YC: `architecture/3-task-context/demo-video-script.mdc`.
+- 2026-02-04 03:58 UTC: Updated `architecture/3-task-context/demo-video-script.mdc` and `meta/application.mdc` for memory/repeatability framing.

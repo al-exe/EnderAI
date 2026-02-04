@@ -1,0 +1,26 @@
+# Backend Library API — Ground Truth
+
+Created: 2026-02-04 08:55 UTC  
+Last reviewed: 2026-02-04 08:55 UTC
+
+## Purpose
+Expose the Postgres-backed `library_item` table via FastAPI so the frontend `Library` tab can load real data.
+
+## Files
+- Models/schemas: `demo/full-stack-fastapi-template/backend/app/models.py`
+- Routes: `demo/full-stack-fastapi-template/backend/app/api/routes/library.py`
+- Router wiring: `demo/full-stack-fastapi-template/backend/app/api/main.py`
+
+## Endpoints
+- `GET /api/v1/library/` (auth required)
+  - Query params: `workflow_key`, `kind`, `q`, `current_only=true`, `skip`, `limit`
+  - `q` uses `ILIKE` on `title` or `body_mdc`
+  - `current_only` filters `superseded_by_id is null`
+- `GET /api/v1/library/{id}` (auth required)
+- `POST /api/v1/library/` (superuser required)
+- `PUT /api/v1/library/{id}` (superuser required)
+  - Update is implemented as **supersede**: creates a new row and sets `superseded_by_id` on the old row
+
+## Notes
+- Deletes are intentionally not implemented; supersede is the supported evolution mechanism.
+
