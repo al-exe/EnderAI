@@ -1,7 +1,7 @@
 # Flight Log — 2026-02-04 (UTC)
 
 Created: 2026-02-04 06:16 UTC  
-Last used: 2026-02-04 10:06 UTC
+Last used: 2026-02-04 10:20 UTC
 
 ## Summary
 - 06:16: Planned Tasks+Library UI and minimal memory data model for YC demo (focus: Created vs Utilized across Run 1/Run 2).
@@ -36,6 +36,7 @@ Last used: 2026-02-04 10:06 UTC
 - 09:41: Debounced Library search input by 750ms to prevent per-keystroke refetch.
 - 10:02: Added `workflow_bucket` mapping table so buckets have human-readable names; updated backend to join/search bucket names and frontend to group/render by bucket name.
 - 10:06: Made the top bar opaque while scrolling by adding `bg-background` to the sticky header in `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout.tsx`.
+- 10:20: Improved Library item readability by unescaping literal `\\n` and making each Library card clickable to open a dialog with full, wrapped text (`/home/alexlee/dev/EnderAI-frontend/src/components/Library/LibraryList.tsx`).
 
 ## Future (Next)
 - Implement minimal tables/endpoints to represent Task -> Run -> Run events + Library links.
