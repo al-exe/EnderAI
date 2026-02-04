@@ -33,6 +33,7 @@ Last used: 2026-02-04 08:08 UTC
 - 09:23: Added `GET /api/v1/library/workflow-keys` endpoint to support “bucket” grouping on the Library page.
 - 09:26: Updated frontend `Library` UI to group items by bucket (`workflow_key`) and populate a bucket dropdown from `GET /api/v1/library/workflow-keys`.
 - 09:28: Render deploy failed during `alembic upgrade head` due to SQLModel `typing.Literal[...]` type usage in `LibraryItem` model; patched `demo/full-stack-fastapi-template/backend/app/models.py` to keep table fields as `str` and constrain via API schemas.
+- 09:41: Debounced Library search input by 750ms to prevent per-keystroke refetch.
 
 ## Future (Next)
 - Implement minimal tables/endpoints to represent Task -> Run -> Run events + Library links.

@@ -71,3 +71,4 @@ Code touched (frontend repo):
   - Updated: `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`
   - Check: `npx tsc -p tsconfig.build.json --noEmit` (exit 0)
 - 2026-02-04 09:26 UTC: Added bucket grouping UI (group cards by `workflow_key`) and bucket dropdown driven by backend `GET /api/v1/library/workflow-keys`.
+- 2026-02-04 09:41 UTC: Debounced Library search by 750ms so keystrokes don’t trigger immediate refetch (`/home/alexlee/dev/EnderAI-frontend/src/components/Library/LibraryList.tsx`).
