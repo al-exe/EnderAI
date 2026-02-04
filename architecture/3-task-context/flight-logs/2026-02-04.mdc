@@ -29,6 +29,9 @@ Last used: 2026-02-04 08:08 UTC
   - `demo/full-stack-fastapi-template/backend/app/api/routes/library.py`
   - `demo/full-stack-fastapi-template/backend/app/api/main.py`
   - `demo/full-stack-fastapi-template/backend/app/models.py`
+- 09:20: Wired frontend `Library` tab to backend `GET /api/v1/library/` (basic list UI + filters for bucket/workflow_key, kind, and search).
+- 09:23: Added `GET /api/v1/library/workflow-keys` endpoint to support “bucket” grouping on the Library page.
+- 09:26: Updated frontend `Library` UI to group items by bucket (`workflow_key`) and populate a bucket dropdown from `GET /api/v1/library/workflow-keys`.
 
 ## Future (Next)
 - Implement minimal tables/endpoints to represent Task -> Run -> Run events + Library links.

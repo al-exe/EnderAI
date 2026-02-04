@@ -16,6 +16,9 @@ Expose the Postgres-backed `library_item` table via FastAPI so the frontend `Lib
   - Query params: `workflow_key`, `kind`, `q`, `current_only=true`, `skip`, `limit`
   - `q` uses `ILIKE` on `title` or `body_mdc`
   - `current_only` filters `superseded_by_id is null`
+- `GET /api/v1/library/workflow-keys` (auth required)
+  - Returns distinct `workflow_key` values with counts (for "bucket" grouping UI)
+  - `current_only=true` counts only current (non-superseded) items
 - `GET /api/v1/library/{id}` (auth required)
 - `POST /api/v1/library/` (superuser required)
 - `PUT /api/v1/library/{id}` (superuser required)
@@ -23,4 +26,3 @@ Expose the Postgres-backed `library_item` table via FastAPI so the frontend `Lib
 
 ## Notes
 - Deletes are intentionally not implemented; supersede is the supported evolution mechanism.
-

@@ -19,6 +19,8 @@ Wire the backend to expose Library items from the existing Postgres tables so th
 ### Endpoints (current)
 - `GET /api/v1/library/` (authenticated)
   - filters: `workflow_key`, `kind`, `q`, `current_only`, `skip`, `limit`
+- `GET /api/v1/library/workflow-keys` (authenticated)
+  - returns distinct `workflow_key` values (buckets) with counts
 - `GET /api/v1/library/{id}` (authenticated)
 - `POST /api/v1/library/` (superuser)
 - `PUT /api/v1/library/{id}` (superuser)

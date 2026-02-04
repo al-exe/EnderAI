@@ -156,6 +156,8 @@ Endpoints:
   - `q` (optional; `ILIKE` on `title` or `body_mdc`)
   - `current_only` (default true; filters `superseded_by_id is null`)
   - `skip`/`limit`
+- `GET /api/v1/library/workflow-keys` (auth required)
+  - Distinct `workflow_key` values + counts (supports bucket grouping UI)
 - `GET /api/v1/library/{id}` (auth required)
 - `POST /api/v1/library/` (**superuser required**)
 - `PUT /api/v1/library/{id}` (**superuser required**)

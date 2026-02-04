@@ -13,9 +13,34 @@ from app.models import (
     LibraryItemPublic,
     LibraryItemsPublic,
     LibraryItemUpdate,
+    WorkflowKeyCount,
+    WorkflowKeysPublic,
 )
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+@router.get("/workflow-keys", response_model=WorkflowKeysPublic)
+def read_library_workflow_keys(
+    session: SessionDep,
+    current_user: CurrentUser,
+    current_only: bool = True,
+) -> Any:
+    """
+    Retrieve distinct library workflow keys ("buckets") with counts.
+    """
+
+    statement = (
+        select(LibraryItem.workflow_key, func.count(LibraryItem.id))
+        .group_by(LibraryItem.workflow_key)
+        .order_by(func.count(LibraryItem.id).desc())
+    )
+    if current_only:
+        statement = statement.where(LibraryItem.superseded_by_id.is_(None))
+
+    rows = session.exec(statement).all()
+    data = [WorkflowKeyCount(workflow_key=row[0], count=row[1]) for row in rows]
+    return WorkflowKeysPublic(data=data)
 
 
 @router.get("/", response_model=LibraryItemsPublic)

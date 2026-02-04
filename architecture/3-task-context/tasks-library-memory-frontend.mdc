@@ -63,3 +63,11 @@ Code touched (frontend repo):
 - Script: `scripts/log_tasks_library_frontend_progress.py`
   - Purpose: create/update Task + Run, append run events, and create/supersede Library items for this frontend step.
   - Safety: defaults to dry-run; requires `--apply` to write.
+
+### Library tab (DB-backed list)
+- 2026-02-04 09:20 UTC: Wired `Library` tab to call backend `GET /api/v1/library/` and render a basic list (search + bucket/workflow_key + kind filter).
+  - New: `/home/alexlee/dev/EnderAI-frontend/src/api/library.ts`
+  - New: `/home/alexlee/dev/EnderAI-frontend/src/components/Library/LibraryList.tsx`
+  - Updated: `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`
+  - Check: `npx tsc -p tsconfig.build.json --noEmit` (exit 0)
+- 2026-02-04 09:26 UTC: Added bucket grouping UI (group cards by `workflow_key`) and bucket dropdown driven by backend `GET /api/v1/library/workflow-keys`.

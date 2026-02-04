@@ -167,6 +167,15 @@ class LibraryItemsPublic(SQLModel):
     count: int
 
 
+class WorkflowKeyCount(SQLModel):
+    workflow_key: str
+    count: int
+
+
+class WorkflowKeysPublic(SQLModel):
+    data: list[WorkflowKeyCount]
+
+
 # Generic message
 class Message(SQLModel):
     message: str
