@@ -15,3 +15,4 @@ User report: "Couldn't rename task. Check backend connectivity/auth".
 - 2026-02-05 06:22 UTC — Added `formatBadgeLabel` in `TasksPage` to normalize badge text (underscores -> spaces, lowercase) and applied to task/run status, event types, and run relation badges so casing renders cleanly.
 - 2026-02-05 06:22 UTC — Updated time display formatting in frontend to show only HH:MM AM/PM (no seconds) for task/run/library timestamps.
 - 2026-02-05 06:22 UTC — Updated time formatting to avoid leading zero hours (use numeric hour) for task and library timestamps.
+- 2026-02-05 06:23 UTC — Updated task metadata label from “Touched” to “Updated” in task card footer.
