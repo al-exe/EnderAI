@@ -1,7 +1,7 @@
 # Flight Log — 2026-02-05 (UTC)
 
 Created: 2026-02-05 05:02 UTC  
-Last used: 2026-02-05 06:07 UTC
+Last used: 2026-02-05 06:10 UTC
 
 ## Summary
 - 04:39: Updated demo script to be Memory-first (Tasks + Library) vs GitHub-first.
@@ -73,3 +73,9 @@ Last used: 2026-02-05 06:07 UTC
 ## 2026-02-05 06:07 UTC — Tasks list layout (vertical, full width)
 - Updated Tasks page to render tasks as a vertical, full-width list (not a 2-column grid) and ensured client-side most-recent-first ordering (by `last_touched_at` then `created_at`):
   - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+
+## 2026-02-05 06:10 UTC — Commit + deploy (frontend)
+- Committed backend changes (local): `7aec688` (“Add Task Title Rename API”) in `EnderAI`.
+- Committed frontend changes: `220d929` (“Improve Tasks Modals UX”) in `EnderAI-frontend`.
+- Ran `npm run build` in `EnderAI-frontend` (succeeded; local Node version warning surfaced).
+- Pushed `EnderAI-frontend` `main` to `origin` to trigger the GitHub Pages deploy workflow.
