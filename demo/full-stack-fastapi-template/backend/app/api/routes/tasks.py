@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep
-from app.models import RunPublic, RunsPublic, TaskPublic, TasksPublic
+from app.models import RunPublic, RunsPublic, TaskPublic, TasksPublic, TaskTitleUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -143,3 +143,42 @@ def read_task_runs(
     runs = [RunPublic(**dict(row)) for row in rows]
     return RunsPublic(data=runs, count=count)
 
+
+@router.patch("/{task_id}", response_model=TaskPublic)
+def update_task_title(
+    session: SessionDep,
+    current_user: CurrentUser,
+    task_id: uuid.UUID,
+    task_in: TaskTitleUpdate,
+) -> Any:
+    """
+    Update a Task title (DB-backed memory).
+    """
+
+    title = task_in.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Title must not be empty")
+
+    try:
+        stmt = text(
+            "update public.task "
+            "set title = :title, last_touched_at = now() "
+            "where id = :task_id "
+            "returning "
+            "id, title, workflow_key, goal, acceptance_criteria, "
+            "systems_touched, risk_level, status, created_at, last_touched_at"
+        )
+        row = (
+            session.connection()
+            .execute(stmt, {"task_id": task_id, "title": title})
+            .mappings()
+            .first()
+        )
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            raise HTTPException(status_code=404, detail="Task not found")
+        raise
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return TaskPublic(**dict(row))

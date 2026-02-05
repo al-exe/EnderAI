@@ -215,6 +215,10 @@ class TaskPublic(SQLModel):
     last_touched_at: datetime | None = None
 
 
+class TaskTitleUpdate(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+
+
 class TasksPublic(SQLModel):
     data: list[TaskPublic]
     count: int

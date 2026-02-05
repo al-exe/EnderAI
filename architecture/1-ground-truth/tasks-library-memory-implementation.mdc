@@ -152,6 +152,7 @@ Endpoints (auth required):
   - `skip`/`limit`
 - `GET /api/v1/tasks/{task_id}`
 - `GET /api/v1/tasks/{task_id}/runs`
+- `PATCH /api/v1/tasks/{task_id}` (update title; touches `last_touched_at`)
 - `GET /api/v1/runs/{run_id}`
 - `GET /api/v1/runs/{run_id}/detail` (run + events + memory links with embedded `library_item`)
 

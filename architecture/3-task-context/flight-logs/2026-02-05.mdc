@@ -1,7 +1,7 @@
 # Flight Log — 2026-02-05 (UTC)
 
 Created: 2026-02-05 05:02 UTC  
-Last used: 2026-02-05 05:14 UTC
+Last used: 2026-02-05 06:07 UTC
 
 ## Summary
 - 04:39: Updated demo script to be Memory-first (Tasks + Library) vs GitHub-first.
@@ -26,3 +26,50 @@ Last used: 2026-02-05 05:14 UTC
 - Frontend Tasks API wrapper: `/home/alexlee/dev/EnderAI-frontend/src/api/tasks.ts`
 - Seed script update: `scripts/seed_demo_tasks_library.py`
 - DB logger: `scripts/log_tasks_tab_implementation.py`
+
+## 2026-02-05 05:48 UTC — Task modal title rename
+- Located Task modal title rendering in `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx` (`TaskDialog` -> `DialogTitle`).
+- Added backend endpoint to persist title renames:
+  - `PATCH /api/v1/tasks/{task_id}` updates `public.task.title` and touches `last_touched_at`.
+  - Code: `demo/full-stack-fastapi-template/backend/app/api/routes/tasks.py` (`update_task_title`)
+
+## 2026-02-05 05:51 UTC — Wire FE rename -> BE patch
+- Updated frontend Tasks modal to allow renaming on double-click and persist via backend:
+  - UI: `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx` (`TaskDialog`)
+  - API wrapper: `/home/alexlee/dev/EnderAI-frontend/src/api/tasks.ts` (`updateTaskTitle`)
+  - Cache: invalidates `["tasks"]` after success so task cards reorder by `last_touched_at`.
+- Added backend test for title rename persistence:
+  - `demo/full-stack-fastapi-template/backend/tests/api/test_tasks_rename.py`
+- Test run note: `python3 -m pytest` failed here due to missing `pytest` module (`/usr/bin/python3: No module named pytest`).
+
+## 2026-02-05 05:55 UTC — Make dialogs scrollable
+- Updated Tasks page dialogs to be scrollable with `max-h-[85vh] overflow-y-auto` on `DialogContent`:
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx` (MemoryItemDialog, RunDetailDialog, TaskDialog)
+
+## 2026-02-05 05:59 UTC — Remove “Append-only run events” label
+- Removed the “Append-only run events” helper text from the Run detail dialog header:
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+
+## 2026-02-05 06:02 UTC — Remove task UUID from header
+- Removed rendering of `{task.id}` (UUID) from the Task dialog header row:
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+
+## 2026-02-05 06:02 UTC — Clean up Run detail subheader
+- Removed Run detail section helper texts:
+  - Removed “Memory Diff”
+  - Removed “Used / Created / Promoted / Superseded”
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+
+## 2026-02-05 06:04 UTC — Run Started/Ended timestamps (no seconds)
+- Updated Run detail Started/Ended line to display hh:mm without seconds (keeps date), and ensured spacing around the bullet separator:
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+
+## 2026-02-05 06:05 UTC — Library header copy
+- Updated Library page subtitle copy:
+  - From “Your reusable memory entries and workflows”
+  - To “What I've learned so far.”
+  - `/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/library.tsx`
+
+## 2026-02-05 06:07 UTC — Tasks list layout (vertical, full width)
+- Updated Tasks page to render tasks as a vertical, full-width list (not a 2-column grid) and ensured client-side most-recent-first ordering (by `last_touched_at` then `created_at`):
+  - `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
