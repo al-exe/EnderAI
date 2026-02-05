@@ -197,6 +197,66 @@ class WorkflowKeysPublic(SQLModel):
     data: list[WorkflowKeyCount]
 
 
+# --- Tasks/Runs/Events/Memory link schemas (DB-backed; tables created via scripts) ---
+
+RunLibraryRelation = Literal["used", "created", "promoted", "superseded"]
+
+
+class TaskPublic(SQLModel):
+    id: uuid.UUID
+    title: str
+    workflow_key: str
+    goal: str | None = None
+    acceptance_criteria: str | None = None
+    systems_touched: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
+    risk_level: str = "read_only"
+    status: str = "open"
+    created_at: datetime | None = None
+    last_touched_at: datetime | None = None
+
+
+class TasksPublic(SQLModel):
+    data: list[TaskPublic]
+    count: int
+
+
+class RunPublic(SQLModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    targets: list[Any] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    status: str = "aborted"
+    summary: str | None = None
+
+
+class RunsPublic(SQLModel):
+    data: list[RunPublic]
+    count: int
+
+
+class RunEventPublic(SQLModel):
+    id: int
+    run_id: uuid.UUID
+    ts: datetime | None = None
+    type: str
+    message: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
+    supersedes_event_id: int | None = None
+
+
+class RunMemoryLinkPublic(SQLModel):
+    relation: RunLibraryRelation
+    created_at: datetime | None = None
+    library_item: LibraryItemPublic
+
+
+class RunDetailPublic(SQLModel):
+    run: RunPublic
+    events: list[RunEventPublic]
+    memory_links: list[RunMemoryLinkPublic]
+
+
 # Generic message
 class Message(SQLModel):
     message: str
