@@ -1,0 +1,28 @@
+# Flight Log — 2026-02-05 (UTC)
+
+Created: 2026-02-05 05:02 UTC  
+Last used: 2026-02-05 05:14 UTC
+
+## Summary
+- 04:39: Updated demo script to be Memory-first (Tasks + Library) vs GitHub-first.
+- 04:48: Added an explicit “Implement (Live)” beat to the demo script for screen-record demos.
+- 05:02: Began implementing Tasks tab support:
+  - Added DB-backed response schemas for `task/run/run_event/run_library_link`.
+  - Added backend read APIs for Tasks/Runs (incl. run detail with events + memory links).
+- 05:08: Implemented frontend Tasks tab UX:
+  - Task cards + filters -> Task dialog -> Run detail (Memory Diff + Audit Trail).
+  - Memory links open a modal with the full Library item.
+- 05:09: Extended demo seed script to add an `items_tab` Task with two Runs + linked memory recipes (UI + CRUD wiring).
+- 05:14: Updated the seeded Items CRUD memory recipe to explicitly point to the DB table (`public.item`).
+- 05:10: Added a DB logger script for this step (dry-run by default): `scripts/log_tasks_tab_implementation.py`.
+- 05:10: Updated Layer 1 runbook to reflect Tasks/Runs APIs + Tasks UI: `architecture/1-ground-truth/tasks-library-memory-implementation.mdc`.
+
+## Evidence / Links
+- Demo script: `architecture/3-task-context/demo-video-script.mdc`
+- Backend models: `demo/full-stack-fastapi-template/backend/app/models.py`
+- Tasks API: `demo/full-stack-fastapi-template/backend/app/api/routes/tasks.py`
+- Runs API: `demo/full-stack-fastapi-template/backend/app/api/routes/runs.py`
+- Frontend Tasks UI: `/home/alexlee/dev/EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+- Frontend Tasks API wrapper: `/home/alexlee/dev/EnderAI-frontend/src/api/tasks.ts`
+- Seed script update: `scripts/seed_demo_tasks_library.py`
+- DB logger: `scripts/log_tasks_tab_implementation.py`

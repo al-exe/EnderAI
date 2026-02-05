@@ -218,6 +218,7 @@ def main() -> int:
     t_cleanup = seeded_uuid("task:customer_data_cleanup")
     t_gh = seeded_uuid("task:github_issue_ops")
     t_tables = seeded_uuid("task:memory_tables_bootstrap")
+    t_items = seeded_uuid("task:items_tab_evolution")
 
     # Library items
     li_db_connect = seeded_uuid("lib:customer_data_cleanup:db_connect_recipe")
@@ -225,6 +226,8 @@ def main() -> int:
     li_safe_delete = seeded_uuid("lib:customer_data_cleanup:safe_delete_checklist")
     li_gh_ops = seeded_uuid("lib:github_issue_ops:gh_issue_recipe")
     li_tables = seeded_uuid("lib:memory_tables_bootstrap:create_tables_recipe")
+    li_items_ui = seeded_uuid("lib:items_tab:items_ui_recipe")
+    li_items_crud = seeded_uuid("lib:items_tab:items_crud_wiring_recipe")
 
     now = datetime.now(timezone.utc)
 
@@ -273,12 +276,39 @@ def main() -> int:
         "last_touched_at": utc_dt("2026-02-04 06:26:00"),
     }
 
+    items_task = {
+        "id": str(t_items),
+        "title": "Items Tab (Frontend + CRUD Wiring)",
+        "workflow_key": "items_tab",
+        "goal": "Build the Items tab UX and wire it to backend CRUD endpoints.",
+        "acceptance_criteria": (
+            "- Items list renders\n"
+            "- Per-item actions menu works (Edit/Delete)\n"
+            "- CRUD calls succeed via backend API\n"
+            "- Memory captured for repeatable future work"
+        ),
+        "systems_touched": {
+            "repos": ["al-exe/EnderAI-frontend", "al-exe/EnderAI"],
+            "paths": [
+                "/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/items.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/components/Items/ItemActionsMenu.tsx",
+                "/home/alexlee/dev/EnderAI/demo/full-stack-fastapi-template/backend/app/api/routes/items.py",
+            ],
+        },
+        "risk_level": "read_only",
+        "status": "done",
+        "created_at": utc_dt("2026-02-01 22:30:00"),
+        "last_touched_at": utc_dt("2026-02-01 23:25:00"),
+    }
+
     # Runs (deterministic).
     r_cleanup_1 = seeded_uuid("run:customer_data_cleanup:1")
     r_cleanup_2 = seeded_uuid("run:customer_data_cleanup:2")
     r_cleanup_3 = seeded_uuid("run:customer_data_cleanup:3")
     r_gh_1 = seeded_uuid("run:github_issue_ops:1")
     r_tables_1 = seeded_uuid("run:memory_tables_bootstrap:1")
+    r_items_1 = seeded_uuid("run:items_tab:1")
+    r_items_2 = seeded_uuid("run:items_tab:2")
 
     runs: list[dict[str, Any]] = [
         {
@@ -326,6 +356,24 @@ def main() -> int:
             "ended_at": utc_dt("2026-02-04 06:26:00"),
             "status": "success",
             "summary": "Created memory tables and verified they exist.",
+        },
+        {
+            "id": str(r_items_1),
+            "task_id": str(t_items),
+            "targets": ["EnderAI-frontend:/items"],
+            "started_at": utc_dt("2026-02-01 22:35:00"),
+            "ended_at": utc_dt("2026-02-01 22:50:00"),
+            "status": "success",
+            "summary": "Added the baseline Items UI (table + actions menu) without wiring.",
+        },
+        {
+            "id": str(r_items_2),
+            "task_id": str(t_items),
+            "targets": ["api:/items", "EnderAI-frontend:ItemsService"],
+            "started_at": utc_dt("2026-02-01 23:05:00"),
+            "ended_at": utc_dt("2026-02-01 23:25:00"),
+            "status": "success",
+            "summary": "Wired Items UI to backend CRUD API (read/create/update/delete).",
         },
     ]
 
@@ -461,6 +509,79 @@ def main() -> int:
             "promotion_mode": "auto",
             "superseded_by_id": None,
         },
+        {
+            "id": str(li_items_ui),
+            "workflow_key": "items_tab",
+            "kind": "recipe",
+            "title": "Items UI (Route + Table + Actions Menu)",
+            "body_mdc": (
+                "# Recipe — Items UI (Route + Table + Actions Menu)\\n\\n"
+                "Goal: understand how the Items list renders and how the per-item dropdown opens Edit/Delete modals.\\n\\n"
+                "## Frontend location\\n"
+                "- Repo: `/home/alexlee/dev/EnderAI-frontend`\\n"
+                "- Route: `src/routes/_layout/items.tsx`\\n\\n"
+                "## Table rendering\\n"
+                "- Uses `ItemsService.readItems({ skip: 0, limit: 100 })` and renders a shared `DataTable`.\\n"
+                "- Table columns live in: `src/components/Items/columns.tsx`\\n\\n"
+                "## Actions dropdown + modals\\n"
+                "- Dropdown trigger per row: `src/components/Items/ItemActionsMenu.tsx`\\n"
+                "- Menu entries are `DropdownMenuItem`s that open dialogs:\\n"
+                "  - Edit modal: `src/components/Items/EditItem.tsx`\\n"
+                "  - Delete confirmation modal: `src/components/Items/DeleteItem.tsx`\\n\\n"
+                "Notes:\\n"
+                "- Each action owns its own `Dialog open` state.\\n"
+                "- After success, Items query is invalidated with `queryKey: ['items']`.\\n"
+            ),
+            "tags": {"area": "frontend", "feature": "items"},
+            "source_refs": [
+                "/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/items.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/components/Items/columns.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/components/Items/ItemActionsMenu.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/components/Items/EditItem.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/components/Items/DeleteItem.tsx",
+            ],
+            "created_at": utc_dt("2026-02-01 22:50:00"),
+            "last_used_at": utc_dt("2026-02-01 23:05:00"),
+            "promotion_mode": "auto",
+            "superseded_by_id": None,
+        },
+        {
+            "id": str(li_items_crud),
+            "workflow_key": "items_tab",
+            "kind": "recipe",
+            "title": "Items CRUD Wiring (Backend API + Frontend Client)",
+            "body_mdc": (
+                "# Recipe — Items CRUD Wiring\\n\\n"
+                "Goal: wire the Items UI to backend CRUD endpoints and verify the list refreshes correctly.\\n\\n"
+                "## Backend\\n"
+                "- FastAPI routes: `demo/full-stack-fastapi-template/backend/app/api/routes/items.py`\\n"
+                "- DB table: `public.item` (model: `demo/full-stack-fastapi-template/backend/app/models.py` → `Item`)\\n"
+                "- Endpoints (auth required):\\n"
+                "  - `GET /api/v1/items/`\\n"
+                "  - `POST /api/v1/items/`\\n"
+                "  - `PUT /api/v1/items/{id}`\\n"
+                "  - `DELETE /api/v1/items/{id}`\\n\\n"
+                "## Frontend\\n"
+                "- Generated client lives under: `src/client/`\\n"
+                "- Items calls are in `ItemsService` (imported from `@/client`).\\n"
+                "- Items list query lives in: `src/routes/_layout/items.tsx` (queryKey: `['items']`).\\n\\n"
+                "## Verify\\n"
+                "- Create an item -> list updates (query invalidation).\\n"
+                "- Edit an item -> list updates.\\n"
+                "- Delete an item -> list updates.\\n"
+            ),
+            "tags": {"area": "full_stack", "feature": "items"},
+            "source_refs": [
+                "/home/alexlee/dev/EnderAI/demo/full-stack-fastapi-template/backend/app/api/routes/items.py",
+                "/home/alexlee/dev/EnderAI/demo/full-stack-fastapi-template/backend/app/models.py",
+                "/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/items.tsx",
+                "/home/alexlee/dev/EnderAI-frontend/src/client/sdk.gen.ts",
+            ],
+            "created_at": utc_dt("2026-02-01 23:25:00"),
+            "last_used_at": utc_dt("2026-02-01 23:25:00"),
+            "promotion_mode": "auto",
+            "superseded_by_id": None,
+        },
     ]
 
     # Run events: key timeline only (no secrets).
@@ -581,6 +702,47 @@ def main() -> int:
             "Verified memory tables exist via information_schema.",
             {"tables": ["task", "run", "run_event", "library_item", "run_library_link"]},
         ),
+        (
+            r_items_1,
+            "seed:items:1:note",
+            utc_dt("2026-02-01 22:36:00"),
+            "note",
+            "Built baseline Items UI: Items route + DataTable + per-item actions dropdown.",
+            {
+                "files": [
+                    "/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/items.tsx",
+                    "/home/alexlee/dev/EnderAI-frontend/src/components/Items/columns.tsx",
+                    "/home/alexlee/dev/EnderAI-frontend/src/components/Items/ItemActionsMenu.tsx",
+                ]
+            },
+        ),
+        (
+            r_items_1,
+            "seed:items:1:breakthrough",
+            utc_dt("2026-02-01 22:50:00"),
+            "breakthrough",
+            "BREAKTHROUGH: Items table renders with per-row actions dropdown (Edit/Delete).",
+            {"route": "/items"},
+        ),
+        (
+            r_items_2,
+            "seed:items:2:note",
+            utc_dt("2026-02-01 23:06:00"),
+            "note",
+            "Wired Items UI to backend CRUD endpoints via ItemsService; ensured list refreshes via query invalidation.",
+            {
+                "backend": "demo/full-stack-fastapi-template/backend/app/api/routes/items.py",
+                "frontend": "/home/alexlee/dev/EnderAI-frontend/src/routes/_layout/items.tsx",
+            },
+        ),
+        (
+            r_items_2,
+            "seed:items:2:verify",
+            utc_dt("2026-02-01 23:24:00"),
+            "note",
+            "Verified create/edit/delete flows update the list (queryKey: ['items']).",
+            {"query_key": ["items"]},
+        ),
     ]
 
     # Run -> library links (Created vs Utilized story).
@@ -605,11 +767,20 @@ def main() -> int:
         (r_tables_1, li_db_connect, "used", utc_dt("2026-02-04 06:25:00")),
         (r_tables_1, li_tables, "created", utc_dt("2026-02-04 06:26:00")),
         (r_tables_1, li_tables, "promoted", utc_dt("2026-02-04 06:26:00")),
+        # Items tab run 1: created/promoted baseline UI recipe.
+        (r_items_1, li_items_ui, "created", utc_dt("2026-02-01 22:50:00")),
+        (r_items_1, li_items_ui, "promoted", utc_dt("2026-02-01 22:50:00")),
+        # Items tab run 2: used baseline UI recipe; created/promoted CRUD wiring recipe.
+        (r_items_2, li_items_ui, "used", utc_dt("2026-02-01 23:05:00")),
+        (r_items_2, li_items_crud, "created", utc_dt("2026-02-01 23:25:00")),
+        (r_items_2, li_items_crud, "promoted", utc_dt("2026-02-01 23:25:00")),
     ]
 
     if args.dry_run:
         print("Dry run OK. Would seed:")
-        print(f"- tasks: 3 (cleanup={t_cleanup}, gh={t_gh}, tables={t_tables})")
+        print(
+            f"- tasks: 4 (cleanup={t_cleanup}, gh={t_gh}, tables={t_tables}, items={t_items})"
+        )
         print(f"- runs: {len(runs)}")
         print(f"- run events: {len(events)}")
         print(f"- library items: {len(library_items)}")
@@ -624,6 +795,7 @@ def main() -> int:
             upsert_task(cur, cleanup_task)
             upsert_task(cur, gh_task)
             upsert_task(cur, tables_task)
+            upsert_task(cur, items_task)
 
             for r in runs:
                 upsert_run(cur, r)

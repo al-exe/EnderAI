@@ -1,10 +1,10 @@
-# Demo Video Script — EnderAI (FastAPI App)
+# Demo Video Script — EnderAI (Tasks + Library Memory)
 
 Created: 2026-02-03 09:14 UTC  
-Last used: 2026-02-03 09:15 UTC
+Last used: 2026-02-05 04:48 UTC
 
 ## Version
-- Draft v0.2 (YC-focused walkthrough)
+- Draft v0.3 (Memory-first walkthrough)
 
 ## Length Target
 - 3–5 minutes
@@ -13,74 +13,90 @@ Last used: 2026-02-03 09:15 UTC
 - Y Combinator partners + early-stage operators evaluating leverage and execution velocity.
 
 ## Core Promise
-- EnderAI turns messy work-in-motion into a tight, auditable ship loop and builds reusable memory so future workflows run faster with less user input.
+- EnderAI turns work-in-motion into **auditable memory** so future work runs faster with less user input.
 
 ## Demo Narrative (Beats)
-1) **Hook: Founder Speed (0:00–0:30)**
-   - “Teams lose days to missing tickets and stale boards. EnderAI closes those gaps automatically.”
-   - Show FastAPI items UI + Kanban board side by side.
+1) **Hook: Work Should Compound (0:00–0:30)**
+   - “Most teams redo the same work because the context disappears. EnderAI makes work compound — with proof.”
+   - Show **Items** next to **Tasks**/**Library** tabs (same app).
 
-2) **Work in Motion (0:30–1:15)**
-   - Show items list in the FastAPI app (real data).
-   - Show the Kanban board with existing issues in flight.
-   - Call out: “Everything is wired — GitHub Issues, board automation, repos, and deploys.”
+2) **Setup: Past Work Is Already Captured (0:30–1:15)**
+   - Open **Library**: highlight pre‑populated memory from building the Items UX:
+     - where frontend lives (repo + paths)
+     - where Items live in Postgres (`public.item`)
+     - how the per‑item dropdown actions menu works (Edit/Delete entry points)
+   - Open **Tasks**: show prior runs that created/promoted that memory (auditable, timestamped).
 
-3) **Memory in Action (1:15–2:00)**
-   - Highlight “memory used” from prior tickets (known patterns, prior decisions, commands).
-   - Note: “We don’t start from zero; EnderAI reuses proven context.”
+3) **The New Ask: Don’t Delete — Archive (1:15–2:10)**
+   - In **Items**, open the actions dropdown for an item and call out the current behavior (Delete).
+   - “A customer asks: don’t delete records — archive them.”
+   - Frame the change as a concrete task: add `is_archived`/`archived_at`, update UI behavior, verify DB state.
 
-4) **The Gap (2:00–3:00)**
-   - Move a task on the board and notice missing frontend ticket for archived items UI.
-   - Ask EnderAI to create it from context.
-   - Show the issue appear in GitHub and auto‑land in the right column.
+4) **Implement (Live): Add Archive Support (2:10–3:10)**
+   - Open the relevant Library card(s) (pre‑seeded) that point to:
+     - where to add the DB column(s)
+     - where the Items list query lives
+     - where the dropdown actions menu is wired
+   - Make the smallest visible product change:
+     - add `archived_at` (and/or `is_archived`) at the DB/model layer
+     - update UI to show **Archive** (not Delete) and hide archived rows by default
+   - (Optional) commit/push and mention deploy‑on‑commit.
 
-5) **Execution Loop (3:00–4:00)**
-   - Open frontend repo, point to the created issue.
-   - Mention auto‑deploys for frontend + backend.
-   - Close the issue; show the board update.
+5) **Run 1 (Teach + Capture) (3:10–4:05)**
+   - Start a new Task/Run: “Archive customer items safely.”
+   - Explicitly teach once (on camera):
+     - how to connect to the DB (env vars, no secrets in logs)
+     - the exact SQL to archive **2 of 5** items
+     - how to verify it worked (counts + selecting archived rows)
+   - Show the system capturing durable memory:
+     - a Library “recipe” for archive SQL + verification checklist
+     - the Run log showing commands/queries + outcomes (audit trail)
 
-6) **Trust + Auditability (4:00–4:40)**
-   - Open today’s Flight Log and show the audit trail (requests → commands → outcomes).
-   - Emphasize: “No guessing, no lost context. You can audit the work.”
+6) **Verify in Product (4:05–4:25)**
+   - Refresh **Items**: show archived items are no longer in the active list (or appear under an Archived view/filter).
+   - Open **Library**: show the newly created archive memory entry.
+   - Open **Tasks**: show the Run with “Memory Used / Memory Created” links.
 
-7) **Wrap: Repeatable Outcomes (4:40–5:00)**
-   - “EnderAI compresses coordination overhead into minutes and makes outcomes repeatable.”
-   - “Memory used, memory created, and memory promoted → faster future workflows.”
+7) **Run 2 (Cold Start, Minimal Prompt) (4:25–4:50)**
+   - From a **fresh terminal / fresh agent session**, give only the ask:
+     - “Archive the remaining 3 items for this customer.”
+   - Show that it pulls from Library memory (no re‑explaining), executes, verifies, and logs a new Run.
+
+8) **Wrap: Proof of Compounding (4:50–5:00)**
+   - “Run 1 taught the system. Run 2 reused it with minimal input — and you can audit both.”
+   - “That’s compounding execution: Memory used → Memory created → repeatable outcomes.”
 
 ## Shot List (Concrete Screens)
-- FastAPI demo app (items list)
-- GitHub Issues (frontend repo)
-- Kanban board (issues auto‑added)
-- Render deploys (frontend + backend)
-- DB query output (items/users)
-- Flight Log entry (today)
+- EnderAI frontend: **Items** list + per-item actions dropdown
+- EnderAI frontend: **Library** list + open a memory item (“recipe”)
+- EnderAI frontend: **Tasks** (task list + a run detail / memory diff)
+- Terminal: DB connect + archive SQL + verify SQL output (summarized, no secrets)
+- (Optional cameo) Kanban board auto‑adds the archive task / issue
 
 ## Script (Talk Track)
-- Hook: “Every team has the same problem: missing tickets and stale boards. EnderAI closes those gaps automatically.”
-- Setup: “We’ve wired GitHub Issues, a Kanban workflow, repos, auto‑deploys, and a live Postgres DB.”
-- Gap: “We’re moving work… and notice there’s no frontend ticket for archived items UI.”
-- Ask EnderAI: “Create the missing frontend ticket for archived items UI.”
-- Confirm: “Issue created and auto‑added to the board.”
-- Execution: “As we close it, the board updates instantly.”
-- Trust: “Flight Logs capture the full trail — requests, commands, outcomes.”
-- Memory: “EnderAI reuses proven context from past tickets and captures new decisions as reusable memory.”
-- Wrap: “This is a tighter ship loop: fewer misses, faster shipping, repeatable outcomes.”
+- Hook: “Work should compound. EnderAI captures work with proof so the next run is faster.”
+- Setup: “Here’s the product surface: Items, Tasks, Library. This Library is already pre‑populated with how we built Items.”
+- Proof: “This isn’t a wiki — it’s auditable memory linked to runs.”
+- Ask: “Customer request: don’t delete items — archive them.”
+- Run 1: “I’ll teach the system once: connect to DB, archive 2 items, verify.”
+- Capture: “EnderAI stores the recipe + verification as reusable memory, tied to this run.”
+- Run 2: “Now from a fresh session: archive the remaining 3 — minimal prompt.”
+- Wrap: “You can see exactly what memory was used and what new memory was created.”
 
 ## Required Artifacts
-- Stable test data in DB (users/items)
-- Kanban board configured to auto‑add new issues
-- GitHub issue template for frontend features (optional)
-- Flight Log updated during demo
-- Example memory snippet to show “used” + “created”
+- Stable demo data in DB (1 user + 5 items, deterministic titles)
+- Pre‑populated Tasks/Runs/Library memory showing prior Items work (code pointers + DB schema)
+- A fast live-implementation path for archive support (DB fields + UI behavior + verification query)
+- A visible audit surface (Tasks run detail / Flight Log) showing “Used/Created/Promoted”
+- (Optional) Kanban board configured to auto‑add new issues/tasks
 
 ## Risks + Mitigations
-- Board automation delay → buffer in script with “refresh board” step.
-- Rate limits/permissions → confirm tokens + device auth ahead of time.
-- Deploy lag → pre‑warm deployments, or note “already deployed.”
+- DB access hiccup → preflight DB connectivity; keep a read‑only fallback query ready.
+- UI cache/stale list → include a “hard refresh” beat; show DB verify as source of truth.
+- Live coding takes longer than expected → pre‑stage a branch and keep changes to 2–3 files max.
 
 ## Callouts (On-screen)
-- “Auto-added to Kanban”
-- “Issue created from context”
-- “Flight Log evidence captured”
-- “Faster ship loop”
-- “Memory used → Memory created → Repeatable outcomes”
+- “Memory used → Memory created”
+- “Audit trail (run events)”
+- “Run 1 teaches / Run 2 reuses”
+- “No deletes — archived with verification”

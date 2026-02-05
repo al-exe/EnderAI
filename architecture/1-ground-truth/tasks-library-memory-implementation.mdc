@@ -1,7 +1,7 @@
 # Tasks + Library + Memory Diff (FastAPI + Vite) - Implementation Runbook
 
 Created: 2026-02-04 07:34 UTC  
-Last reviewed: 2026-02-04 10:02 UTC
+Last reviewed: 2026-02-05 05:10 UTC
 
 ## Scope
 Implement the "Tasks" + "Library" UI and backend APIs to support a YC demo.
@@ -120,31 +120,40 @@ Both scripts:
 - must not store secrets in repo docs/files
 
 ## Current Demo Seed State (Timestamped)
-As of 2026-02-04 07:10 UTC, seed script produced:
+Last applied to Render Postgres (2026-02-04 07:09 UTC):
 - tasks: 3
 - runs: 5
 - run_events: 14
 - library_items: 5
-- run_library_link: 15 (created/promoted/used each 5)
+- run_library_link: 15
 
-## Backend Implementation (Next Agent)
-1) Add models for `task/run/run_event/library_item/run_library_link`:
-   - Option A (recommended short-term): SQLAlchemy Core / plain SQL for these tables (avoid Alembic churn while schema is experimental).
-   - Option B: SQLModel models + Alembic migration with create-if-not-exists logic (requires careful rollout because tables already exist in prod DB).
-2) Add read-only APIs first (safe):
-   - `GET /api/v1/tasks?workflow_key=&q=&status=&...`
-   - `GET /api/v1/tasks/{task_id}`
-   - `GET /api/v1/tasks/{task_id}/runs`
-   - `GET /api/v1/runs/{run_id}`
-   - `GET /api/v1/runs/{run_id}/events`
-   - `GET /api/v1/library?workflow_key=&q=&current_only=true`
-   - `GET /api/v1/library/{library_item_id}`
-3) Add write APIs once UI exists:
-   - Create task/run, append run_event, link run<->library relations.
-   - Never delete; supersede via `superseded_by_id` and/or `relation='superseded'`.
+Current seed plan (2026-02-05 dry-run):
+- tasks: 4
+- runs: 7
+- run_events: 18
+- library_items: 7
+- run_library_link: 20
 
-Search v1:
-- simple `ILIKE` for title/body/workflow key/bucket name (enough for demo)
+## Backend Implementation (Status: Tasks/Runs read APIs wired)
+As of 2026-02-05, the backend has DB-backed read APIs for Tasks/Runs/Events/Memory links (parameterized SQL; no Alembic churn):
+- Schemas:
+  - `demo/full-stack-fastapi-template/backend/app/models.py` (`TaskPublic`, `RunPublic`, `RunEventPublic`, `RunDetailPublic`)
+- Routes:
+  - `demo/full-stack-fastapi-template/backend/app/api/routes/tasks.py`
+  - `demo/full-stack-fastapi-template/backend/app/api/routes/runs.py`
+- Router registration:
+  - `demo/full-stack-fastapi-template/backend/app/api/main.py`
+
+Endpoints (auth required):
+- `GET /api/v1/tasks/`
+  - `workflow_key` (optional)
+  - `status` (optional)
+  - `q` (optional; `ILIKE` on `title`, `goal`, `acceptance_criteria`, `workflow_key`)
+  - `skip`/`limit`
+- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/tasks/{task_id}/runs`
+- `GET /api/v1/runs/{run_id}`
+- `GET /api/v1/runs/{run_id}/detail` (run + events + memory links with embedded `library_item`)
 
 ## Backend Implementation (Status: Library API wired)
 As of 2026-02-04 08:55 UTC, the backend has a first-pass `Library` API implemented (read + create + supersede-update):
@@ -169,27 +178,21 @@ Endpoints:
 - `PUT /api/v1/library/{id}` (**superuser required**)
   - Creates a new row and sets `superseded_by_id` on the old row (never edits content in place)
 
-## Frontend Implementation (Next Agent)
-Add two sidebar tabs:
-- Tasks
-- Library
+## Frontend Implementation (Status: Tasks + Run detail UI wired)
+As of 2026-02-05, the frontend `Tasks` tab is implemented and wired to the backend APIs:
+- Route:
+  - `/tasks` → `EnderAI-frontend/src/routes/_layout/tasks.tsx`
+- UI + modals:
+  - `EnderAI-frontend/src/components/Tasks/TasksPage.tsx`
+    - Task cards + search + workflow filter
+    - Task dialog (shows goal + acceptance criteria + Runs list)
+    - Run detail dialog (Memory Diff + Audit Trail)
+    - Clicking a memory link opens a modal with the full Library item body
+- API wrapper:
+  - `EnderAI-frontend/src/api/tasks.ts`
 
-Tasks view:
-- Tasks list + filters (workflow_key, status, date, has_breakthrough, touched_db)
-- Task detail: goal + acceptance criteria + runs list
-
-Run detail (core demo screen):
-- Memory Diff sections (color-coded):
-  - Used (links to Library items, updates last_used_at)
-  - Created
-  - Promoted
-  - Superseded
-- Append-only run log timeline (events)
-- Evidence links (files/issues/commands) as text links
-
-Library view:
-- Default: show current items (where `superseded_by_id is null`)
-- Detail: show body + tags + last_used + history chain
+Library view (status):
+- Implemented and wired: `EnderAI-frontend/src/components/Library/LibraryList.tsx`
 
 ## DB-Backed “What We Did” Logging (App Development)
 For ongoing app development, capture progress in the DB-backed memory tables:
@@ -199,6 +202,9 @@ For ongoing app development, capture progress in the DB-backed memory tables:
 
 Script (this repo):
 - `scripts/log_tasks_library_frontend_progress.py`
+  - Default: dry-run (read-only)
+  - Write mode: pass `--apply`
+- `scripts/log_tasks_tab_implementation.py`
   - Default: dry-run (read-only)
   - Write mode: pass `--apply`
 
