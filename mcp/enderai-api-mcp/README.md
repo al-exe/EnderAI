@@ -19,7 +19,8 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 ## Run Locally
 
 ```sh
-cd EnderAI/mcp/enderai-api-mcp
+# From the repo root:
+cd mcp/enderai-api-mcp
 npm install
 npm run build
 ENDERAI_BASE_URL=https://enderai-backend.onrender.com npm start
@@ -30,7 +31,8 @@ ENDERAI_BASE_URL=https://enderai-backend.onrender.com npm start
 This repo includes a Streamable HTTP MCP server entrypoint you can deploy so others can connect by URL:
 
 ```sh
-cd EnderAI/mcp/enderai-api-mcp
+# From the repo root:
+cd mcp/enderai-api-mcp
 npm install
 npm run build
 PORT=8080 MCP_BEARER_TOKEN=dev-token npm run start:http
@@ -44,21 +46,24 @@ MCP endpoint: `GET|POST|DELETE /mcp` (or `MCP_PATH`)
 Unit tests (no network):
 
 ```sh
-cd EnderAI/mcp/enderai-api-mcp
+# From the repo root:
+cd mcp/enderai-api-mcp
 npm test
 ```
 
 Smoke test (spawns the MCP server and calls `enderai_health_check` + `enderai_openapi` against your configured backend):
 
 ```sh
-cd EnderAI/mcp/enderai-api-mcp
+# From the repo root:
+cd mcp/enderai-api-mcp
 ENDERAI_BASE_URL=https://enderai-backend.onrender.com npm run smoke
 ```
 
 Smoke test (local Streamable HTTP server + Streamable HTTP client transport):
 
 ```sh
-cd EnderAI/mcp/enderai-api-mcp
+# From the repo root:
+cd mcp/enderai-api-mcp
 npm run smoke:http
 ```
 
@@ -71,7 +76,7 @@ Example MCP server config (adapt to your client):
   "mcpServers": {
     "enderai-api": {
       "command": "node",
-      "args": ["/home/alexlee/dev/EnderAI/mcp/enderai-api-mcp/dist/index.js"],
+      "args": ["mcp/enderai-api-mcp/dist/index.js"],
       "env": {
         "ENDERAI_BASE_URL": "https://enderai-backend.onrender.com",
         "ENDERAI_BEARER_TOKEN": "REDACTED"
@@ -109,7 +114,7 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
 
 ## Deploy (Render MVP)
 
-Create a **new Render Web Service** pointing at this repo, with root directory `EnderAI/mcp/enderai-api-mcp`:
+Create a **new Render Web Service** pointing at this repo (`al-exe/EnderAI`), with root directory `mcp/enderai-api-mcp`:
 
 - Build command: `npm ci && npm run build`
 - Start command: `npm run start:http`
@@ -126,7 +131,7 @@ If you are using VS Code and running Codex via the integrated terminal, you can 
 codex mcp add enderai-api \
   --env ENDERAI_BASE_URL=https://enderai-backend.onrender.com \
   --env ENDERAI_TIMEOUT_MS=30000 \
-  -- node /home/alexlee/dev/EnderAI/mcp/enderai-api-mcp/dist/index.js
+  -- node mcp/enderai-api-mcp/dist/index.js
 
 codex mcp list
 codex mcp get enderai-api --json

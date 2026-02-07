@@ -17,3 +17,4 @@ User report: "Couldn't rename task. Check backend connectivity/auth".
 - 2026-02-05 06:22 UTC — Updated time formatting to avoid leading zero hours (use numeric hour) for task and library timestamps.
 - 2026-02-05 06:23 UTC — Updated task metadata label from “Touched” to “Updated” in task card footer.
 - 2026-02-05 06:24 UTC — Removed run UUID display from Run detail header (next to status badge).
+- 2026-02-05 06:24 UTC — User reports `PATCH …/tasks/{UUID}` returns 405 Method Not Allowed. Next: verify backend route/methods and environment base URL; capture request/response details.
