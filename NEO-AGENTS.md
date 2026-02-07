@@ -4,6 +4,13 @@ Last updated: 2026-02-07
 
 This is a clean, MCP-first rules template intended to be imported into new IDEs/agents. It assumes **no repo-specific local memory directories exist** and treats the EnderAI backend (via MCP) as the primary persistence layer.
 
+## IDE Setup (One-Time)
+- Configure an MCP server entry that points to your deployed MCP endpoint (example: `https://enderai-mcp.onrender.com/mcp`).
+- If the MCP server is protected, configure `Authorization: Bearer enderai` in your IDE.
+- Do a quick sanity check:
+  - Visit `https://enderai-mcp.onrender.com/health` and confirm it returns `ok`.
+  - Run `enderai_health_check` via the IDE’s MCP tool picker.
+
 ## Top Priorities (Highest First)
 1. **User control + least privilege**
    - Default to read-only actions.
@@ -37,6 +44,16 @@ Rules:
 - Treat backend access tokens as ephemeral session secrets.
 - Never store tokens in repo files or in EnderAI Library items.
 
+## Default Start-Of-Task Flow (Context Hydration)
+1. Decide on a `workflow_key` (short, stable identifier for the workstream). If unsure, query workflow buckets: `GET /api/v1/library/workflow-keys`.
+2. Fetch only the memory you need to avoid noise:
+   - Tasks: `GET /api/v1/tasks/?workflow_key=...&q=...`
+   - Library: `GET /api/v1/library/?workflow_key=...&q=...&current_only=true`
+3. If you need deeper “what happened last time” context:
+   - Runs: `GET /api/v1/tasks/{task_id}/runs`, then `GET /api/v1/runs/{run_id}/detail`
+4. Inject the retrieved context into the current plan:
+   - Summarize the minimal relevant items and include IDs (`task_id`, `run_id`, `library_item.id`) so the user can audit and navigate.
+
 ## Memory: What To Read First (Context Hydration)
 At the start of any task:
 1. `enderai_health_check` to confirm connectivity.
@@ -64,12 +81,22 @@ If the backend API does not provide an endpoint for what you want to log (for ex
 - Do not fall back to direct SQL by default.
 - Keep an ephemeral worklog in the chat/IDE scratchpad and propose/implement the missing API endpoint.
 
+## Default End-Of-Task Flow (Promotion)
+1. Confirm with the user what should become durable memory (what’s reusable vs task-specific).
+2. Prefer “durable, reusable” content in Library items (supersede instead of editing in place).
+3. Prefer task hygiene updates that keep navigation easy (rename task titles to match reality).
+4. Never store secrets in written memory.
+
 ## API Calling Conventions (Via `enderai_request`)
 - Always send `path` starting with `/` (never a full URL).
 - Use `json` for JSON bodies and `text` for non-JSON (don’t provide both).
 - Prefer passing backend auth as `bearerToken` (avoid embedding secrets in headers or stored config).
 
+## Local/Dev Backends (Optional)
+- If you run the EnderAI backend locally, the MCP server must point at it (set `ENDERAI_BASE_URL=http://localhost:8000` in the MCP server environment).
+- Keep this configuration out of committed files; set it in your deployment/IDE environment.
+
 ## Common Failure Modes (MCP Transport)
 - A transient `404 Not Found` from the MCP endpoint often indicates a stale session after a redeploy/spin-down. Retry so the client re-initializes.
 - If hand-rolling MCP HTTP requests (not recommended), you must use JSON-RPC and include `Accept: application/json, text/event-stream`.
-
+  - Never invent `Mcp-Session-Id` values; initialize first and use the server-issued session id.
