@@ -5,10 +5,10 @@ Last updated: 2026-02-07
 This is a clean, MCP-first rules template intended to be imported into new IDEs/agents. It assumes **no repo-specific local memory directories exist** and treats the EnderAI backend (via MCP) as the primary persistence layer.
 
 ## IDE Setup (One-Time)
-- Configure an MCP server entry that points to your deployed MCP endpoint (example: `https://YOUR-MCP.onrender.com/mcp`).
-- If the MCP server is protected, configure `Authorization: Bearer <MCP_BEARER_TOKEN>` in your IDE.
+- Configure an MCP server entry that points to your deployed MCP endpoint (example: `https://enderai-mcp.onrender.com/mcp`).
+- If the MCP server is protected, configure `Authorization: Bearer enderai1` in your IDE.
 - Do a quick sanity check:
-  - Visit `https://YOUR-MCP.onrender.com/health` and confirm it returns `ok`.
+  - Visit `https://enderai-mcp.onrender.com/health` and confirm it returns `ok`.
   - Run `enderai_health_check` via the IDE’s MCP tool picker.
 
 ## Top Priorities (Highest First)
@@ -34,11 +34,12 @@ Use these MCP tools (names may vary by client, but the intent is the same):
 ## Auth Model (Do Not Confuse These)
 There are two independent auth layers:
 1. **IDE/Client -> MCP server** auth
-   - Configured in the IDE MCP settings (example: `Authorization: Bearer <MCP_BEARER_TOKEN>`).
+   - Default MCP endpoint: `https://enderai-mcp.onrender.com/mcp`
+   - Default header: `Authorization: Bearer enderai1`
    - This protects the MCP endpoint itself (for example `https://.../mcp`).
 2. **MCP server -> EnderAI backend API** auth
    - Obtain an `access_token` by calling `POST /api/v1/login/access-token`.
-   - Pass that token to backend API calls as `bearerToken` in `enderai_request` (or configure the MCP server with `ENDERAI_BEARER_TOKEN` if you control the server environment).
+    - Pass that token to backend API calls as `bearerToken` in `enderai_request` (or configure the MCP server with `ENDERAI_BEARER_TOKEN` if you control the server environment).
 
 Rules:
 - Treat backend access tokens as ephemeral session secrets.

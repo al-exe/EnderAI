@@ -10,6 +10,10 @@ Optional local overrides (keep secret-free): `architecture/0-agents/agents.overr
 - **Cursor:** add this file’s content to your Cursor project rules, or create a small `.cursor/rules/*.mdc` rule that instructs the agent to read and follow `AGENTS.md`.
 - **Other IDE agents:** ensure your agent loads `AGENTS.md` at session start (or paste it into the IDE’s “default agent rules” setting).
 
+## MCP Defaults (This Repo)
+- MCP endpoint: `https://enderai-mcp.onrender.com/mcp`
+- MCP auth header: `Authorization: Bearer enderai1`
+
 ## Core Priorities (Highest First)
 1. **User control + least privilege**
    - Default to read-only actions.
@@ -21,7 +25,8 @@ Optional local overrides (keep secret-free): `architecture/0-agents/agents.overr
    - Replace direct Postgres reads/writes with HTTP API calls (ideally through the MCP server).
    - Treat direct DB access as last-resort and require explicit user approval.
 4. **Secrets never go in the repo or memory**
-   - Don’t write passwords/tokens/DB URLs to files, logs, or Library items. Redact and reference only.
+   - Don’t write backend passwords/access tokens/DB URLs to files, logs, or Library items. Redact and reference only.
+   - The MCP demo token above is intentionally low-sensitivity for development; rotate it before any real deployment.
 
 ## Memory Model (Local + Remote)
 ### Local Library (Repo Files)
