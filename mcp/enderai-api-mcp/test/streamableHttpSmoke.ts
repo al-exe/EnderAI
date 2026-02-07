@@ -38,7 +38,10 @@ async function main(): Promise<void> {
     let session: Session | undefined;
     if (sessionId) {
       session = sessions.get(sessionId);
-      if (!session) {
+      // Allow initialize to create a session even when the client pre-sends a session id.
+      if (!session && method === "POST" && containsInitialize(parsedBody)) {
+        session = await createSession(sessions, sessionId);
+      } else if (!session) {
         res.writeHead(404);
         res.end();
         return;
@@ -89,8 +92,8 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 }
 
-async function createSession(sessions: Map<string, Session>): Promise<Session> {
-  const id = randomUUID();
+async function createSession(sessions: Map<string, Session>, forcedId?: string): Promise<Session> {
+  const id = forcedId ?? randomUUID();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => id,
     enableJsonResponse: true,
@@ -196,4 +199,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-

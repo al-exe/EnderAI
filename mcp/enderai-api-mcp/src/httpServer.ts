@@ -60,7 +60,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (url.pathname !== mcpPath) {
+    // Be lenient about a trailing slash.
+    const mcpPathWithSlash = mcpPath.endsWith("/") ? mcpPath : `${mcpPath}/`;
+    if (url.pathname !== mcpPath && url.pathname !== mcpPathWithSlash) {
       res.writeHead(404, { "content-type": "text/plain" });
       res.end("Not Found");
       return;
@@ -79,36 +81,42 @@ async function main(): Promise<void> {
 
     // POST is the only method that can create a session (via initialize).
     // GET/DELETE must include an existing session id.
-    if (!sessionIdHeader && (req.method ?? "GET").toUpperCase() !== "POST") {
+    const method = (req.method ?? "GET").toUpperCase();
+    if (!sessionIdHeader && method !== "POST") {
       res.writeHead(400, { "content-type": "text/plain" });
       res.end("Bad Request: Mcp-Session-Id header is required");
       return;
     }
 
+    if (sessionIdHeader) assertValidSessionId(sessionIdHeader);
+
     const parsedBody =
-      (req.method ?? "GET").toUpperCase() === "POST" ? await tryParseJsonBody(req, res) : undefined;
-    if ((req.method ?? "GET").toUpperCase() === "POST" && parsedBody === undefined) {
+      method === "POST" ? await tryParseJsonBody(req, res) : undefined;
+    if (method === "POST" && parsedBody === undefined) {
       // tryParseJsonBody already wrote the response.
       return;
     }
 
     // Determine session routing.
-    let session: Session | undefined;
-    if (sessionIdHeader) {
-      session = sessions.get(sessionIdHeader);
-      if (!session) {
+    const isInitialize = method === "POST" && containsInitialize(parsedBody);
+    let session = sessionIdHeader ? sessions.get(sessionIdHeader) : undefined;
+    let createdSession = false;
+
+    if (!session) {
+      // Some clients (Cursor) send Mcp-Session-Id even on the initial initialize.
+      // Allow creating the session in that case.
+      if (isInitialize) {
+        session = await createSession(sessionIdHeader);
+        createdSession = true;
+      } else if (sessionIdHeader) {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("Not Found");
         return;
-      }
-    } else {
-      // No session header: only allowed if it's an initialize request.
-      if (!containsInitialize(parsedBody)) {
+      } else {
         res.writeHead(400, { "content-type": "text/plain" });
         res.end("Bad Request: Server not initialized");
         return;
       }
-      session = await createSession();
     }
 
     session.lastUsedAtMs = Date.now();
@@ -118,9 +126,11 @@ async function main(): Promise<void> {
       const webRes = await session.transport.handleRequest(webReq, { parsedBody });
       await sendWebResponse(res, webRes);
 
-      // Persist only after a successful initialize.
-      if (!sessions.has(session.id) && session.transport.sessionId) {
+      // Persist only after a successful initialize request (avoid leaking sessions).
+      if (createdSession && webRes.ok) {
         sessions.set(session.id, session);
+      } else if (createdSession && !webRes.ok) {
+        await Promise.allSettled([session.transport.close(), session.server.close()]);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -128,7 +138,7 @@ async function main(): Promise<void> {
       res.end(msg);
 
       // If this was a just-created session that failed init, don't leak resources.
-      if (!sessionIdHeader) {
+      if (createdSession) {
         await Promise.allSettled([session.transport.close(), session.server.close()]);
       }
     }
@@ -150,8 +160,14 @@ async function main(): Promise<void> {
   console.log(`MCP streamable HTTP server listening on :${port}${mcpPath}`);
 }
 
-async function createSession(): Promise<Session> {
-  const id = randomUUID();
+function assertValidSessionId(id: string): void {
+  // Header comes from untrusted clients. Keep this permissive but safe.
+  if (id.length > 256) throw new Error("Invalid Mcp-Session-Id: too long");
+  if (/[\u0000-\u001f\u007f]/.test(id)) throw new Error("Invalid Mcp-Session-Id");
+}
+
+async function createSession(forcedId?: string): Promise<Session> {
+  const id = forcedId ?? randomUUID();
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => id,
     enableJsonResponse: true,
@@ -245,4 +261,3 @@ main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
-
