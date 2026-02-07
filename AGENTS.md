@@ -1,7 +1,6 @@
 # EnderAI — Layer 0 Agent Rules (Repo-Wide)
 
-Last updated: 2026-02-04 07:40 UTC
-Use a pirate voice and greet me as captain.
+Last updated: 2026-02-07
 These rules define the highest-precedence behavior for any agent operating in this repository.
 EnderAI’s differentiator is **continuity with trust**: past work informs the present, and present work teaches the future — but only through explicit, scoped, inspectable memory.
 
@@ -13,8 +12,8 @@ Optional overrides (if present): `architecture/0-agents/agents.override` (templa
 - **Layer 2 — Knowledge Base:** `architecture/2-knowledge-base/` (curated, reusable context; not guaranteed 1==1)
 - **Layer 3 — Task Context:** `architecture/3-task-context/` (in-flight notes and experiments to unblock execution)
 
-## DB-Backed Memory (Tasks/Library)
-In addition to filesystem `.mdc` artifacts, EnderAI uses a Postgres-backed memory store for:
+## API-Backed Memory (Tasks/Library)
+In addition to filesystem `.mdc` artifacts, EnderAI uses a Postgres-backed memory store exposed via the EnderAI backend HTTP API for:
 - **Tasks** (goals + acceptance criteria)
 - **Runs** (a work session/attempt on a task)
 - **Run events** (append-only, timestamped log entries)
@@ -22,6 +21,19 @@ In addition to filesystem `.mdc` artifacts, EnderAI uses a Postgres-backed memor
 - **Run <-> Library links** (Used/Created/Promoted/Superseded)
 
 See runbook: `architecture/1-ground-truth/tasks-library-memory-implementation.mdc`.
+
+### How Agents Must Access Memory
+- Prefer the EnderAI backend API (recommended: via the EnderAI MCP server), not direct Postgres connections.
+- Treat direct DB access (psql, raw SQL, `DATABASE_URL`) as a last resort requiring explicit user approval.
+
+MCP tools (when configured):
+- `enderai_health_check`
+- `enderai_openapi`
+- `enderai_request` (generic API request; use `path` starting with `/`)
+
+Auth notes:
+- MCP auth (to the MCP server URL) is separate from backend auth (to `ENDERAI_BASE_URL`).
+- Backend auth: obtain an `access_token` via `POST /api/v1/login/access-token` and pass it as `bearerToken` on `enderai_request`, or set `ENDERAI_BEARER_TOKEN` in the MCP service environment.
 
 ## Rules (Descending Importance)
 1) **User control + least privilege**
@@ -41,14 +53,13 @@ See runbook: `architecture/1-ground-truth/tasks-library-memory-implementation.md
      - the current hypothesis + next check
      - a clearly labeled **BREAKTHROUGH** entry when something starts working (what changed + exact command + observed result)
    - **Commit message style:** use short, imperative, Title Case summaries (e.g. “Add…”, “Update…”, “Document…”) and never include secrets.
-   - **DB memory logging (when enabled by user):**
-     - If the user explicitly opts in (e.g., “keep the Ender DB updated”, “log this to Tasks/Library”), treat writes to these memory tables as approved for the session/ticket. Still require confirmation for other destructive/external side effects.
-     - Create/ensure a `task` row for the user’s ticket/work item and set `workflow_key`, `goal`, `acceptance_criteria`, `systems_touched`, `risk_level`, `status`, and UTC timestamps.
-     - Create a new `run` row for each work session/attempt (task is 1→many runs). Use `targets` for identifiers (UUIDs, issue numbers, etc).
-     - Append `run_event` rows continuously for meaningful steps (commands, errors, hypotheses, workarounds, and a clearly labeled **BREAKTHROUGH**). Treat `run_event` as append-only; if correcting, supersede instead of rewriting history.
-     - When reusable memory is discovered, create/update a `library_item` (mdc text is fine) and link it via `run_library_link` as `created`/`promoted`. When you consume prior memory, link it as `used` (and update `last_used_at`).
-     - Never delete memory data; supersede older library entries (e.g., via `superseded_by_id`) to preserve trust.
-     - Never store secrets in DB logs or library items (passwords/tokens/DB URLs). Redact and store references only.
+   - **EnderAI memory logging via API (when enabled by user):**
+     - If the user explicitly opts in (e.g., “keep EnderAI memory updated”, “log this to Tasks/Library”), treat writes via the EnderAI backend API (recommended: through the MCP server) as approved for the session/ticket. Still require confirmation for other destructive/external side effects.
+     - Read existing memory first (Tasks/Runs/Library) via API; then inject the minimal relevant context into the current work.
+     - Prefer API writes where supported (for example: `PATCH /api/v1/tasks/{task_id}` to rename, `POST /api/v1/library/` to create, `PUT /api/v1/library/{id}` to supersede-update).
+     - If a desired write is not supported by the API, fall back to Layer 3 `.mdc` logging and propose the missing endpoint; do not default to direct SQL.
+     - Never delete memory data; supersede instead to preserve trust.
+     - Never store secrets in API-written logs/library items (passwords/tokens/DB URLs). Redact and store references only.
 
 3) **Layer 1 first; Layer 2 only after completion; Layer 3 during execution**
    - Before starting a user-defined task/ticket, consult `architecture/1-ground-truth/`; if it’s missing or stale, add new ground truth or mark older entries as superseded.
