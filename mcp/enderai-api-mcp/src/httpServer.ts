@@ -83,6 +83,15 @@ async function main(): Promise<void> {
     // GET/DELETE must include an existing session id.
     const method = (req.method ?? "GET").toUpperCase();
     if (!sessionIdHeader && method !== "POST") {
+      // The Streamable HTTP client transport may probe the endpoint with a GET to try to
+      // establish an SSE stream *before* initialization. Per the spec, servers that don't
+      // support (or can't currently support) the SSE stream can reply 405.
+      if (method === "GET") {
+        res.writeHead(405, { "content-type": "text/plain" });
+        res.end("Method Not Allowed");
+        return;
+      }
+
       res.writeHead(400, { "content-type": "text/plain" });
       res.end("Bad Request: Mcp-Session-Id header is required");
       return;
