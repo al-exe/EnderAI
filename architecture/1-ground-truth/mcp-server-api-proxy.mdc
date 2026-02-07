@@ -1,0 +1,26 @@
+---
+Title: MCP Server (EnderAI Backend API Proxy)
+Created: 2026-02-07 20:34 UTC
+Last reviewed: 2026-02-07 20:39 UTC
+---
+
+## What Exists
+- MCP server implementation: `mcp/enderai-api-mcp/`
+- Transport: stdio (`StdioServerTransport`)
+- Tools:
+  - `enderai_request`
+  - `enderai_openapi`
+  - `enderai_health_check`
+
+## Runtime Configuration
+- `ENDERAI_BASE_URL` default: `https://enderai-backend.onrender.com`
+- `ENDERAI_BEARER_TOKEN` optional: bearer auth header
+- `ENDERAI_TIMEOUT_MS` default: `30000`
+
+## Build/Test (local)
+```sh
+cd EnderAI/mcp/enderai-api-mcp
+npm install
+npm run build
+npm test
+```

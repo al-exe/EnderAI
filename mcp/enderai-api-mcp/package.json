@@ -1,0 +1,31 @@
+{
+  "name": "enderai-api-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that proxies tool calls to an EnderAI backend (e.g. Render).",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/httpServer.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:http": "node dist/httpServer.js",
+    "smoke": "npm run build && tsx test/smoke.ts",
+    "smoke:http": "npm run build && tsx test/streamableHttpSmoke.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
