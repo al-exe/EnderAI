@@ -5,10 +5,10 @@ Last updated: 2026-02-07
 This is a clean, MCP-first rules template intended to be imported into new IDEs/agents. It assumes **no repo-specific local memory directories exist** and treats the EnderAI backend (via MCP) as the primary persistence layer.
 
 ## IDE Setup (One-Time)
-- Configure an MCP server entry that points to your deployed MCP endpoint (example: `https://enderai-mcp.onrender.com/mcp`).
-- If the MCP server is protected, configure `Authorization: Bearer enderai` in your IDE.
+- Configure an MCP server entry that points to your deployed MCP endpoint (example: `https://YOUR-MCP.onrender.com/mcp`).
+- If the MCP server is protected, configure `Authorization: Bearer <MCP_BEARER_TOKEN>` in your IDE.
 - Do a quick sanity check:
-  - Visit `https://enderai-mcp.onrender.com/health` and confirm it returns `ok`.
+  - Visit `https://YOUR-MCP.onrender.com/health` and confirm it returns `ok`.
   - Run `enderai_health_check` via the IDE’s MCP tool picker.
 
 ## Top Priorities (Highest First)
@@ -53,21 +53,6 @@ Rules:
    - Runs: `GET /api/v1/tasks/{task_id}/runs`, then `GET /api/v1/runs/{run_id}/detail`
 4. Inject the retrieved context into the current plan:
    - Summarize the minimal relevant items and include IDs (`task_id`, `run_id`, `library_item.id`) so the user can audit and navigate.
-
-## Memory: What To Read First (Context Hydration)
-At the start of any task:
-1. `enderai_health_check` to confirm connectivity.
-2. `enderai_openapi` if you need to confirm endpoints/schemas.
-3. Query existing memory:
-   - Tasks: `GET /api/v1/tasks/` with filters (`workflow_key`, `q`, `status`, `skip`, `limit`)
-   - Library: `GET /api/v1/library/` with filters (`workflow_key`, `kind`, `q`, `current_only`, `skip`, `limit`)
-   - Workflow buckets: `GET /api/v1/library/workflow-keys`
-4. If you need deeper audit context:
-   - Runs for a task: `GET /api/v1/tasks/{task_id}/runs`
-   - Full run detail: `GET /api/v1/runs/{run_id}/detail`
-
-Injection rule:
-- Summarize the minimal relevant items and include object IDs (`task_id`, `run_id`, `library_item.id`) so the user can audit and navigate.
 
 ## Memory: What To Write (When User Opts In)
 Only write memory when the user explicitly opts in (examples: “log this”, “keep memory updated”).
