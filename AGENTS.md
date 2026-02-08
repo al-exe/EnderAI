@@ -62,6 +62,23 @@ Auth model (do not confuse these):
 - **MCP server -> backend API** auth:
   - Obtain an `access_token` via `POST /api/v1/login/access-token`, then pass it as `bearerToken` on `enderai_request`, or
   - Set `ENDERAI_BEARER_TOKEN` in the MCP server environment.
+  - If you are using the **hosted Streamable HTTP MCP** and want **per-user backend auth without passing `bearerToken` per call**, send:
+    - `X-EnderAI-Backend-Token: <access_token>` on MCP requests (the server will bind it to the session and forward as `Authorization: Bearer ...` to the backend).
+    - Codex CLI example (`~/.codex/config.toml`, do not commit):
+      - `env_http_headers = { "X-EnderAI-Backend-Token" = "ENDERAI_BACKEND_TOKEN" }`
+      - Optional MCP protection: `bearer_token_env_var = "ENDERAI_MCP_TOKEN"`
+
+Auth debugging quickcheck:
+- `POST /api/v1/login/test-token` (note: **POST**, not GET)
+  - `200` means auth worked
+  - `401 Not authenticated` means the backend did not receive an `Authorization` header (token missing)
+  - `403 Could not validate credentials` means the token was present but invalid/expired
+
+Non-interactive / agent-run token injection (local machine, do not commit secrets):
+- Some agent runtimes do not inherit your interactive shell env. In that case, set `ENDERAI_BACKEND_TOKEN` at invocation time.
+- Recommended local file: `~/.enderai_backend_token` (chmod `600`).
+- Example (runs Codex with a one-off env var):
+  - `ENDERAI_BACKEND_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_backend_token)" codex exec ...`
 
 Local backend instance:
 - If you’re running EnderAI locally, set `ENDERAI_BASE_URL` to your local server (example: `http://localhost:8000`).

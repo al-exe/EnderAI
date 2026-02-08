@@ -164,6 +164,41 @@ codex mcp get enderai-api --json
 Notes:
 - This avoids storing auth tokens in config. If you need auth, call the login endpoint and pass the token per-call via the `bearerToken` argument to `enderai_request`, or set `ENDERAI_BEARER_TOKEN` via your environment.
 
+### Codex CLI (Hosted MCP URL)
+
+If you are using the hosted Streamable HTTP MCP server (for example `https://enderai-mcp.onrender.com/mcp`), register it by URL:
+
+```sh
+codex mcp add enderai-mcp --url https://enderai-mcp.onrender.com/mcp
+codex mcp list
+```
+
+Per-user backend auth (recommended for shared hosted MCP):
+- Configure Codex to send the backend access token on each MCP request:
+  - In `~/.codex/config.toml`:
+    - `env_http_headers = { "X-EnderAI-Backend-Token" = "ENDERAI_BACKEND_TOKEN" }`
+  - Then export: `ENDERAI_BACKEND_TOKEN="<access_token from /api/v1/login/access-token>"`
+
+Non-interactive tip (Codex doesn’t see your interactive shell env):
+- If a non-interactive agent run can’t see `ENDERAI_BACKEND_TOKEN`, set it at invocation time.
+- One pattern is to store the token in a local file with tight perms and read it when launching Codex:
+  - `~/.enderai_backend_token` (chmod `600`)
+  - Example: `ENDERAI_BACKEND_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_backend_token)" codex exec ...`
+
+Optional MCP endpoint protection:
+- If the hosted MCP is protected with a static bearer token (recommended), set:
+  - `bearer_token_env_var = "ENDERAI_MCP_TOKEN"`
+  - And export: `ENDERAI_MCP_TOKEN="..."`
+
+Debug tip:
+- `POST /api/v1/login/test-token` should return:
+  - `200` when auth is working
+  - `401 Not authenticated` when the backend did not receive a token
+  - `403 Could not validate credentials` when the token is invalid/expired
+
+Security note:
+- `codex mcp get` / `codex mcp list --json` may print resolved header values; avoid running those commands when `ENDERAI_BACKEND_TOKEN` is set.
+
 ## Notes
 
 - Requests are restricted to `path` values that start with `/` to prevent accidental full-URL overrides.

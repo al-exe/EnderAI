@@ -40,10 +40,22 @@ There are two independent auth layers:
 2. **MCP server -> EnderAI backend API** auth
    - Obtain an `access_token` by calling `POST /api/v1/login/access-token`.
     - Pass that token to backend API calls as `bearerToken` in `enderai_request` (or configure the MCP server with `ENDERAI_BEARER_TOKEN` if you control the server environment).
+    - Hosted MCP per-user pattern: send `X-EnderAI-Backend-Token: <access_token>` on MCP requests so the hosted MCP can forward it as `Authorization: Bearer ...` to the backend.
 
 Rules:
 - Treat backend access tokens as ephemeral session secrets.
 - Never store tokens in repo files or in EnderAI Library items.
+
+Auth debugging quickcheck:
+- `POST /api/v1/login/test-token` (note: **POST**, not GET)
+  - `200` = authenticated
+  - `401` = token missing (no `Authorization` header seen by backend)
+  - `403` = token present but invalid/expired
+
+Non-interactive token injection (local machine, do not commit secrets):
+- If your agent runtime does not inherit your interactive shell env, read the token from a local file and set `ENDERAI_BACKEND_TOKEN` at invocation time.
+- Suggested: `~/.enderai_backend_token` (chmod `600`)
+- Example: `ENDERAI_BACKEND_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_backend_token)" codex exec ...`
 
 ## Default Start-Of-Task Flow (Context Hydration)
 1. Decide on a `workflow_key` (short, stable identifier for the workstream). If unsure, query workflow buckets: `GET /api/v1/library/workflow-keys`.
