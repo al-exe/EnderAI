@@ -284,7 +284,9 @@ class Token(SQLModel):
 
 # Contents of JWT token
 class TokenPayload(SQLModel):
-    sub: str | None = None
+    # Access tokens are issued with `sub` = user id (UUID string). Keep it typed so
+    # malformed tokens fail auth with 403 instead of leaking into DB lookups.
+    sub: uuid.UUID
 
 
 class NewPassword(SQLModel):

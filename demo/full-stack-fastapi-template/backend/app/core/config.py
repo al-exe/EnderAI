@@ -1,4 +1,3 @@
-import secrets
 import warnings
 from typing import Annotated, Any, Literal
 
@@ -31,7 +30,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # IMPORTANT:
+    # This MUST be set explicitly in deployments. If it is generated per-process,
+    # JWTs issued by one worker won't validate on another worker (e.g. multi-worker setup).
+    # Keep the default as a sentinel and enforce it via _check_default_secret().
+    SECRET_KEY: str = "changethis"
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
     FRONTEND_HOST: str = "http://localhost:5173"
