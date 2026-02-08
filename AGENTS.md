@@ -41,7 +41,7 @@ Retention/hygiene:
 
 ### Remote Library (EnderAI Backend)
 EnderAI’s DB-backed memory is exposed via the backend API:
-- **Tasks**: `GET /api/v1/tasks/`, `GET /api/v1/tasks/{task_id}`, `PATCH /api/v1/tasks/{task_id}`
+- **Tasks**: `GET /api/v1/tasks/`, `POST /api/v1/tasks/`, `GET /api/v1/tasks/{task_id}`, `PATCH /api/v1/tasks/{task_id}`
 - **Runs**: `GET /api/v1/tasks/{task_id}/runs`, `GET /api/v1/runs/{run_id}`, `GET /api/v1/runs/{run_id}/detail`
 - **Library items**: `GET /api/v1/library/`, `GET /api/v1/library/{id}`, `GET /api/v1/library/workflow-keys`
   - Writes: `POST /api/v1/library/` and `PUT /api/v1/library/{id}` (may require superuser)

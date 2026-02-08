@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Any
 
@@ -6,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep
-from app.models import RunPublic, RunsPublic, TaskPublic, TasksPublic, TaskTitleUpdate
+from app.models import RunPublic, RunsPublic, TaskCreate, TaskPublic, TasksPublic, TaskTitleUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -77,6 +78,72 @@ def read_tasks(
 
     tasks = [TaskPublic(**dict(row)) for row in rows]
     return TasksPublic(data=tasks, count=count)
+
+
+@router.post("/", response_model=TaskPublic, status_code=201)
+def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCreate) -> Any:
+    """
+    Create a Task (DB-backed memory).
+    """
+
+    title = task_in.title.strip()
+    workflow_key = task_in.workflow_key.strip()
+
+    if not title:
+        raise HTTPException(status_code=422, detail="Title must not be empty")
+    if not workflow_key:
+        raise HTTPException(status_code=422, detail="workflow_key must not be empty")
+
+    # Keep behavior stable even if clients send empty strings.
+    goal = task_in.goal.strip() if isinstance(task_in.goal, str) and task_in.goal.strip() else None
+    acceptance_criteria = (
+        task_in.acceptance_criteria.strip()
+        if isinstance(task_in.acceptance_criteria, str) and task_in.acceptance_criteria.strip()
+        else None
+    )
+    risk_level = task_in.risk_level.strip() or "read_only"
+    status = task_in.status.strip() or "open"
+    systems_touched = task_in.systems_touched or {}
+
+    task_id = uuid.uuid4()
+
+    try:
+        stmt = text(
+            "insert into public.task ("
+            "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
+            ") values ("
+            ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
+            ") returning "
+            "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
+            "risk_level, status, created_at, last_touched_at"
+        )
+        row = (
+            session.connection()
+            .execute(
+                stmt,
+                {
+                    "id": task_id,
+                    "title": title,
+                    "workflow_key": workflow_key,
+                    "goal": goal,
+                    "acceptance_criteria": acceptance_criteria,
+                    "systems_touched": json.dumps(systems_touched),
+                    "risk_level": risk_level,
+                    "status": status,
+                },
+            )
+            .mappings()
+            .first()
+        )
+        session.commit()
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+        raise
+
+    if row is None:
+        raise HTTPException(status_code=500, detail="Failed to create task")
+    return TaskPublic(**dict(row))
 
 
 @router.get("/{task_id}", response_model=TaskPublic)

@@ -215,6 +215,16 @@ class TaskPublic(SQLModel):
     last_touched_at: datetime | None = None
 
 
+class TaskCreate(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+    workflow_key: str = Field(min_length=1)
+    goal: str | None = None
+    acceptance_criteria: str | None = None
+    systems_touched: dict[str, Any] = Field(default_factory=dict)
+    risk_level: str = Field(default="read_only", min_length=1)
+    status: str = Field(default="open", min_length=1)
+
+
 class TaskTitleUpdate(SQLModel):
     title: str = Field(min_length=1, max_length=255)
 

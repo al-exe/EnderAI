@@ -59,6 +59,7 @@ Rules:
 Only write memory when the user explicitly opts in (examples: “log this”, “keep memory updated”).
 
 Preferred write patterns:
+- Create task: `POST /api/v1/tasks/` with `{ "title": "...", "workflow_key": "...", "goal": "...", "acceptance_criteria": "...", "systems_touched": {...} }`
 - Rename/update task title: `PATCH /api/v1/tasks/{task_id}` with `{ "title": "..." }`
 - Create reusable guidance (Library item): `POST /api/v1/library/` (may require elevated permissions)
 - Update reusable guidance by superseding: `PUT /api/v1/library/{id}` (creates a new row; never edits in place)
