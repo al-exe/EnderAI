@@ -17,6 +17,7 @@ Optional local overrides (keep secret-free): `architecture/0-agents/agents.overr
 ## Core Priorities (Highest First)
 1. **Capture-first: write memory by default**
    - The default is to capture outcomes of work in EnderAI memory (Tasks/Runs/Library) so the system improves over time.
+   - Do **not** treat “DB writes” as risky by default when the DB write is a normal memory-capture action (creating/updating Tasks, adding Runs/Events, creating Library items).
    - Only ask before truly risky/irreversible actions: deploys, pushing branches, opening PRs, deleting data/files, schema changes, and any prod-like operations.
 2. **Ground truth + audit trail**
    - Don’t guess. Anchor important claims in: code, tests, tool output, or recorded artifacts.
@@ -67,14 +68,18 @@ Local backend instance:
 
 ## Default “Start Of Task” Flow (Context Hydration)
 1. Pick/confirm a `workflow_key` (short, stable identifier for the work stream).
-2. Read remote memory first (minimal, targeted):
+2. Create or select the **Task** in remote memory:
+   - If a Task doesn’t exist yet for the work, create it via `POST /api/v1/tasks/`.
+   - If one exists, keep it tidy: update the title via `PATCH /api/v1/tasks/{task_id}` when reality changes.
+3. Read remote memory (minimal, targeted):
    - Tasks: `GET /api/v1/tasks/?workflow_key=...&q=...`
    - Library: `GET /api/v1/library/?workflow_key=...&q=...&current_only=true`
    - If needed: load runs for a candidate task, then `GET /api/v1/runs/{run_id}/detail` for audit trail + memory links.
-3. Read local ground truth (Layer 1) and the most relevant Layer 2 entries.
-4. Create/update a Layer 3 working log as you execute (especially in debug loops).
-5. Execute the work. Keep changes reversible and evidence-backed.
+4. Read local ground truth (Layer 1) and the most relevant Layer 2 entries.
+5. Create/update a Layer 3 working log as you execute (especially in debug loops).
+6. Execute the work. Keep changes reversible and evidence-backed.
 
 ## Default “End Of Task” Flow (Promotion)
-1. Ensure Layer 1 and Layer 3 are up to date and reproducible.
-2. Only after user confirms the task is done: promote stable learnings into Layer 2 (or into the remote Library via API, depending on desired persistence).
+1. Ensure remote memory is up to date: task title reflects reality; run summaries/events (when supported) capture what happened; reusable outputs are in Library items (when permissions allow).
+2. Ensure Layer 1 and Layer 3 are up to date and reproducible.
+3. Promote stable learnings into Layer 2 (or into the remote Library via API, depending on desired persistence).
