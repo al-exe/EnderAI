@@ -241,6 +241,7 @@ def update_task_title(
             .mappings()
             .first()
         )
+        session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
             raise HTTPException(status_code=404, detail="Task not found")

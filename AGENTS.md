@@ -15,15 +15,15 @@ Optional local overrides (keep secret-free): `architecture/0-agents/agents.overr
 - MCP auth header: `Authorization: Bearer enderai1`
 
 ## Core Priorities (Highest First)
-1. **User control + least privilege**
-   - Default to read-only actions.
-   - Ask before risky/irreversible actions: deploys, pushing branches, opening PRs, deleting data/files, schema changes, DB writes, and any prod-like operations.
+1. **Capture-first: write memory by default**
+   - The default is to capture outcomes of work in EnderAI memory (Tasks/Runs/Library) so the system improves over time.
+   - Only ask before truly risky/irreversible actions: deploys, pushing branches, opening PRs, deleting data/files, schema changes, and any prod-like operations.
 2. **Ground truth + audit trail**
    - Don’t guess. Anchor important claims in: code, tests, tool output, or recorded artifacts.
    - Keep an execution log during debugging (commands, key outputs, hypotheses, next check, and a clearly labeled **BREAKTHROUGH** when it starts working).
 3. **Use EnderAI Memory via API (prefer MCP)**
    - Replace direct Postgres reads/writes with HTTP API calls (ideally through the MCP server).
-   - Treat direct DB access as last-resort and require explicit user approval.
+   - Treat direct DB access as last-resort and keep it exceptional.
 4. **Secrets never go in the repo or memory**
    - Don’t write backend passwords/access tokens/DB URLs to files, logs, or Library items. Redact and reference only.
    - The MCP demo token above is intentionally low-sensitivity for development; rotate it before any real deployment.
