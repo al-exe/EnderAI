@@ -7,7 +7,14 @@ import { z } from "zod";
 
 import { enderaiFetch } from "./http.js";
 
-export function createMcpServer(): Server {
+export type McpServerOptions = {
+  // Optional backend bearer token provider used for all tool calls in this server instance.
+  // This enables a hosted MCP server to act "per user" by binding a backend token to a session,
+  // while still supporting token rotation during that session.
+  backendBearerTokenProvider?: () => string | undefined;
+};
+
+export function createMcpServer(opts: McpServerOptions = {}): Server {
   const server = new Server(
     { name: "enderai-api", version: "0.1.0" },
     { capabilities: { tools: {} } },
@@ -91,22 +98,30 @@ export function createMcpServer(): Server {
     try {
       if (name === "enderai_request") {
         const args = EnderaiRequestArgsSchema.parse(req.params.arguments ?? {});
-        const res = await enderaiFetch(args);
+        const sessionToken = opts.backendBearerTokenProvider?.();
+        const res = await enderaiFetch({
+          ...args,
+          bearerToken: args.bearerToken ?? sessionToken,
+        });
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
       }
 
       if (name === "enderai_openapi") {
+        const sessionToken = opts.backendBearerTokenProvider?.();
         const res = await enderaiFetch({
           method: "GET",
           path: "/api/v1/openapi.json",
+          bearerToken: sessionToken,
         });
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
       }
 
       if (name === "enderai_health_check") {
+        const sessionToken = opts.backendBearerTokenProvider?.();
         const res = await enderaiFetch({
           method: "GET",
           path: "/api/v1/utils/health-check/",
+          bearerToken: sessionToken,
         });
         return { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
       }
@@ -123,4 +138,3 @@ export function createMcpServer(): Server {
 
   return server;
 }
-

@@ -112,6 +112,30 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
 }
 ```
 
+### Per-User Backend Access (Hosted MCP)
+
+When deploying the MCP server as a shared hosted service, MCP auth (to the MCP server) is **not** the same as backend auth (to the EnderAI API).
+
+To access a specific user's account resources through the hosted MCP, send the user's backend access token on each request using:
+- `X-EnderAI-Backend-Token: <enderai_backend_access_token>`
+
+Some clients support env interpolation for headers; for example:
+
+```json
+{
+  "servers": {
+    "enderai-api": {
+      "type": "http",
+      "url": "https://YOUR-MCP-SERVICE.onrender.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:enderai_mcp_token}",
+        "X-EnderAI-Backend-Token": "${env:ENDERAI_BACKEND_TOKEN}"
+      }
+    }
+  }
+}
+```
+
 ## Deploy (Render MVP)
 
 Create a **new Render Web Service** pointing at this repo (`al-exe/EnderAI`), with root directory `mcp/enderai-api-mcp`:

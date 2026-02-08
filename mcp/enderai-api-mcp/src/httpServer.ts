@@ -15,6 +15,7 @@ type Session = {
   id: string;
   transport: WebStandardStreamableHTTPServerTransport;
   server: ReturnType<typeof createMcpServer>;
+  backendBearerToken?: string;
   createdAtMs: number;
   lastUsedAtMs: number;
 };
@@ -32,6 +33,18 @@ function readBearer(req: http.IncomingMessage): string | undefined {
   const h = req.headers.authorization;
   if (!h) return undefined;
   const m = /^Bearer\s+(.+)$/.exec(h);
+  return m?.[1]?.trim() || undefined;
+}
+
+function readBackendBearerToken(req: http.IncomingMessage): string | undefined {
+  // Allow passing the EnderAI backend token separately from the MCP server auth header.
+  // This is required for a hosted MCP server to act "per user".
+  const raw = getHeaderString(req, "x-enderai-backend-token")?.trim();
+  if (raw) return raw;
+
+  const auth = getHeaderString(req, "x-enderai-backend-authorization")?.trim();
+  if (!auth) return undefined;
+  const m = /^Bearer\s+(.+)$/.exec(auth);
   return m?.[1]?.trim() || undefined;
 }
 
@@ -115,7 +128,7 @@ async function main(): Promise<void> {
       // Some clients (Cursor) send Mcp-Session-Id even on the initial initialize.
       // Allow creating the session in that case.
       if (isInitialize) {
-        session = await createSession(sessionIdHeader);
+        session = await createSession(sessionIdHeader, readBackendBearerToken(req));
         createdSession = true;
       } else if (sessionIdHeader) {
         res.writeHead(404, { "content-type": "text/plain" });
@@ -127,6 +140,10 @@ async function main(): Promise<void> {
         return;
       }
     }
+
+    // Allow rotating/updating backend token mid-session (client may refresh tokens).
+    const backendBearerToken = readBackendBearerToken(req);
+    if (backendBearerToken) session.backendBearerToken = backendBearerToken;
 
     session.lastUsedAtMs = Date.now();
 
@@ -175,8 +192,9 @@ function assertValidSessionId(id: string): void {
   if (/[\u0000-\u001f\u007f]/.test(id)) throw new Error("Invalid Mcp-Session-Id");
 }
 
-async function createSession(forcedId?: string): Promise<Session> {
+async function createSession(forcedId?: string, backendBearerToken?: string): Promise<Session> {
   const id = forcedId ?? randomUUID();
+  const tokenRef: { value?: string } = { value: backendBearerToken };
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => id,
     enableJsonResponse: true,
@@ -188,11 +206,21 @@ async function createSession(forcedId?: string): Promise<Session> {
     },
   });
 
-  const server = createMcpServer();
+  const server = createMcpServer({ backendBearerTokenProvider: () => tokenRef.value });
   await server.connect(transport);
 
   const now = Date.now();
-  return { id, transport, server, createdAtMs: now, lastUsedAtMs: now };
+  const session: Session = { id, transport, server, backendBearerToken, createdAtMs: now, lastUsedAtMs: now };
+  // Keep tokenRef in sync with the Session's token for rotations.
+  Object.defineProperty(session, "backendBearerToken", {
+    get: () => tokenRef.value,
+    set: (v: string | undefined) => {
+      tokenRef.value = v;
+    },
+    enumerable: true,
+    configurable: false,
+  });
+  return session;
 }
 
 function nodeRequestToWebRequest(req: http.IncomingMessage, url: URL): Request {
