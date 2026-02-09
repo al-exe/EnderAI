@@ -68,7 +68,12 @@ def read_artifact_workflow_keys(
     if current_only:
         statement = statement.where(Artifact.superseded_by_id.is_(None))
 
-    rows = session.exec(statement).all()
+    try:
+        rows = session.exec(statement).all()
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            return WorkflowKeysPublic(data=[])
+        raise
     data = [
         WorkflowKeyCount(
             workflow_key=row[0],
@@ -122,7 +127,12 @@ def read_artifacts(
         )
     if filters:
         count_statement = count_statement.where(*filters)
-    count = session.exec(count_statement).one()
+    try:
+        count = session.exec(count_statement).one()
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            return ArtifactsPublic(data=[], count=0)
+        raise
 
     statement = select(Artifact).order_by(Artifact.created_at.desc()).offset(skip).limit(limit)
     if q:
@@ -132,7 +142,12 @@ def read_artifacts(
         )
     if filters:
         statement = statement.where(*filters)
-    items = session.exec(statement).all()
+    try:
+        items = session.exec(statement).all()
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            return ArtifactsPublic(data=[], count=0)
+        raise
 
     return ArtifactsPublic(data=items, count=count)
 
@@ -142,7 +157,12 @@ def read_artifact(session: SessionDep, current_user: CurrentUser, id: uuid.UUID)
     """
     Get artifact by ID.
     """
-    item = session.get(Artifact, id)
+    try:
+        item = session.get(Artifact, id)
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        raise
     if not item:
         raise HTTPException(status_code=404, detail="Artifact not found")
     return item
