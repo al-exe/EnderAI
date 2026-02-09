@@ -7,9 +7,17 @@ from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
-from app.models import Message, RunPublic, RunsPublic, TaskCreate, TaskPublic, TasksPublic, TaskUpdate
+from app.models import (
+    ExecutionPublic,
+    ExecutionsPublic,
+    Message,
+    ThreadCreate,
+    ThreadPublic,
+    ThreadsPublic,
+    ThreadUpdate,
+)
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(prefix="/threads", tags=["threads"])
 
 
 def _is_missing_table_error(err: Exception) -> bool:
@@ -17,19 +25,19 @@ def _is_missing_table_error(err: Exception) -> bool:
     return "does not exist" in message and "relation" in message
 
 
-def _task_has_intent_key_column(session: SessionDep) -> bool:
+def _thread_has_intent_key_column(session: SessionDep) -> bool:
     # Use information_schema to keep the API backward-compatible with older DB schemas.
     stmt = text(
         "select 1 "
         "from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key' "
+        "where table_schema = 'public' and table_name = 'thread' and column_name = 'intent_key' "
         "limit 1"
     )
     return session.connection().execute(stmt).first() is not None
 
 
-@router.get("/", response_model=TasksPublic)
-def read_tasks(
+@router.get("/", response_model=ThreadsPublic)
+def read_threads(
     session: SessionDep,
     current_user: CurrentUser,
     workflow_key: str | None = None,
@@ -40,7 +48,7 @@ def read_tasks(
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve Tasks (DB-backed memory).
+    Retrieve Threads (DB-backed memory).
     """
 
     workflow_key = workflow_key.strip() if workflow_key else None
@@ -48,11 +56,11 @@ def read_tasks(
     status = status.strip() if status else None
     q = q.strip() if q else None
 
-    has_intent_key = _task_has_intent_key_column(session)
+    has_intent_key = _thread_has_intent_key_column(session)
     if intent_key and not has_intent_key:
         raise HTTPException(
             status_code=501,
-            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
+            detail="Threads table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
         )
 
     clauses: list[str] = []
@@ -84,7 +92,7 @@ def read_tasks(
     where_sql = f" where {' and '.join(clauses)}" if clauses else ""
 
     try:
-        count_stmt = text(f"select count(*) from public.task t{where_sql}")
+        count_stmt = text(f"select count(*) from public.thread t{where_sql}")
         count = session.connection().execute(count_stmt, params).scalar_one()
 
         data_stmt = text(
@@ -93,7 +101,7 @@ def read_tasks(
             + ("t.intent_key, " if has_intent_key else "")
             + "t.goal, t.acceptance_criteria, "
             "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-            "from public.task t"
+            "from public.thread t"
             f"{where_sql} "
             "order by t.last_touched_at desc nulls last "
             "offset :skip limit :limit"
@@ -101,22 +109,26 @@ def read_tasks(
         rows = session.connection().execute(data_stmt, params).mappings().all()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return TasksPublic(data=[], count=0)
+            return ThreadsPublic(data=[], count=0)
         raise
 
-    tasks = [TaskPublic(**dict(row)) for row in rows]
-    return TasksPublic(data=tasks, count=count)
+    threads = [ThreadPublic(**dict(row)) for row in rows]
+    return ThreadsPublic(data=threads, count=count)
 
 
-@router.post("/", response_model=TaskPublic, status_code=201)
-def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCreate) -> Any:
+@router.post("/", response_model=ThreadPublic, status_code=201)
+def create_thread(session: SessionDep, current_user: CurrentUser, thread_in: ThreadCreate) -> Any:
     """
-    Create a Task (DB-backed memory).
+    Create a Thread (DB-backed memory).
     """
 
-    title = task_in.title.strip()
-    workflow_key = task_in.workflow_key.strip()
-    intent_key = task_in.intent_key.strip() if isinstance(task_in.intent_key, str) and task_in.intent_key.strip() else None
+    title = thread_in.title.strip()
+    workflow_key = thread_in.workflow_key.strip()
+    intent_key = (
+        thread_in.intent_key.strip()
+        if isinstance(thread_in.intent_key, str) and thread_in.intent_key.strip()
+        else None
+    )
 
     if not title:
         raise HTTPException(status_code=422, detail="Title must not be empty")
@@ -124,29 +136,29 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
         raise HTTPException(status_code=422, detail="workflow_key must not be empty")
 
     # Keep behavior stable even if clients send empty strings.
-    goal = task_in.goal.strip() if isinstance(task_in.goal, str) and task_in.goal.strip() else None
+    goal = thread_in.goal.strip() if isinstance(thread_in.goal, str) and thread_in.goal.strip() else None
     acceptance_criteria = (
-        task_in.acceptance_criteria.strip()
-        if isinstance(task_in.acceptance_criteria, str) and task_in.acceptance_criteria.strip()
+        thread_in.acceptance_criteria.strip()
+        if isinstance(thread_in.acceptance_criteria, str) and thread_in.acceptance_criteria.strip()
         else None
     )
-    risk_level = task_in.risk_level.strip() or "read_only"
-    status = task_in.status.strip() or "open"
-    systems_touched = task_in.systems_touched or {}
+    risk_level = thread_in.risk_level.strip() or "read_only"
+    status = thread_in.status.strip() or "open"
+    systems_touched = thread_in.systems_touched or {}
 
-    task_id = uuid.uuid4()
+    thread_id = uuid.uuid4()
 
-    has_intent_key = _task_has_intent_key_column(session)
+    has_intent_key = _thread_has_intent_key_column(session)
     if intent_key and not has_intent_key:
         raise HTTPException(
             status_code=501,
-            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
+            detail="Threads table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
         )
 
     try:
         if has_intent_key:
             stmt = text(
-                "insert into public.task ("
+                "insert into public.thread ("
                 "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                 ") values ("
                 ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -156,7 +168,7 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
             )
         else:
             stmt = text(
-                "insert into public.task ("
+                "insert into public.thread ("
                 "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                 ") values ("
                 ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -170,7 +182,7 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
                 stmt,
                 (
                     {
-                        "id": task_id,
+                        "id": thread_id,
                         "title": title,
                         "workflow_key": workflow_key,
                         "intent_key": intent_key,
@@ -182,7 +194,7 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
                     }
                     if has_intent_key
                     else {
-                        "id": task_id,
+                        "id": thread_id,
                         "title": title,
                         "workflow_key": workflow_key,
                         "goal": goal,
@@ -199,21 +211,21 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+            raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
     if row is None:
-        raise HTTPException(status_code=500, detail="Failed to create task")
-    return TaskPublic(**dict(row))
+        raise HTTPException(status_code=500, detail="Failed to create thread")
+    return ThreadPublic(**dict(row))
 
 
-@router.get("/{task_id}", response_model=TaskPublic)
-def read_task(session: SessionDep, current_user: CurrentUser, task_id: uuid.UUID) -> Any:
+@router.get("/{thread_id}", response_model=ThreadPublic)
+def read_thread(session: SessionDep, current_user: CurrentUser, thread_id: uuid.UUID) -> Any:
     """
-    Get a Task by ID.
+    Get a Thread by ID.
     """
 
-    has_intent_key = _task_has_intent_key_column(session)
+    has_intent_key = _thread_has_intent_key_column(session)
 
     try:
         stmt = text(
@@ -222,84 +234,84 @@ def read_task(session: SessionDep, current_user: CurrentUser, task_id: uuid.UUID
             + ("t.intent_key, " if has_intent_key else "")
             + "t.goal, t.acceptance_criteria, "
             "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-            "from public.task t "
-            "where t.id = :task_id "
+            "from public.thread t "
+            "where t.id = :thread_id "
             "limit 1"
         )
-        row = session.connection().execute(stmt, {"task_id": task_id}).mappings().first()
+        row = session.connection().execute(stmt, {"thread_id": thread_id}).mappings().first()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Task not found")
+            raise HTTPException(status_code=404, detail="Thread not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return TaskPublic(**dict(row))
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return ThreadPublic(**dict(row))
 
 
-@router.get("/{task_id}/runs", response_model=RunsPublic)
-def read_task_runs(
+@router.get("/{thread_id}/executions", response_model=ExecutionsPublic)
+def read_thread_executions(
     session: SessionDep,
     current_user: CurrentUser,
-    task_id: uuid.UUID,
+    thread_id: uuid.UUID,
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve Runs for a Task.
+    Retrieve Executions for a Thread.
     """
 
     try:
-        count_stmt = text("select count(*) from public.run r where r.task_id = :task_id")
-        count = session.connection().execute(count_stmt, {"task_id": task_id}).scalar_one()
+        count_stmt = text("select count(*) from public.execution r where r.thread_id = :thread_id")
+        count = session.connection().execute(count_stmt, {"thread_id": thread_id}).scalar_one()
 
         stmt = text(
             "select "
-            "r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
-            "from public.run r "
-            "where r.task_id = :task_id "
+            "r.id, r.thread_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
+            "from public.execution r "
+            "where r.thread_id = :thread_id "
             "order by r.started_at desc nulls last "
             "offset :skip limit :limit"
         )
         rows = (
             session.connection()
-            .execute(stmt, {"task_id": task_id, "skip": skip, "limit": limit})
+            .execute(stmt, {"thread_id": thread_id, "skip": skip, "limit": limit})
             .mappings()
             .all()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return RunsPublic(data=[], count=0)
+            return ExecutionsPublic(data=[], count=0)
         raise
 
-    runs = [RunPublic(**dict(row)) for row in rows]
-    return RunsPublic(data=runs, count=count)
+    executions = [ExecutionPublic(**dict(row)) for row in rows]
+    return ExecutionsPublic(data=executions, count=count)
 
 
-@router.patch("/{task_id}", response_model=TaskPublic)
-def update_task(
+@router.patch("/{thread_id}", response_model=ThreadPublic)
+def update_thread(
     session: SessionDep,
     current_user: CurrentUser,
-    task_id: uuid.UUID,
-    task_in: TaskUpdate,
+    thread_id: uuid.UUID,
+    thread_in: ThreadUpdate,
 ) -> Any:
     """
-    Update a Task (DB-backed memory).
+    Update a Thread (DB-backed memory).
     """
 
-    has_intent_key = _task_has_intent_key_column(session)
-    update = task_in.model_dump(exclude_unset=True)
+    has_intent_key = _thread_has_intent_key_column(session)
+    update = thread_in.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=422, detail="No fields to update")
 
     if "intent_key" in update and update.get("intent_key") is not None and not has_intent_key:
         raise HTTPException(
             status_code=501,
-            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
+            detail="Threads table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
         )
 
     clauses: list[str] = []
-    params: dict[str, Any] = {"task_id": task_id}
+    params: dict[str, Any] = {"thread_id": thread_id}
 
     if "title" in update:
         title = update.get("title")
@@ -381,9 +393,9 @@ def update_task(
 
     try:
         stmt = text(
-            "update public.task "
+            "update public.thread "
             f"set {', '.join(clauses)}, last_touched_at = now() "
-            "where id = :task_id "
+            "where id = :thread_id "
             "returning "
             "id, title, workflow_key, "
             + ("intent_key, " if has_intent_key else "")
@@ -399,32 +411,32 @@ def update_task(
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Task not found")
+            raise HTTPException(status_code=404, detail="Thread not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return TaskPublic(**dict(row))
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return ThreadPublic(**dict(row))
 
 
-@router.delete("/{task_id}", response_model=Message)
-def delete_task(session: SessionDep, current_user: CurrentUser, task_id: uuid.UUID) -> Any:
+@router.delete("/{thread_id}", response_model=Message)
+def delete_thread(session: SessionDep, current_user: CurrentUser, thread_id: uuid.UUID) -> Any:
     """
-    Delete a Task.
+    Delete a Thread.
 
-    Note: this is intentionally restricted to superusers; deleting tasks cascades to Runs/Events/Links.
+    Note: this is intentionally restricted to superusers; deleting threads cascades to Executions/Events/Links.
     """
 
     get_current_active_superuser(current_user)
     try:
-        stmt = text("delete from public.task where id = :task_id returning id")
-        deleted = session.connection().execute(stmt, {"task_id": task_id}).first()
+        stmt = text("delete from public.thread where id = :thread_id returning id")
+        deleted = session.connection().execute(stmt, {"thread_id": thread_id}).first()
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Task not found")
+            raise HTTPException(status_code=404, detail="Thread not found")
         raise
 
     if deleted is None:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return Message(message="Task deleted successfully")
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return Message(message="Thread deleted successfully")

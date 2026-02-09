@@ -8,6 +8,34 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 - `enderai_openapi`: Fetch `/api/v1/openapi.json`.
 - `enderai_health_check`: Fetch `/api/v1/utils/health-check/`.
 
+## Run Audit Trail (Optional)
+
+This MCP server can help keep an **audit trail per Run** (EnderAI `run_event` rows):
+
+- If you call `POST /api/v1/runs/start` via `enderai_request`, the server will remember the returned `run.id` (per MCP session).
+- For subsequent `enderai_request` calls, you can pass an `audit` object:
+  - `audit.intent`: short human-readable reason for the call (becomes the Run event message)
+  - `audit.run_id`: optional override for the current Run id (also updates session context)
+- When a Run id is known, the server will append a `run_event` of type `mcp` containing:
+  - the request args (method/path/query/headers/body)
+  - the response summary (status/ok/data)
+  - secrets redacted (`Authorization`, tokens, passwords, etc.)
+  - payloads capped to keep DB/UI healthy (large JSON like OpenAPI is truncated)
+
+Additionally, when you `POST /api/v1/library/` and a Run id is known, the server will auto-link
+the created Library item to the current Run (`relation=created`).
+
+Example (pseudo-code):
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/items/",
+  "query": { "skip": 0, "limit": 25 },
+  "audit": { "intent": "List items to find the oldest two" }
+}
+```
+
 ## Environment
 
 - `ENDERAI_BASE_URL` (default: `https://enderai-backend.onrender.com`)

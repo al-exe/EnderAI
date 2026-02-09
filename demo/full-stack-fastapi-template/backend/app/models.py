@@ -110,13 +110,13 @@ class ItemsPublic(SQLModel):
     count: int
 
 
-# --- Tasks/Library/Memory models (demo) ---
+# --- Artifacts (DB-backed; demo) ---
 
-LibraryItemKind = Literal["recipe", "pitfall", "decision", "checklist"]
+ArtifactKind = Literal["recipe", "pitfall", "decision", "checklist"]
 PromotionMode = Literal["auto", "user"]
 
 
-class LibraryItemBase(SQLModel):
+class ArtifactBase(SQLModel):
     workflow_key: str = Field(min_length=1)
     # NOTE: keep table-safe primitive types here; constrain via API schemas below.
     # SQLModel's table model creation will choke on `typing.Literal[...]`.
@@ -128,14 +128,14 @@ class LibraryItemBase(SQLModel):
     promotion_mode: str = "auto"
 
 
-class LibraryItemCreate(LibraryItemBase):
-    kind: LibraryItemKind = Field(min_length=1)
+class ArtifactCreate(ArtifactBase):
+    kind: ArtifactKind = Field(min_length=1)
     promotion_mode: PromotionMode = "auto"
 
 
-class LibraryItemUpdate(SQLModel):
+class ArtifactUpdate(SQLModel):
     workflow_key: str | None = Field(default=None, min_length=1)
-    kind: LibraryItemKind | None = Field(default=None, min_length=1)
+    kind: ArtifactKind | None = Field(default=None, min_length=1)
     title: str | None = Field(default=None, min_length=1)
     body_mdc: str | None = Field(default=None, min_length=1)
     tags: dict[str, Any] | None = None
@@ -143,8 +143,8 @@ class LibraryItemUpdate(SQLModel):
     promotion_mode: PromotionMode | None = None
 
 
-class LibraryItem(LibraryItemBase, table=True):
-    __tablename__ = "library_item"
+class Artifact(ArtifactBase, table=True):
+    __tablename__ = "artifact"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     created_at: datetime | None = Field(
@@ -155,20 +155,20 @@ class LibraryItem(LibraryItemBase, table=True):
         default=None,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
-    superseded_by_id: uuid.UUID | None = Field(default=None, foreign_key="library_item.id")
+    superseded_by_id: uuid.UUID | None = Field(default=None, foreign_key="artifact.id")
 
 
-class LibraryItemPublic(LibraryItemBase):
+class ArtifactPublic(ArtifactBase):
     id: uuid.UUID
-    kind: LibraryItemKind
+    kind: ArtifactKind
     promotion_mode: PromotionMode
     created_at: datetime | None = None
     last_used_at: datetime | None = None
     superseded_by_id: uuid.UUID | None = None
 
 
-class LibraryItemsPublic(SQLModel):
-    data: list[LibraryItemPublic]
+class ArtifactsPublic(SQLModel):
+    data: list[ArtifactPublic]
     count: int
 
 
@@ -218,12 +218,12 @@ class WorkflowBucketsPublic(SQLModel):
     count: int
 
 
-# --- Tasks/Runs/Events/Memory link schemas (DB-backed; tables created via scripts) ---
+# --- Threads/Executions/Events/Artifact links (DB-backed; tables created via scripts) ---
 
-RunLibraryRelation = Literal["used", "created", "promoted", "superseded"]
+ExecutionArtifactRelation = Literal["used", "created", "promoted", "superseded"]
 
 
-class TaskPublic(SQLModel):
+class ThreadPublic(SQLModel):
     id: uuid.UUID
     title: str
     workflow_key: str
@@ -237,7 +237,7 @@ class TaskPublic(SQLModel):
     last_touched_at: datetime | None = None
 
 
-class TaskCreate(SQLModel):
+class ThreadCreate(SQLModel):
     title: str = Field(min_length=1, max_length=255)
     workflow_key: str = Field(min_length=1)
     intent_key: str | None = Field(default=None, min_length=1)
@@ -248,7 +248,7 @@ class TaskCreate(SQLModel):
     status: str = Field(default="open", min_length=1)
 
 
-class TaskUpdate(SQLModel):
+class ThreadUpdate(SQLModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     workflow_key: str | None = Field(default=None, min_length=1)
     intent_key: str | None = Field(default=None, min_length=1)
@@ -259,14 +259,14 @@ class TaskUpdate(SQLModel):
     status: str | None = Field(default=None, min_length=1)
 
 
-class TasksPublic(SQLModel):
-    data: list[TaskPublic]
+class ThreadsPublic(SQLModel):
+    data: list[ThreadPublic]
     count: int
 
 
-class RunPublic(SQLModel):
+class ExecutionPublic(SQLModel):
     id: uuid.UUID
-    task_id: uuid.UUID
+    thread_id: uuid.UUID
     targets: list[Any] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -274,39 +274,39 @@ class RunPublic(SQLModel):
     summary: str | None = None
 
 
-class RunCreate(SQLModel):
+class ExecutionCreate(SQLModel):
     targets: list[Any] = Field(default_factory=list)
     status: str = Field(default="running", min_length=1)
     summary: str | None = None
 
 
-class RunsPublic(SQLModel):
-    data: list[RunPublic]
+class ExecutionsPublic(SQLModel):
+    data: list[ExecutionPublic]
     count: int
 
 
-class RunUpdate(SQLModel):
+class ExecutionUpdate(SQLModel):
     targets: list[Any] | None = None
     ended_at: datetime | None = None
     status: str | None = Field(default=None, min_length=1)
     summary: str | None = None
 
 
-class RunStartRequest(SQLModel):
-    task: TaskCreate
-    run: RunCreate = Field(default_factory=RunCreate)
-    # If set, reuse the most recently touched Task with the same (workflow_key, intent_key)
+class ExecutionStartRequest(SQLModel):
+    thread: ThreadCreate
+    execution: ExecutionCreate = Field(default_factory=ExecutionCreate)
+    # If set, reuse the most recently touched Thread with the same (workflow_key, intent_key)
     # only if it was touched within this window.
     reuse_within_seconds: int | None = 60 * 60 * 24 * 30
 
 
-class RunStartPublic(SQLModel):
-    task: TaskPublic
-    run: RunPublic
-    reused_task: bool
+class ExecutionStartPublic(SQLModel):
+    thread: ThreadPublic
+    execution: ExecutionPublic
+    reused_thread: bool
 
 
-class RunEventCreate(SQLModel):
+class EventCreate(SQLModel):
     ts: datetime | None = None
     type: str = Field(min_length=1)
     message: str | None = None
@@ -314,25 +314,25 @@ class RunEventCreate(SQLModel):
     supersedes_event_id: int | None = None
 
 
-class RunEventsPublic(SQLModel):
-    data: list["RunEventPublic"]
+class EventsPublic(SQLModel):
+    data: list["EventPublic"]
     count: int
 
 
-class RunMemoryLinkCreate(SQLModel):
-    library_item_id: uuid.UUID
-    relation: RunLibraryRelation
+class ExecutionArtifactLinkCreate(SQLModel):
+    artifact_id: uuid.UUID
+    relation: ExecutionArtifactRelation
     created_at: datetime | None = None
 
 
-class RunMemoryLinksPublic(SQLModel):
-    data: list["RunMemoryLinkPublic"]
+class ExecutionArtifactLinksPublic(SQLModel):
+    data: list["ExecutionArtifactLinkPublic"]
     count: int
 
 
-class RunEventPublic(SQLModel):
+class EventPublic(SQLModel):
     id: int
-    run_id: uuid.UUID
+    execution_id: uuid.UUID
     ts: datetime | None = None
     type: str
     message: str | None = None
@@ -340,16 +340,17 @@ class RunEventPublic(SQLModel):
     supersedes_event_id: int | None = None
 
 
-class RunMemoryLinkPublic(SQLModel):
-    relation: RunLibraryRelation
+class ExecutionArtifactLinkPublic(SQLModel):
+    relation: ExecutionArtifactRelation
     created_at: datetime | None = None
-    library_item: LibraryItemPublic
+    artifact: ArtifactPublic
 
 
-class RunDetailPublic(SQLModel):
-    run: RunPublic
-    events: list[RunEventPublic]
-    memory_links: list[RunMemoryLinkPublic]
+class ExecutionDetailPublic(SQLModel):
+    execution: ExecutionPublic
+    thread: ThreadPublic
+    events: list[EventPublic]
+    artifact_links: list[ExecutionArtifactLinkPublic]
 
 
 # Generic message

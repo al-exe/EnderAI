@@ -10,24 +10,24 @@ from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.models import (
-    LibraryItemPublic,
+    ArtifactPublic,
+    EventCreate,
+    EventPublic,
+    EventsPublic,
+    ExecutionArtifactLinkCreate,
+    ExecutionArtifactLinkPublic,
+    ExecutionArtifactLinksPublic,
+    ExecutionDetailPublic,
+    ExecutionPublic,
+    ExecutionsPublic,
     Message,
-    RunDetailPublic,
-    RunEventCreate,
-    RunEventPublic,
-    RunEventsPublic,
-    RunMemoryLinkCreate,
-    RunMemoryLinkPublic,
-    RunMemoryLinksPublic,
-    RunPublic,
-    RunsPublic,
-    RunStartPublic,
-    RunStartRequest,
-    RunUpdate,
-    TaskPublic,
+    ExecutionStartPublic,
+    ExecutionStartRequest,
+    ExecutionUpdate,
+    ThreadPublic,
 )
 
-router = APIRouter(prefix="/runs", tags=["runs"])
+router = APIRouter(prefix="/executions", tags=["executions"])
 
 _UUID_RE = re.compile(
     r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
@@ -45,18 +45,18 @@ def _is_missing_column_error(err: Exception, *, column: str) -> bool:
     return "does not exist" in message and "column" in message and column.lower() in message
 
 
-def _task_has_intent_key_column(session: SessionDep) -> bool:
-    # Keep /runs/start backward-compatible with older DB schemas. Mirrors routes/tasks.py.
+def _thread_has_intent_key_column(session: SessionDep) -> bool:
+    # Keep /executions/start backward-compatible with older DB schemas. Mirrors routes/tasks.py.
     stmt = text(
         "select 1 "
         "from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key' "
+        "where table_schema = 'public' and table_name = 'thread' and column_name = 'intent_key' "
         "limit 1"
     )
     return session.connection().execute(stmt).first() is not None
 
 
-def _canonicalize_task_title(title: str) -> str:
+def _canonicalize_thread_title(title: str) -> str:
     # Keep this conservative: only strip UUID-like tokens and normalize whitespace.
     cleaned = _UUID_RE.sub("", title).strip()
     cleaned = re.sub(r"\\s+", " ", cleaned)
@@ -65,30 +65,30 @@ def _canonicalize_task_title(title: str) -> str:
 
 def _default_intent_key(title: str) -> str:
     # Stable-ish machine key derived from the title, with UUIDs removed.
-    base = _canonicalize_task_title(title).lower()
+    base = _canonicalize_thread_title(title).lower()
     base = re.sub(r"[^a-z0-9]+", "_", base).strip("_")
     return base or "task"
 
 
-@router.get("/", response_model=RunsPublic)
-def read_runs(
+@router.get("/", response_model=ExecutionsPublic)
+def read_executions(
     session: SessionDep,
     current_user: CurrentUser,
-    task_id: uuid.UUID | None = None,
+    thread_id: uuid.UUID | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve Runs.
+    Retrieve Executions.
     """
 
     clauses: list[str] = []
     params: dict[str, Any] = {"skip": skip, "limit": limit}
 
-    if task_id:
-        clauses.append("r.task_id = :task_id")
-        params["task_id"] = task_id
+    if thread_id:
+        clauses.append("r.thread_id = :thread_id")
+        params["thread_id"] = thread_id
     if status:
         status = status.strip()
         if status:
@@ -98,13 +98,13 @@ def read_runs(
     where_sql = f" where {' and '.join(clauses)}" if clauses else ""
 
     try:
-        count_stmt = text(f"select count(*) from public.run r{where_sql}")
+        count_stmt = text(f"select count(*) from public.execution r{where_sql}")
         count = session.connection().execute(count_stmt, params).scalar_one()
 
         data_stmt = text(
             "select "
-            "r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
-            "from public.run r"
+            "r.id, r.thread_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
+            "from public.execution r"
             f"{where_sql} "
             "order by r.started_at desc nulls last "
             "offset :skip limit :limit"
@@ -112,57 +112,57 @@ def read_runs(
         rows = session.connection().execute(data_stmt, params).mappings().all()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return RunsPublic(data=[], count=0)
+            return ExecutionsPublic(data=[], count=0)
         raise
 
-    runs = [RunPublic(**dict(row)) for row in rows]
-    return RunsPublic(data=runs, count=count)
+    executions = [ExecutionPublic(**dict(row)) for row in rows]
+    return ExecutionsPublic(data=executions, count=count)
 
 
-@router.post("/start", response_model=RunStartPublic, status_code=201)
-def start_run(
+@router.post("/start", response_model=ExecutionStartPublic, status_code=201)
+def start_execution(
     session: SessionDep,
     current_user: CurrentUser,
-    payload: RunStartRequest,
+    payload: ExecutionStartRequest,
 ) -> Any:
     """
-    Start a Run, reusing an existing Task when appropriate.
+    Start an Execution, reusing an existing Thread when appropriate.
 
-    This is the primary "Task vs Run" grouping mechanism:
-    - Task groups repeated work by (workflow_key, intent_key).
-    - Run captures a single execution/attempt with per-instance targets.
+    This is the primary "Thread vs Execution" grouping mechanism:
+    - Thread groups repeated work by (workflow_key, intent_key).
+    - Execution captures a single attempt with per-instance targets.
     """
 
-    task_in = payload.task
-    run_in = payload.run
+    thread_in = payload.thread
+    execution_in = payload.execution
 
-    workflow_key = task_in.workflow_key.strip()
-    title_raw = task_in.title.strip()
+    workflow_key = thread_in.workflow_key.strip()
+    title_raw = thread_in.title.strip()
     if not workflow_key:
         raise HTTPException(status_code=422, detail="workflow_key must not be empty")
     if not title_raw:
         raise HTTPException(status_code=422, detail="Title must not be empty")
 
     intent_key = (
-        task_in.intent_key.strip()
-        if isinstance(task_in.intent_key, str) and task_in.intent_key.strip()
+        thread_in.intent_key.strip()
+        if isinstance(thread_in.intent_key, str) and thread_in.intent_key.strip()
         else _default_intent_key(title_raw)
     )
-    task_title = _canonicalize_task_title(title_raw)
-    has_intent_key = _task_has_intent_key_column(session)
+    thread_title = _canonicalize_thread_title(title_raw)
+    has_intent_key = _thread_has_intent_key_column(session)
 
     now = datetime.now(timezone.utc)
     reuse_within_seconds = payload.reuse_within_seconds
 
-    task_row = None
-    reused_task = False
+    thread_row = None
+    reused_thread = False
     try:
         if has_intent_key:
             stmt = text(
                 "select "
                 "t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria, "
                 "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-                "from public.task t "
+                "from public.thread t "
                 "where t.workflow_key = :workflow_key and t.intent_key = :intent_key "
                 "order by t.last_touched_at desc nulls last "
                 "limit 1"
@@ -174,43 +174,43 @@ def start_run(
                 "select "
                 "t.id, t.title, t.workflow_key, t.goal, t.acceptance_criteria, "
                 "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-                "from public.task t "
+                "from public.thread t "
                 "where t.workflow_key = :workflow_key and t.title = :title "
                 "order by t.last_touched_at desc nulls last "
                 "limit 1"
             )
-            params = {"workflow_key": workflow_key, "title": task_title}
-        task_row = session.connection().execute(stmt, params).mappings().first()
+            params = {"workflow_key": workflow_key, "title": thread_title}
+        thread_row = session.connection().execute(stmt, params).mappings().first()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+            raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
-    if task_row is not None and reuse_within_seconds is not None:
-        last_touched_at = task_row.get("last_touched_at")
+    if thread_row is not None and reuse_within_seconds is not None:
+        last_touched_at = thread_row.get("last_touched_at")
         if last_touched_at is not None:
             age_s = (now - last_touched_at).total_seconds()
             if age_s > reuse_within_seconds:
-                task_row = None
+                thread_row = None
 
-    # Create a new Task if none is eligible for reuse.
-    if task_row is None:
+    # Create a new Thread if none is eligible for reuse.
+    if thread_row is None:
         # Keep behavior stable even if clients send empty strings.
-        goal = task_in.goal.strip() if isinstance(task_in.goal, str) and task_in.goal.strip() else None
+        goal = thread_in.goal.strip() if isinstance(thread_in.goal, str) and thread_in.goal.strip() else None
         acceptance_criteria = (
-            task_in.acceptance_criteria.strip()
-            if isinstance(task_in.acceptance_criteria, str) and task_in.acceptance_criteria.strip()
+            thread_in.acceptance_criteria.strip()
+            if isinstance(thread_in.acceptance_criteria, str) and thread_in.acceptance_criteria.strip()
             else None
         )
-        risk_level = task_in.risk_level.strip() or "read_only"
-        status = task_in.status.strip() or "open"
-        systems_touched = task_in.systems_touched or {}
+        risk_level = thread_in.risk_level.strip() or "read_only"
+        status = thread_in.status.strip() or "open"
+        systems_touched = thread_in.systems_touched or {}
 
-        task_id = uuid.uuid4()
+        thread_id = uuid.uuid4()
         try:
             if has_intent_key:
                 insert_stmt = text(
-                    "insert into public.task ("
+                    "insert into public.thread ("
                     "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                     ") values ("
                     ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -220,7 +220,7 @@ def start_run(
                 )
             else:
                 insert_stmt = text(
-                    "insert into public.task ("
+                    "insert into public.thread ("
                     "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                     ") values ("
                     ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -228,14 +228,14 @@ def start_run(
                     "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
                     "risk_level, status, created_at, last_touched_at"
                 )
-            task_row = (
+            thread_row = (
                 session.connection()
                 .execute(
                     insert_stmt,
                     (
                         {
-                            "id": task_id,
-                            "title": task_title,
+                            "id": thread_id,
+                            "title": thread_title,
                             "workflow_key": workflow_key,
                             "intent_key": intent_key,
                             "goal": goal,
@@ -246,8 +246,8 @@ def start_run(
                         }
                         if has_intent_key
                         else {
-                            "id": task_id,
-                            "title": task_title,
+                            "id": thread_id,
+                            "title": thread_title,
                             "workflow_key": workflow_key,
                             "goal": goal,
                             "acceptance_criteria": acceptance_criteria,
@@ -262,37 +262,41 @@ def start_run(
             )
         except ProgrammingError as e:
             if _is_missing_table_error(e):
-                raise HTTPException(status_code=501, detail="Tasks table not initialized")
+                raise HTTPException(status_code=501, detail="Threads table not initialized")
             raise
 
-        if task_row is None:
-            raise HTTPException(status_code=500, detail="Failed to create task")
+        if thread_row is None:
+            raise HTTPException(status_code=500, detail="Failed to create thread")
     else:
-        reused_task = True
+        reused_thread = True
 
-    task_id = task_row["id"]
+    thread_id = thread_row["id"]
 
-    # Create the Run.
-    targets = run_in.targets or []
-    run_status = run_in.status.strip() or "running"
-    summary = run_in.summary.strip() if isinstance(run_in.summary, str) and run_in.summary.strip() else None
-    run_id = uuid.uuid4()
+    # Create the Execution.
+    targets = execution_in.targets or []
+    execution_status = execution_in.status.strip() or "running"
+    summary = (
+        execution_in.summary.strip()
+        if isinstance(execution_in.summary, str) and execution_in.summary.strip()
+        else None
+    )
+    execution_id = uuid.uuid4()
 
     try:
-        run_stmt = text(
-            "insert into public.run (id, task_id, targets, status, summary) "
-            "values (:id, :task_id, cast(:targets as jsonb), :status, :summary) "
-            "returning id, task_id, targets, started_at, ended_at, status, summary"
+        execution_stmt = text(
+            "insert into public.execution (id, thread_id, targets, status, summary) "
+            "values (:id, :thread_id, cast(:targets as jsonb), :status, :summary) "
+            "returning id, thread_id, targets, started_at, ended_at, status, summary"
         )
-        run_row = (
+        execution_row = (
             session.connection()
             .execute(
-                run_stmt,
+                execution_stmt,
                 {
-                    "id": run_id,
-                    "task_id": task_id,
+                    "id": execution_id,
+                    "thread_id": thread_id,
                     "targets": json.dumps(targets),
-                    "status": run_status,
+                    "status": execution_status,
                     "summary": summary,
                 },
             )
@@ -301,45 +305,49 @@ def start_run(
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Runs table not initialized")
+            raise HTTPException(status_code=501, detail="Executions table not initialized")
         raise
 
-    if run_row is None:
-        raise HTTPException(status_code=500, detail="Failed to create run")
+    if execution_row is None:
+        raise HTTPException(status_code=500, detail="Failed to create execution")
 
-    # Touch the Task (and reopen "done" tasks) to keep ordering/grouping sensible.
+    # Touch the Thread (and reopen "done" threads) to keep ordering/grouping sensible.
     try:
         if has_intent_key:
             touch_stmt = text(
-                "update public.task "
+                "update public.thread "
                 "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
-                "where id = :task_id "
+                "where id = :thread_id "
                 "returning "
                 "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
                 "risk_level, status, created_at, last_touched_at"
             )
         else:
             touch_stmt = text(
-                "update public.task "
+                "update public.thread "
                 "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
-                "where id = :task_id "
+                "where id = :thread_id "
                 "returning "
                 "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
                 "risk_level, status, created_at, last_touched_at"
             )
         touched = (
-            session.connection().execute(touch_stmt, {"task_id": task_id}).mappings().first()
+            session.connection().execute(touch_stmt, {"thread_id": thread_id}).mappings().first()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+            raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
     session.commit()
 
-    task_public = TaskPublic(**dict(touched or task_row))
-    run_public = RunPublic(**dict(run_row))
-    return RunStartPublic(task=task_public, run=run_public, reused_task=reused_task)
+    thread_public = ThreadPublic(**dict(touched or thread_row))
+    execution_public = ExecutionPublic(**dict(execution_row))
+    return ExecutionStartPublic(
+        thread=thread_public,
+        execution=execution_public,
+        reused_thread=reused_thread,
+    )
 
 
 @router.get("/{run_id}", response_model=RunPublic)
