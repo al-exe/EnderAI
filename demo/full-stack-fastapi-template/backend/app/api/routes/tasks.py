@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
-from app.api.deps import CurrentUser, SessionDep
-from app.models import RunPublic, RunsPublic, TaskCreate, TaskPublic, TasksPublic, TaskTitleUpdate
+from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
+from app.models import Message, RunPublic, RunsPublic, TaskCreate, TaskPublic, TasksPublic, TaskUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -17,11 +17,23 @@ def _is_missing_table_error(err: Exception) -> bool:
     return "does not exist" in message and "relation" in message
 
 
+def _task_has_intent_key_column(session: SessionDep) -> bool:
+    # Use information_schema to keep the API backward-compatible with older DB schemas.
+    stmt = text(
+        "select 1 "
+        "from information_schema.columns "
+        "where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key' "
+        "limit 1"
+    )
+    return session.connection().execute(stmt).first() is not None
+
+
 @router.get("/", response_model=TasksPublic)
 def read_tasks(
     session: SessionDep,
     current_user: CurrentUser,
     workflow_key: str | None = None,
+    intent_key: str | None = None,
     status: str | None = None,
     q: str | None = None,
     skip: int = 0,
@@ -32,8 +44,16 @@ def read_tasks(
     """
 
     workflow_key = workflow_key.strip() if workflow_key else None
+    intent_key = intent_key.strip() if intent_key else None
     status = status.strip() if status else None
     q = q.strip() if q else None
+
+    has_intent_key = _task_has_intent_key_column(session)
+    if intent_key and not has_intent_key:
+        raise HTTPException(
+            status_code=501,
+            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
+        )
 
     clauses: list[str] = []
     params: dict[str, Any] = {"skip": skip, "limit": limit}
@@ -41,17 +61,23 @@ def read_tasks(
     if workflow_key:
         clauses.append("t.workflow_key = :workflow_key")
         params["workflow_key"] = workflow_key
+    if intent_key:
+        clauses.append("t.intent_key = :intent_key")
+        params["intent_key"] = intent_key
     if status:
         clauses.append("t.status = :status")
         params["status"] = status
     if q:
+        q_fields = [
+            "t.title ilike :q",
+            "t.goal ilike :q",
+            "t.acceptance_criteria ilike :q",
+            "t.workflow_key ilike :q",
+        ]
+        if has_intent_key:
+            q_fields.insert(1, "t.intent_key ilike :q")
         clauses.append(
-            "("
-            "t.title ilike :q or "
-            "t.goal ilike :q or "
-            "t.acceptance_criteria ilike :q or "
-            "t.workflow_key ilike :q"
-            ")"
+            "(" + " or ".join(q_fields) + ")"
         )
         params["q"] = f"%{q}%"
 
@@ -63,7 +89,9 @@ def read_tasks(
 
         data_stmt = text(
             "select "
-            "t.id, t.title, t.workflow_key, t.goal, t.acceptance_criteria, "
+            "t.id, t.title, t.workflow_key, "
+            + ("t.intent_key, " if has_intent_key else "")
+            + "t.goal, t.acceptance_criteria, "
             "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
             "from public.task t"
             f"{where_sql} "
@@ -88,6 +116,7 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
 
     title = task_in.title.strip()
     workflow_key = task_in.workflow_key.strip()
+    intent_key = task_in.intent_key.strip() if isinstance(task_in.intent_key, str) and task_in.intent_key.strip() else None
 
     if not title:
         raise HTTPException(status_code=422, detail="Title must not be empty")
@@ -107,30 +136,62 @@ def create_task(session: SessionDep, current_user: CurrentUser, task_in: TaskCre
 
     task_id = uuid.uuid4()
 
-    try:
-        stmt = text(
-            "insert into public.task ("
-            "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
-            ") values ("
-            ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
-            ") returning "
-            "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
-            "risk_level, status, created_at, last_touched_at"
+    has_intent_key = _task_has_intent_key_column(session)
+    if intent_key and not has_intent_key:
+        raise HTTPException(
+            status_code=501,
+            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
         )
+
+    try:
+        if has_intent_key:
+            stmt = text(
+                "insert into public.task ("
+                "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
+                ") values ("
+                ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
+                ") returning "
+                "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
+                "risk_level, status, created_at, last_touched_at"
+            )
+        else:
+            stmt = text(
+                "insert into public.task ("
+                "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
+                ") values ("
+                ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
+                ") returning "
+                "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
+                "risk_level, status, created_at, last_touched_at"
+            )
         row = (
             session.connection()
             .execute(
                 stmt,
-                {
-                    "id": task_id,
-                    "title": title,
-                    "workflow_key": workflow_key,
-                    "goal": goal,
-                    "acceptance_criteria": acceptance_criteria,
-                    "systems_touched": json.dumps(systems_touched),
-                    "risk_level": risk_level,
-                    "status": status,
-                },
+                (
+                    {
+                        "id": task_id,
+                        "title": title,
+                        "workflow_key": workflow_key,
+                        "intent_key": intent_key,
+                        "goal": goal,
+                        "acceptance_criteria": acceptance_criteria,
+                        "systems_touched": json.dumps(systems_touched),
+                        "risk_level": risk_level,
+                        "status": status,
+                    }
+                    if has_intent_key
+                    else {
+                        "id": task_id,
+                        "title": title,
+                        "workflow_key": workflow_key,
+                        "goal": goal,
+                        "acceptance_criteria": acceptance_criteria,
+                        "systems_touched": json.dumps(systems_touched),
+                        "risk_level": risk_level,
+                        "status": status,
+                    }
+                ),
             )
             .mappings()
             .first()
@@ -152,10 +213,14 @@ def read_task(session: SessionDep, current_user: CurrentUser, task_id: uuid.UUID
     Get a Task by ID.
     """
 
+    has_intent_key = _task_has_intent_key_column(session)
+
     try:
         stmt = text(
             "select "
-            "t.id, t.title, t.workflow_key, t.goal, t.acceptance_criteria, "
+            "t.id, t.title, t.workflow_key, "
+            + ("t.intent_key, " if has_intent_key else "")
+            + "t.goal, t.acceptance_criteria, "
             "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
             "from public.task t "
             "where t.id = :task_id "
@@ -212,32 +277,122 @@ def read_task_runs(
 
 
 @router.patch("/{task_id}", response_model=TaskPublic)
-def update_task_title(
+def update_task(
     session: SessionDep,
     current_user: CurrentUser,
     task_id: uuid.UUID,
-    task_in: TaskTitleUpdate,
+    task_in: TaskUpdate,
 ) -> Any:
     """
-    Update a Task title (DB-backed memory).
+    Update a Task (DB-backed memory).
     """
 
-    title = task_in.title.strip()
-    if not title:
-        raise HTTPException(status_code=422, detail="Title must not be empty")
+    has_intent_key = _task_has_intent_key_column(session)
+    update = task_in.model_dump(exclude_unset=True)
+    if not update:
+        raise HTTPException(status_code=422, detail="No fields to update")
+
+    if "intent_key" in update and update.get("intent_key") is not None and not has_intent_key:
+        raise HTTPException(
+            status_code=501,
+            detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
+        )
+
+    clauses: list[str] = []
+    params: dict[str, Any] = {"task_id": task_id}
+
+    if "title" in update:
+        title = update.get("title")
+        if title is None:
+            # Allow explicit null to mean "no change" for clients that send it.
+            pass
+        else:
+            title = title.strip()
+            if not title:
+                raise HTTPException(status_code=422, detail="Title must not be empty")
+            clauses.append("title = :title")
+            params["title"] = title
+
+    if "workflow_key" in update:
+        workflow_key = update.get("workflow_key")
+        if workflow_key is None:
+            pass
+        else:
+            workflow_key = workflow_key.strip()
+            if not workflow_key:
+                raise HTTPException(status_code=422, detail="workflow_key must not be empty")
+            clauses.append("workflow_key = :workflow_key")
+            params["workflow_key"] = workflow_key
+
+    if has_intent_key and "intent_key" in update:
+        intent_key = update.get("intent_key")
+        if intent_key is None:
+            clauses.append("intent_key = null")
+        else:
+            intent_key = intent_key.strip()
+            if not intent_key:
+                raise HTTPException(status_code=422, detail="intent_key must not be empty")
+            clauses.append("intent_key = :intent_key")
+            params["intent_key"] = intent_key
+
+    if "goal" in update:
+        goal = update.get("goal")
+        if isinstance(goal, str):
+            goal = goal.strip() or None
+        clauses.append("goal = :goal")
+        params["goal"] = goal
+
+    if "acceptance_criteria" in update:
+        acceptance_criteria = update.get("acceptance_criteria")
+        if isinstance(acceptance_criteria, str):
+            acceptance_criteria = acceptance_criteria.strip() or None
+        clauses.append("acceptance_criteria = :acceptance_criteria")
+        params["acceptance_criteria"] = acceptance_criteria
+
+    if "systems_touched" in update:
+        systems_touched = update.get("systems_touched")
+        clauses.append("systems_touched = cast(:systems_touched as jsonb)")
+        params["systems_touched"] = json.dumps(systems_touched or {})
+
+    if "risk_level" in update:
+        risk_level = update.get("risk_level")
+        if risk_level is None:
+            pass
+        else:
+            risk_level = risk_level.strip()
+            if not risk_level:
+                raise HTTPException(status_code=422, detail="risk_level must not be empty")
+            clauses.append("risk_level = :risk_level")
+            params["risk_level"] = risk_level
+
+    if "status" in update:
+        status = update.get("status")
+        if status is None:
+            pass
+        else:
+            status = status.strip()
+            if not status:
+                raise HTTPException(status_code=422, detail="status must not be empty")
+            clauses.append("status = :status")
+            params["status"] = status
+
+    if not clauses:
+        raise HTTPException(status_code=422, detail="No valid fields to update")
 
     try:
         stmt = text(
             "update public.task "
-            "set title = :title, last_touched_at = now() "
+            f"set {', '.join(clauses)}, last_touched_at = now() "
             "where id = :task_id "
             "returning "
-            "id, title, workflow_key, goal, acceptance_criteria, "
+            "id, title, workflow_key, "
+            + ("intent_key, " if has_intent_key else "")
+            + "goal, acceptance_criteria, "
             "systems_touched, risk_level, status, created_at, last_touched_at"
         )
         row = (
             session.connection()
-            .execute(stmt, {"task_id": task_id, "title": title})
+            .execute(stmt, params)
             .mappings()
             .first()
         )
@@ -250,3 +405,26 @@ def update_task_title(
     if row is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return TaskPublic(**dict(row))
+
+
+@router.delete("/{task_id}", response_model=Message)
+def delete_task(session: SessionDep, current_user: CurrentUser, task_id: uuid.UUID) -> Any:
+    """
+    Delete a Task.
+
+    Note: this is intentionally restricted to superusers; deleting tasks cascades to Runs/Events/Links.
+    """
+
+    get_current_active_superuser(current_user)
+    try:
+        stmt = text("delete from public.task where id = :task_id returning id")
+        deleted = session.connection().execute(stmt, {"task_id": task_id}).first()
+        session.commit()
+    except ProgrammingError as e:
+        if _is_missing_table_error(e):
+            raise HTTPException(status_code=404, detail="Task not found")
+        raise
+
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return Message(message="Task deleted successfully")

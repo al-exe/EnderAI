@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import or_
+from sqlalchemy.exc import ProgrammingError
 from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
@@ -13,12 +14,18 @@ from app.models import (
     LibraryItemPublic,
     LibraryItemsPublic,
     LibraryItemUpdate,
+    Message,
     WorkflowBucket,
     WorkflowKeyCount,
     WorkflowKeysPublic,
 )
 
 router = APIRouter(prefix="/library", tags=["library"])
+
+
+def _is_missing_table_error(err: Exception) -> bool:
+    message = str(err).lower()
+    return "does not exist" in message and "relation" in message
 
 
 def _humanize_workflow_key(workflow_key: str) -> str:
@@ -215,3 +222,54 @@ def update_library_item(
     session.commit()
     session.refresh(new_item)
     return new_item
+
+
+@router.delete("/{id}", response_model=Message)
+def delete_library_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
+    """
+    Delete a library item.
+
+    Note: restricted to superusers. Deletion is blocked if the item is referenced.
+    Prefer superseding instead of deleting.
+    """
+
+    get_current_active_superuser(current_user)
+    item = session.get(LibraryItem, id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Library item not found")
+
+    # Block deletion if referenced by newer versions.
+    newer_count = (
+        session.exec(
+            select(func.count()).select_from(LibraryItem).where(LibraryItem.superseded_by_id == id)
+        ).one()
+    )
+    if newer_count and int(newer_count) > 0:
+        raise HTTPException(status_code=409, detail="Library item is referenced by newer versions")
+
+    # Actual check (raw SQL)
+    from sqlalchemy import text as sql_text
+
+    linked_count = (
+        0
+    )
+    try:
+        linked_count = (
+            session.connection()
+            .execute(
+                sql_text(
+                    "select count(*) from public.run_library_link where library_item_id = :id"
+                ),
+                {"id": id},
+            )
+            .scalar_one()
+        )
+    except ProgrammingError as e:
+        if not _is_missing_table_error(e):
+            raise
+    if linked_count and int(linked_count) > 0:
+        raise HTTPException(status_code=409, detail="Library item is linked from runs")
+
+    session.delete(item)
+    session.commit()
+    return Message(message="Library item deleted successfully")

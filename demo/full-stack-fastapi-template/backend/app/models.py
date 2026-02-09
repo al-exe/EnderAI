@@ -197,6 +197,27 @@ class WorkflowKeysPublic(SQLModel):
     data: list[WorkflowKeyCount]
 
 
+class WorkflowBucketCreate(SQLModel):
+    workflow_key: str = Field(min_length=1)
+    bucket_name: str = Field(min_length=1)
+
+
+class WorkflowBucketUpdate(SQLModel):
+    bucket_name: str = Field(min_length=1)
+
+
+class WorkflowBucketPublic(SQLModel):
+    workflow_key: str
+    bucket_name: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class WorkflowBucketsPublic(SQLModel):
+    data: list[WorkflowBucketPublic]
+    count: int
+
+
 # --- Tasks/Runs/Events/Memory link schemas (DB-backed; tables created via scripts) ---
 
 RunLibraryRelation = Literal["used", "created", "promoted", "superseded"]
@@ -206,6 +227,7 @@ class TaskPublic(SQLModel):
     id: uuid.UUID
     title: str
     workflow_key: str
+    intent_key: str | None = None
     goal: str | None = None
     acceptance_criteria: str | None = None
     systems_touched: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
@@ -218,6 +240,7 @@ class TaskPublic(SQLModel):
 class TaskCreate(SQLModel):
     title: str = Field(min_length=1, max_length=255)
     workflow_key: str = Field(min_length=1)
+    intent_key: str | None = Field(default=None, min_length=1)
     goal: str | None = None
     acceptance_criteria: str | None = None
     systems_touched: dict[str, Any] = Field(default_factory=dict)
@@ -225,8 +248,15 @@ class TaskCreate(SQLModel):
     status: str = Field(default="open", min_length=1)
 
 
-class TaskTitleUpdate(SQLModel):
-    title: str = Field(min_length=1, max_length=255)
+class TaskUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    workflow_key: str | None = Field(default=None, min_length=1)
+    intent_key: str | None = Field(default=None, min_length=1)
+    goal: str | None = None
+    acceptance_criteria: str | None = None
+    systems_touched: dict[str, Any] | None = None
+    risk_level: str | None = Field(default=None, min_length=1)
+    status: str | None = Field(default=None, min_length=1)
 
 
 class TasksPublic(SQLModel):
@@ -244,8 +274,59 @@ class RunPublic(SQLModel):
     summary: str | None = None
 
 
+class RunCreate(SQLModel):
+    targets: list[Any] = Field(default_factory=list)
+    status: str = Field(default="running", min_length=1)
+    summary: str | None = None
+
+
 class RunsPublic(SQLModel):
     data: list[RunPublic]
+    count: int
+
+
+class RunUpdate(SQLModel):
+    targets: list[Any] | None = None
+    ended_at: datetime | None = None
+    status: str | None = Field(default=None, min_length=1)
+    summary: str | None = None
+
+
+class RunStartRequest(SQLModel):
+    task: TaskCreate
+    run: RunCreate = Field(default_factory=RunCreate)
+    # If set, reuse the most recently touched Task with the same (workflow_key, intent_key)
+    # only if it was touched within this window.
+    reuse_within_seconds: int | None = 60 * 60 * 24 * 30
+
+
+class RunStartPublic(SQLModel):
+    task: TaskPublic
+    run: RunPublic
+    reused_task: bool
+
+
+class RunEventCreate(SQLModel):
+    ts: datetime | None = None
+    type: str = Field(min_length=1)
+    message: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    supersedes_event_id: int | None = None
+
+
+class RunEventsPublic(SQLModel):
+    data: list["RunEventPublic"]
+    count: int
+
+
+class RunMemoryLinkCreate(SQLModel):
+    library_item_id: uuid.UUID
+    relation: RunLibraryRelation
+    created_at: datetime | None = None
+
+
+class RunMemoryLinksPublic(SQLModel):
+    data: list["RunMemoryLinkPublic"]
     count: int
 
 

@@ -1,0 +1,178 @@
+# Memory Data Model (Current) — Schemas + Object Connections
+
+Created: 2026-02-09  
+Last reviewed: 2026-02-09
+
+Sources:
+- DB DDL: `scripts/create_memory_tables.py`
+- API models/schemas: `demo/full-stack-fastapi-template/backend/app/models.py`
+
+## Relational Model (Tables + FKs)
+
+```mermaid
+erDiagram
+  workflow_bucket {
+    text workflow_key PK
+    text bucket_name
+    timestamptz created_at
+    timestamptz updated_at
+  }
+
+  task {
+    uuid id PK
+    text title
+    text workflow_key
+    text intent_key
+    text goal
+    text acceptance_criteria
+    jsonb systems_touched
+    text risk_level
+    text status
+    timestamptz created_at
+    timestamptz last_touched_at
+  }
+
+  run {
+    uuid id PK
+    uuid task_id FK
+    jsonb targets
+    timestamptz started_at
+    timestamptz ended_at
+    text status
+    text summary
+  }
+
+  run_event {
+    bigint id PK
+    uuid run_id FK
+    timestamptz ts
+    text type
+    text message
+    jsonb data
+    bigint supersedes_event_id FK
+  }
+
+  library_item {
+    uuid id PK
+    text workflow_key
+    text kind
+    text title
+    text body_mdc
+    jsonb tags
+    jsonb source_refs
+    timestamptz created_at
+    timestamptz last_used_at
+    text promotion_mode
+    uuid superseded_by_id FK
+  }
+
+  run_library_link {
+    uuid run_id FK
+    uuid library_item_id FK
+    text relation
+    timestamptz created_at
+  }
+
+  %% Grouping
+  workflow_bucket ||--o{ task : "labels workflow_key (not FK-enforced)"
+  workflow_bucket ||--o{ library_item : "labels workflow_key (not FK-enforced)"
+
+  %% Execution/audit
+  task ||--o{ run : has
+  run ||--o{ run_event : logs
+  run_event ||--o| run_event : supersedes
+
+  %% Memory links + versioning
+  run ||--o{ run_library_link : links
+  library_item ||--o{ run_library_link : linked
+  library_item ||--o| library_item : superseded_by
+```
+
+Notes:
+- `workflow_key` is a **soft grouping key** today. There is no DB-level FK from `task.workflow_key` / `library_item.workflow_key` to `workflow_bucket.workflow_key`.
+- `task.intent_key` is the recommended **Task grouping key** for deciding whether to reuse a Task (append a Run) or create a new Task.
+- `run_event` is append-only by convention; corrections are modeled via `supersedes_event_id`.
+- `library_item` is never deleted by convention; updates are modeled by inserting a new row and setting `superseded_by_id` on the old one.
+
+## API Schema Composition (Object Graph)
+
+```mermaid
+classDiagram
+  class TasksPublic {
+    data: TaskPublic[]
+    count: int
+  }
+  class TaskPublic {
+    id: uuid
+    workflow_key: string
+    title: string
+    intent_key: string?
+    goal: string?
+    acceptance_criteria: string?
+    systems_touched: object
+    risk_level: string
+    status: string
+    created_at: datetime?
+    last_touched_at: datetime?
+  }
+
+  class RunsPublic {
+    data: RunPublic[]
+    count: int
+  }
+  class RunPublic {
+    id: uuid
+    task_id: uuid
+    targets: any[]
+    started_at: datetime?
+    ended_at: datetime?
+    status: string
+    summary: string?
+  }
+
+  class RunDetailPublic {
+    run: RunPublic
+    events: RunEventPublic[]
+    memory_links: RunMemoryLinkPublic[]
+  }
+  class RunEventPublic {
+    id: int
+    run_id: uuid
+    ts: datetime?
+    type: string
+    message: string?
+    data: object
+    supersedes_event_id: int?
+  }
+
+class RunMemoryLinkPublic {
+    relation: string
+    created_at: datetime?
+    library_item: LibraryItemPublic
+  }
+  class LibraryItemPublic {
+    id: uuid
+    workflow_key: string
+    kind: string
+    title: string
+    body_mdc: string
+    tags: object
+    source_refs: any[]
+    promotion_mode: string
+    created_at: datetime?
+    last_used_at: datetime?
+    superseded_by_id: uuid?
+  }
+
+  TasksPublic --> TaskPublic
+  RunsPublic --> RunPublic
+  RunDetailPublic --> RunPublic
+  RunDetailPublic --> RunEventPublic
+  RunDetailPublic --> RunMemoryLinkPublic
+  RunMemoryLinkPublic --> LibraryItemPublic
+```
+
+Enum notes (current API constraints):
+- `library_item.kind`: `recipe|pitfall|decision|checklist`
+- `library_item.promotion_mode`: `auto|user`
+- `run_library_link.relation`: `used|created|promoted|superseded`

@@ -47,6 +47,7 @@ DDL_STATEMENTS: list[str] = [
       id uuid primary key,
       title text not null,
       workflow_key text not null,
+      intent_key text,
       goal text,
       acceptance_criteria text,
       systems_touched jsonb not null default '{}'::jsonb,
@@ -56,7 +57,10 @@ DDL_STATEMENTS: list[str] = [
       last_touched_at timestamptz not null default now()
     )
     """,
+    # Schema evolution: keep this script idempotent across deployed DBs.
+    "alter table public.task add column if not exists intent_key text",
     "create index if not exists idx_task_workflow_key on public.task (workflow_key)",
+    "create index if not exists idx_task_workflow_intent_key on public.task (workflow_key, intent_key)",
     "create index if not exists idx_task_status on public.task (status)",
     "create index if not exists idx_task_last_touched_at on public.task (last_touched_at)",
     # Run: one attempt/session at a task.
