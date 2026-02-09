@@ -278,7 +278,7 @@ def start_execution(
     summary = (
         execution_in.summary.strip()
         if isinstance(execution_in.summary, str) and execution_in.summary.strip()
-        else None
+        else thread_title
     )
     execution_id = uuid.uuid4()
 
@@ -569,6 +569,24 @@ def create_execution_event(
             .mappings()
             .first()
         )
+
+        # Best-effort: improve the Execution summary for UIs that list executions by summary.
+        # Only sets a summary when it's missing or still on a generic placeholder.
+        summary_candidate = message
+        if summary_candidate is None:
+            intent = payload.get("intent")
+            if isinstance(intent, str) and intent.strip():
+                summary_candidate = intent.strip()
+        if isinstance(summary_candidate, str) and summary_candidate.strip():
+            summary_candidate = summary_candidate.strip()[:255]
+            session.connection().execute(
+                text(
+                    "update public.execution "
+                    "set summary = :summary "
+                    "where id = :execution_id and (summary is null or btrim(summary) = '' or summary = 'Execution')"
+                ),
+                {"execution_id": execution_id, "summary": summary_candidate},
+            )
         session.commit()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Invalid event linkage")
