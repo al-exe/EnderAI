@@ -96,12 +96,15 @@ async function main(): Promise<void> {
     // GET/DELETE must include an existing session id.
     const method = (req.method ?? "GET").toUpperCase();
     if (!sessionIdHeader && method !== "POST") {
-      // The Streamable HTTP client transport may probe the endpoint with a GET to try to
-      // establish an SSE stream *before* initialization. Per the spec, servers that don't
-      // support (or can't currently support) the SSE stream can reply 405.
+      // Some MCP clients probe the endpoint with a GET before initialization.
+      // Returning 405 is allowed by the spec, but some client implementations treat it
+      // as a hard failure and never attempt the POST initialize flow.
       if (method === "GET") {
-        res.writeHead(405, { "content-type": "text/plain" });
-        res.end("Method Not Allowed");
+        res.writeHead(200, {
+          "content-type": "text/plain",
+          "cache-control": "no-store",
+        });
+        res.end("ok");
         return;
       }
 
