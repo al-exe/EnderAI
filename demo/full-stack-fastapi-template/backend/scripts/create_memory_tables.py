@@ -208,6 +208,136 @@ DDL = [
       primary key (execution_id, artifact_id, relation)
     );
     """,
+    # ---- Data migration (handles the "both old and new tables exist" case) ----
+    # This can happen if a previous deploy created the new tables but did not rename the legacy ones.
+    """
+    do $$
+    declare has_intent boolean;
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'task'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'thread'
+      ) then
+        select exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key'
+        ) into has_intent;
+
+        if has_intent then
+          insert into public.thread (
+            id, title, workflow_key, intent_key, goal, acceptance_criteria,
+            systems_touched, risk_level, status, created_at, last_touched_at
+          )
+          select
+            t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria,
+            t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at
+          from public.task t
+          where not exists (select 1 from public.thread th where th.id = t.id);
+        else
+          insert into public.thread (
+            id, title, workflow_key, intent_key, goal, acceptance_criteria,
+            systems_touched, risk_level, status, created_at, last_touched_at
+          )
+          select
+            t.id, t.title, t.workflow_key, null, t.goal, t.acceptance_criteria,
+            t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at
+          from public.task t
+          where not exists (select 1 from public.thread th where th.id = t.id);
+        end if;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution'
+      ) then
+        insert into public.execution (
+          id, thread_id, targets, started_at, ended_at, status, summary
+        )
+        select
+          r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary
+        from public.run r
+        where not exists (select 1 from public.execution e where e.id = r.id);
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_event'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'event'
+      ) then
+        insert into public.event (
+          id, execution_id, ts, type, message, data, supersedes_event_id
+        )
+        select
+          e.id, e.run_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id
+        from public.run_event e
+        where not exists (select 1 from public.event ev where ev.id = e.id);
+
+        perform setval(
+          pg_get_serial_sequence('public.event', 'id'),
+          greatest(coalesce((select max(id) from public.event), 0), 1),
+          true
+        );
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'library_item'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'artifact'
+      ) then
+        insert into public.artifact (
+          id, workflow_key, kind, title, body_mdc, tags, source_refs,
+          created_at, last_used_at, promotion_mode, superseded_by_id
+        )
+        select
+          li.id, li.workflow_key, li.kind, li.title, li.body_mdc, li.tags, li.source_refs,
+          li.created_at, li.last_used_at, li.promotion_mode, li.superseded_by_id
+        from public.library_item li
+        where not exists (select 1 from public.artifact a where a.id = li.id);
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_library_link'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution_artifact_link'
+      ) then
+        insert into public.execution_artifact_link (
+          execution_id, artifact_id, relation, created_at
+        )
+        select
+          l.run_id, l.library_item_id, l.relation, l.created_at
+        from public.run_library_link l
+        on conflict (execution_id, artifact_id, relation) do nothing;
+      end if;
+    end $$;
+    """,
 ]
 
 
