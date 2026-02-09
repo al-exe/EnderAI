@@ -8,6 +8,15 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 - `enderai_openapi`: Fetch `/api/v1/openapi.json`.
 - `enderai_health_check`: Fetch `/api/v1/utils/health-check/`.
 
+### Backward-Compatibility Path Rewrites
+
+`enderai_request` will transparently rewrite a few older (pre-migration) API paths:
+
+- `/api/v1/me` -> `/api/v1/users/me`
+- `/api/v1/runs/*` -> `/api/v1/executions/*`
+- `/api/v1/tasks/*` -> `/api/v1/threads/*` (and `/api/v1/tasks/{id}/runs/*` -> `/api/v1/threads/{id}/executions/*`)
+- `/api/v1/library/*` -> `/api/v1/artifacts/*`
+
 ## Execution Event Log (Optional)
 
 This MCP server can help keep an **event log per Execution** (EnderAI `event` rows):

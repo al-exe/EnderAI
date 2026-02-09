@@ -6,6 +6,7 @@ import {
 import { z } from "zod";
 
 import { enderaiFetch } from "./http.js";
+import { rewriteDeprecatedApiPath } from "./deprecatedPathRewrite.js";
 
 export type McpServerOptions = {
   // Optional backend bearer token provider used for all tool calls in this server instance.
@@ -278,15 +279,19 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         if (audit?.execution_id) auditState.executionId = audit.execution_id;
         if (audit?.run_id) auditState.executionId = audit.run_id;
 
+        const rewrite = rewriteDeprecatedApiPath(reqArgs.path);
+        const effectivePath = rewrite.path;
+
         const res = await enderaiFetch({
           ...reqArgs,
+          path: effectivePath,
           bearerToken,
         });
 
         // If this call started a run, update session context so subsequent calls auto-attach.
         const isExecutionStart =
           args.method.toUpperCase() === "POST" &&
-          args.path.replace(/\/+$/, "") === "/api/v1/executions/start";
+          effectivePath.replace(/\/+$/, "") === "/api/v1/executions/start";
         if (isExecutionStart && res.ok) {
           const ids = extractExecutionStartIds(res.data);
           if (ids.executionId) auditState.executionId = ids.executionId;
@@ -294,7 +299,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         }
 
         const auto: Record<string, unknown> = {};
-        const normalizedPath = args.path.replace(/\/+$/, "");
+        if (rewrite.rewrites.length > 0) auto.path_rewrite = rewrite.rewrites;
+
+        const normalizedPath = effectivePath.replace(/\/+$/, "");
         const isArtifactCreate =
           args.method.toUpperCase() === "POST" && normalizedPath === "/api/v1/artifacts";
         if (isArtifactCreate && res.ok) {
@@ -318,7 +325,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             intent: auditIntent ?? null,
             request: {
               method: args.method,
-              path: args.path,
+              path_original: args.path,
+              path: effectivePath,
               query: args.query,
               headers: args.headers,
               json: args.json,
@@ -333,7 +341,11 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             },
           }),
         );
-        const msg = auditIntent?.trim() || `${args.method.toUpperCase()} ${args.path}`;
+        const msg =
+          auditIntent?.trim() ||
+          `${args.method.toUpperCase()} ${effectivePath}${
+            effectivePath === args.path ? "" : " (rewritten)"
+          }`;
         await tryCreateRunEvent({
           bearerToken,
           executionId: auditExecutionId ?? auditState.executionId,
