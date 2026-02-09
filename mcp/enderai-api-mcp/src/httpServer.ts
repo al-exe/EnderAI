@@ -40,7 +40,11 @@ function readBackendBearerToken(req: http.IncomingMessage): string | undefined {
   // Allow passing the EnderAI backend token separately from the MCP server auth header.
   // This is required for a hosted MCP server to act "per user".
   const raw = getHeaderString(req, "x-enderai-backend-token")?.trim();
-  if (raw) return raw;
+  if (raw) {
+    // Be tolerant: some clients include the "Bearer " prefix even on the token header.
+    const m = /^Bearer\s+(.+)$/.exec(raw);
+    return m?.[1]?.trim() || raw;
+  }
 
   const auth = getHeaderString(req, "x-enderai-backend-authorization")?.trim();
   if (!auth) return undefined;
@@ -133,6 +137,15 @@ async function main(): Promise<void> {
       if (isInitialize) {
         session = await createSession(sessionIdHeader, readBackendBearerToken(req));
         createdSession = true;
+      } else if (sessionIdHeader && method === "GET") {
+        // Some clients probe with a GET *and* include a random Mcp-Session-Id header
+        // before initialization. Treat this as a harmless capability check.
+        res.writeHead(200, {
+          "content-type": "text/plain",
+          "cache-control": "no-store",
+        });
+        res.end("ok");
+        return;
       } else if (sessionIdHeader) {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("Not Found");
