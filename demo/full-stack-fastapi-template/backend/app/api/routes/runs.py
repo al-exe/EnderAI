@@ -45,6 +45,17 @@ def _is_missing_column_error(err: Exception, *, column: str) -> bool:
     return "does not exist" in message and "column" in message and column.lower() in message
 
 
+def _task_has_intent_key_column(session: SessionDep) -> bool:
+    # Keep /runs/start backward-compatible with older DB schemas. Mirrors routes/tasks.py.
+    stmt = text(
+        "select 1 "
+        "from information_schema.columns "
+        "where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key' "
+        "limit 1"
+    )
+    return session.connection().execute(stmt).first() is not None
+
+
 def _canonicalize_task_title(title: str) -> str:
     # Keep this conservative: only strip UUID-like tokens and normalize whitespace.
     cleaned = _UUID_RE.sub("", title).strip()
@@ -138,6 +149,7 @@ def start_run(
         else _default_intent_key(title_raw)
     )
     task_title = _canonicalize_task_title(title_raw)
+    has_intent_key = _task_has_intent_key_column(session)
 
     now = datetime.now(timezone.utc)
     reuse_within_seconds = payload.reuse_within_seconds
@@ -145,29 +157,33 @@ def start_run(
     task_row = None
     reused_task = False
     try:
-        stmt = text(
-            "select "
-            "t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria, "
-            "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-            "from public.task t "
-            "where t.workflow_key = :workflow_key and t.intent_key = :intent_key "
-            "order by t.last_touched_at desc nulls last "
-            "limit 1"
-        )
-        task_row = (
-            session.connection()
-            .execute(stmt, {"workflow_key": workflow_key, "intent_key": intent_key})
-            .mappings()
-            .first()
-        )
+        if has_intent_key:
+            stmt = text(
+                "select "
+                "t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria, "
+                "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
+                "from public.task t "
+                "where t.workflow_key = :workflow_key and t.intent_key = :intent_key "
+                "order by t.last_touched_at desc nulls last "
+                "limit 1"
+            )
+            params = {"workflow_key": workflow_key, "intent_key": intent_key}
+        else:
+            # Older schema: no intent_key column. Fall back to grouping by (workflow_key, canonicalized title).
+            stmt = text(
+                "select "
+                "t.id, t.title, t.workflow_key, t.goal, t.acceptance_criteria, "
+                "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
+                "from public.task t "
+                "where t.workflow_key = :workflow_key and t.title = :title "
+                "order by t.last_touched_at desc nulls last "
+                "limit 1"
+            )
+            params = {"workflow_key": workflow_key, "title": task_title}
+        task_row = session.connection().execute(stmt, params).mappings().first()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
             raise HTTPException(status_code=501, detail="Tasks table not initialized")
-        if _is_missing_column_error(e, column="intent_key"):
-            raise HTTPException(
-                status_code=501,
-                detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
-            )
         raise
 
     if task_row is not None and reuse_within_seconds is not None:
@@ -192,30 +208,54 @@ def start_run(
 
         task_id = uuid.uuid4()
         try:
-            insert_stmt = text(
-                "insert into public.task ("
-                "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
-                ") values ("
-                ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
-                ") returning "
-                "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
-                "risk_level, status, created_at, last_touched_at"
-            )
+            if has_intent_key:
+                insert_stmt = text(
+                    "insert into public.task ("
+                    "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
+                    ") values ("
+                    ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
+                    ") returning "
+                    "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
+                    "risk_level, status, created_at, last_touched_at"
+                )
+            else:
+                insert_stmt = text(
+                    "insert into public.task ("
+                    "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
+                    ") values ("
+                    ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
+                    ") returning "
+                    "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
+                    "risk_level, status, created_at, last_touched_at"
+                )
             task_row = (
                 session.connection()
                 .execute(
                     insert_stmt,
-                    {
-                        "id": task_id,
-                        "title": task_title,
-                        "workflow_key": workflow_key,
-                        "intent_key": intent_key,
-                        "goal": goal,
-                        "acceptance_criteria": acceptance_criteria,
-                        "systems_touched": json.dumps(systems_touched),
-                        "risk_level": risk_level,
-                        "status": status,
-                    },
+                    (
+                        {
+                            "id": task_id,
+                            "title": task_title,
+                            "workflow_key": workflow_key,
+                            "intent_key": intent_key,
+                            "goal": goal,
+                            "acceptance_criteria": acceptance_criteria,
+                            "systems_touched": json.dumps(systems_touched),
+                            "risk_level": risk_level,
+                            "status": status,
+                        }
+                        if has_intent_key
+                        else {
+                            "id": task_id,
+                            "title": task_title,
+                            "workflow_key": workflow_key,
+                            "goal": goal,
+                            "acceptance_criteria": acceptance_criteria,
+                            "systems_touched": json.dumps(systems_touched),
+                            "risk_level": risk_level,
+                            "status": status,
+                        }
+                    ),
                 )
                 .mappings()
                 .first()
@@ -223,11 +263,6 @@ def start_run(
         except ProgrammingError as e:
             if _is_missing_table_error(e):
                 raise HTTPException(status_code=501, detail="Tasks table not initialized")
-            if _is_missing_column_error(e, column="intent_key"):
-                raise HTTPException(
-                    status_code=501,
-                    detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
-                )
             raise
 
         if task_row is None:
@@ -274,25 +309,30 @@ def start_run(
 
     # Touch the Task (and reopen "done" tasks) to keep ordering/grouping sensible.
     try:
-        touch_stmt = text(
-            "update public.task "
-            "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
-            "where id = :task_id "
-            "returning "
-            "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
-            "risk_level, status, created_at, last_touched_at"
-        )
+        if has_intent_key:
+            touch_stmt = text(
+                "update public.task "
+                "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
+                "where id = :task_id "
+                "returning "
+                "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
+                "risk_level, status, created_at, last_touched_at"
+            )
+        else:
+            touch_stmt = text(
+                "update public.task "
+                "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
+                "where id = :task_id "
+                "returning "
+                "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
+                "risk_level, status, created_at, last_touched_at"
+            )
         touched = (
             session.connection().execute(touch_stmt, {"task_id": task_id}).mappings().first()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
             raise HTTPException(status_code=501, detail="Tasks table not initialized")
-        if _is_missing_column_error(e, column="intent_key"):
-            raise HTTPException(
-                status_code=501,
-                detail="Tasks table missing intent_key column; run scripts/create_memory_tables.py to upgrade schema",
-            )
         raise
 
     session.commit()
