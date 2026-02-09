@@ -8,19 +8,19 @@ from sqlmodel import func, select
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.models import (
-    LibraryItem,
-    LibraryItemKind,
-    LibraryItemCreate,
-    LibraryItemPublic,
-    LibraryItemsPublic,
-    LibraryItemUpdate,
+    Artifact,
+    ArtifactKind,
+    ArtifactCreate,
+    ArtifactPublic,
+    ArtifactsPublic,
+    ArtifactUpdate,
     Message,
     WorkflowBucket,
     WorkflowKeyCount,
     WorkflowKeysPublic,
 )
 
-router = APIRouter(prefix="/library", tags=["library"])
+router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 
 def _is_missing_table_error(err: Exception) -> bool:
@@ -45,28 +45,28 @@ def _humanize_workflow_key(workflow_key: str) -> str:
 
 
 @router.get("/workflow-keys", response_model=WorkflowKeysPublic)
-def read_library_workflow_keys(
+def read_artifact_workflow_keys(
     session: SessionDep,
     current_user: CurrentUser,
     current_only: bool = True,
 ) -> Any:
     """
-    Retrieve distinct library workflow keys ("buckets") with counts.
+    Retrieve distinct artifact workflow keys ("buckets") with counts.
     """
 
     statement = select(
-        LibraryItem.workflow_key,
+        Artifact.workflow_key,
         WorkflowBucket.bucket_name,
-        func.count(LibraryItem.id),
-    ).select_from(LibraryItem)
+        func.count(Artifact.id),
+    ).select_from(Artifact)
     statement = statement.outerjoin(
         WorkflowBucket,
-        WorkflowBucket.workflow_key == LibraryItem.workflow_key,
+        WorkflowBucket.workflow_key == Artifact.workflow_key,
     )
-    statement = statement.group_by(LibraryItem.workflow_key, WorkflowBucket.bucket_name)
-    statement = statement.order_by(func.count(LibraryItem.id).desc())
+    statement = statement.group_by(Artifact.workflow_key, WorkflowBucket.bucket_name)
+    statement = statement.order_by(func.count(Artifact.id).desc())
     if current_only:
-        statement = statement.where(LibraryItem.superseded_by_id.is_(None))
+        statement = statement.where(Artifact.superseded_by_id.is_(None))
 
     rows = session.exec(statement).all()
     data = [
@@ -80,86 +80,86 @@ def read_library_workflow_keys(
     return WorkflowKeysPublic(data=data)
 
 
-@router.get("/", response_model=LibraryItemsPublic)
-def read_library_items(
+@router.get("/", response_model=ArtifactsPublic)
+def read_artifacts(
     session: SessionDep,
     current_user: CurrentUser,
     workflow_key: str | None = None,
-    kind: LibraryItemKind | None = None,
+    kind: ArtifactKind | None = None,
     q: str | None = None,
     current_only: bool = True,
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve library items.
+    Retrieve artifacts.
     """
 
     filters: list[Any] = []
 
     if workflow_key:
-        filters.append(LibraryItem.workflow_key == workflow_key)
+        filters.append(Artifact.workflow_key == workflow_key)
     if kind:
-        filters.append(LibraryItem.kind == kind)
+        filters.append(Artifact.kind == kind)
     if current_only:
-        filters.append(LibraryItem.superseded_by_id.is_(None))
+        filters.append(Artifact.superseded_by_id.is_(None))
     if q:
         like = f"%{q}%"
         filters.append(
             or_(
-                LibraryItem.title.ilike(like),
-                LibraryItem.body_mdc.ilike(like),
-                LibraryItem.workflow_key.ilike(like),
+                Artifact.title.ilike(like),
+                Artifact.body_mdc.ilike(like),
+                Artifact.workflow_key.ilike(like),
                 WorkflowBucket.bucket_name.ilike(like),
             )
         )
 
-    count_statement = select(func.count()).select_from(LibraryItem)
+    count_statement = select(func.count()).select_from(Artifact)
     if q:
         count_statement = count_statement.outerjoin(
             WorkflowBucket,
-            WorkflowBucket.workflow_key == LibraryItem.workflow_key,
+            WorkflowBucket.workflow_key == Artifact.workflow_key,
         )
     if filters:
         count_statement = count_statement.where(*filters)
     count = session.exec(count_statement).one()
 
-    statement = select(LibraryItem).order_by(LibraryItem.created_at.desc()).offset(skip).limit(limit)
+    statement = select(Artifact).order_by(Artifact.created_at.desc()).offset(skip).limit(limit)
     if q:
         statement = statement.outerjoin(
             WorkflowBucket,
-            WorkflowBucket.workflow_key == LibraryItem.workflow_key,
+            WorkflowBucket.workflow_key == Artifact.workflow_key,
         )
     if filters:
         statement = statement.where(*filters)
     items = session.exec(statement).all()
 
-    return LibraryItemsPublic(data=items, count=count)
+    return ArtifactsPublic(data=items, count=count)
 
 
-@router.get("/{id}", response_model=LibraryItemPublic)
-def read_library_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
+@router.get("/{id}", response_model=ArtifactPublic)
+def read_artifact(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
     """
-    Get library item by ID.
+    Get artifact by ID.
     """
-    item = session.get(LibraryItem, id)
+    item = session.get(Artifact, id)
     if not item:
-        raise HTTPException(status_code=404, detail="Library item not found")
+        raise HTTPException(status_code=404, detail="Artifact not found")
     return item
 
 
-@router.post("/", response_model=LibraryItemPublic)
-def create_library_item(
-    *, session: SessionDep, current_user: CurrentUser, item_in: LibraryItemCreate
+@router.post("/", response_model=ArtifactPublic)
+def create_artifact(
+    *, session: SessionDep, current_user: CurrentUser, item_in: ArtifactCreate
 ) -> Any:
     """
-    Create new library item.
+    Create a new artifact.
 
     Notes:
     - Deletes are not supported; supersede instead.
     """
     get_current_active_superuser(current_user)
-    item = LibraryItem.model_validate(item_in)
+    item = Artifact.model_validate(item_in)
     bucket = session.get(WorkflowBucket, item.workflow_key)
     if bucket is None:
         session.add(
@@ -174,30 +174,30 @@ def create_library_item(
     return item
 
 
-@router.put("/{id}", response_model=LibraryItemPublic)
-def update_library_item(
+@router.put("/{id}", response_model=ArtifactPublic)
+def update_artifact(
     *,
     session: SessionDep,
     current_user: CurrentUser,
     id: uuid.UUID,
-    item_in: LibraryItemUpdate,
+    item_in: ArtifactUpdate,
 ) -> Any:
     """
-    Update a library item by superseding it.
+    Update an artifact by superseding it.
 
     This endpoint never edits the existing row; it creates a new row and sets
-    `superseded_by_id` on the previous item.
+    `superseded_by_id` on the previous artifact.
     """
     get_current_active_superuser(current_user)
 
-    existing = session.get(LibraryItem, id)
+    existing = session.get(Artifact, id)
     if not existing:
-        raise HTTPException(status_code=404, detail="Library item not found")
+        raise HTTPException(status_code=404, detail="Artifact not found")
     if existing.superseded_by_id is not None:
-        raise HTTPException(status_code=409, detail="Cannot update a superseded library item")
+        raise HTTPException(status_code=409, detail="Cannot update a superseded artifact")
 
     update = item_in.model_dump(exclude_unset=True)
-    new_item = LibraryItem(
+    new_item = Artifact(
         workflow_key=update.get("workflow_key", existing.workflow_key),
         kind=update.get("kind", existing.kind),
         title=update.get("title", existing.title),
@@ -225,27 +225,27 @@ def update_library_item(
 
 
 @router.delete("/{id}", response_model=Message)
-def delete_library_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
+def delete_artifact(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Any:
     """
-    Delete a library item.
+    Delete an artifact.
 
     Note: restricted to superusers. Deletion is blocked if the item is referenced.
     Prefer superseding instead of deleting.
     """
 
     get_current_active_superuser(current_user)
-    item = session.get(LibraryItem, id)
+    item = session.get(Artifact, id)
     if not item:
-        raise HTTPException(status_code=404, detail="Library item not found")
+        raise HTTPException(status_code=404, detail="Artifact not found")
 
     # Block deletion if referenced by newer versions.
     newer_count = (
         session.exec(
-            select(func.count()).select_from(LibraryItem).where(LibraryItem.superseded_by_id == id)
+            select(func.count()).select_from(Artifact).where(Artifact.superseded_by_id == id)
         ).one()
     )
     if newer_count and int(newer_count) > 0:
-        raise HTTPException(status_code=409, detail="Library item is referenced by newer versions")
+        raise HTTPException(status_code=409, detail="Artifact is referenced by newer versions")
 
     # Actual check (raw SQL)
     from sqlalchemy import text as sql_text
@@ -258,7 +258,7 @@ def delete_library_item(session: SessionDep, current_user: CurrentUser, id: uuid
             session.connection()
             .execute(
                 sql_text(
-                    "select count(*) from public.run_library_link where library_item_id = :id"
+                    "select count(*) from public.execution_artifact_link where artifact_id = :id"
                 ),
                 {"id": id},
             )
@@ -268,8 +268,8 @@ def delete_library_item(session: SessionDep, current_user: CurrentUser, id: uuid
         if not _is_missing_table_error(e):
             raise
     if linked_count and int(linked_count) > 0:
-        raise HTTPException(status_code=409, detail="Library item is linked from runs")
+        raise HTTPException(status_code=409, detail="Artifact is linked from executions")
 
     session.delete(item)
     session.commit()
-    return Message(message="Library item deleted successfully")
+    return Message(message="Artifact deleted successfully")

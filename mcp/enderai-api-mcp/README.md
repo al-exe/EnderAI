@@ -8,22 +8,22 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 - `enderai_openapi`: Fetch `/api/v1/openapi.json`.
 - `enderai_health_check`: Fetch `/api/v1/utils/health-check/`.
 
-## Run Audit Trail (Optional)
+## Execution Event Log (Optional)
 
-This MCP server can help keep an **audit trail per Run** (EnderAI `run_event` rows):
+This MCP server can help keep an **event log per Execution** (EnderAI `event` rows):
 
-- If you call `POST /api/v1/runs/start` via `enderai_request`, the server will remember the returned `run.id` (per MCP session).
+- If you call `POST /api/v1/executions/start` via `enderai_request`, the server will remember the returned `execution.id` (per MCP session).
 - For subsequent `enderai_request` calls, you can pass an `audit` object:
-  - `audit.intent`: short human-readable reason for the call (becomes the Run event message)
-  - `audit.run_id`: optional override for the current Run id (also updates session context)
-- When a Run id is known, the server will append a `run_event` of type `mcp` containing:
+  - `audit.intent`: short human-readable reason for the call (becomes the Event message)
+  - `audit.run_id`: optional override for the current Execution id (also updates session context)
+- When an Execution id is known, the server will append an `event` of type `mcp` containing:
   - the request args (method/path/query/headers/body)
   - the response summary (status/ok/data)
   - secrets redacted (`Authorization`, tokens, passwords, etc.)
   - payloads capped to keep DB/UI healthy (large JSON like OpenAPI is truncated)
 
-Additionally, when you `POST /api/v1/library/` and a Run id is known, the server will auto-link
-the created Library item to the current Run (`relation=created`).
+Additionally, when you `POST /api/v1/artifacts/` and an Execution id is known, the server will auto-link
+the created Artifact to the current Execution (`relation=created`).
 
 Example (pseudo-code):
 

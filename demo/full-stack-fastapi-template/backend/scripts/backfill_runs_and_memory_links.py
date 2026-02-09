@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Backfill Runs for existing Tasks that have none, and attach Library memory items to Runs.
+Backfill Executions for existing Threads that have none, and attach Artifacts to Executions.
 
 This is intended for environments where:
-- Tasks + Library items exist, but Runs were not created (or were created inconsistently).
-- Library items may include `tags.task_id` so we can link them to a Run.
+- Threads + Artifacts exist, but Executions were not created (or were created inconsistently).
+- Artifacts may include `tags.thread_id` so we can link them to an Execution.
 
 Safety goals:
-- Idempotent: re-running should be a no-op once every Task has >=1 Run and memory links exist.
-- Conservative linking: only links Library items that explicitly declare `tags.task_id`.
+- Idempotent: re-running should be a no-op once every Thread has >=1 Execution and links exist.
+- Conservative linking: only links Artifacts that explicitly declare `tags.thread_id`.
 
 Notes:
 - Uses the public HTTP API (requires `ENDERAI_BEARER_TOKEN`).
@@ -41,7 +41,7 @@ _UUID_RE = re.compile(
 )
 
 
-def canonicalize_task_title(title: str) -> str:
+def canonicalize_thread_title(title: str) -> str:
     cleaned = _UUID_RE.sub("", title).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or title.strip()
@@ -130,25 +130,26 @@ def _merge_systems_touched(existing: dict[str, Any] | None, updates: dict[str, A
     return merged
 
 
-def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tasks: int | None) -> int:
-    tasks = paginate(cfg, "/api/v1/tasks/", params={"workflow_key": workflow_key} if workflow_key else None)
-    runs = paginate(cfg, "/api/v1/runs/")
-    library = paginate(cfg, "/api/v1/library/", params={"current_only": "false"})
+def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_threads: int | None) -> int:
+    threads = paginate(cfg, "/api/v1/threads/", params={"workflow_key": workflow_key} if workflow_key else None)
+    executions = paginate(cfg, "/api/v1/executions/")
+    artifacts = paginate(cfg, "/api/v1/artifacts/", params={"current_only": "false"})
 
-    runs_by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for r in runs:
-        runs_by_task[str(r["task_id"])].append(r)
+    executions_by_thread: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for e in executions:
+        executions_by_thread[str(e["thread_id"])].append(e)
 
-    library_by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for li in library:
-        tid = (li.get("tags") or {}).get("task_id")
+    artifacts_by_thread: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for a in artifacts:
+        tags = a.get("tags") or {}
+        tid = tags.get("thread_id") or tags.get("task_id")
         if tid:
-            library_by_task[str(tid)].append(li)
+            artifacts_by_thread[str(tid)].append(a)
 
     # Deterministic ordering helps debug.
-    tasks_sorted = sorted(tasks, key=lambda t: (t.get("workflow_key") or "", t.get("created_at") or "", t.get("id") or ""))
+    threads_sorted = sorted(threads, key=lambda t: (t.get("workflow_key") or "", t.get("created_at") or "", t.get("id") or ""))
 
-    created_runs = 0
+    created_executions = 0
     created_links = 0
     patched_titles = 0
     patched_details = 0
@@ -159,25 +160,25 @@ def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tas
     failed = 0
     failures: list[tuple[str, str]] = []
 
-    # When the deployed DB schema lacks intent_key, /runs/start groups by (workflow_key, canonicalized title).
-    # Avoid creating multiple Runs for the same group, and avoid spurious failures when duplicate Task rows exist.
+    # When the deployed DB schema lacks intent_key, /executions/start groups by (workflow_key, canonicalized title).
+    # Avoid creating multiple Executions for the same group, and avoid spurious failures when duplicate Thread rows exist.
     handled_groups: set[tuple[str, str]] = set()
 
-    for task in tasks_sorted:
-        task_id = str(task["id"])
-        if runs_by_task.get(task_id):
+    for thread in threads_sorted:
+        thread_id = str(thread["id"])
+        if executions_by_thread.get(thread_id):
             skipped += 1
             continue
 
-        if max_tasks is not None and created_runs >= max_tasks:
+        if max_threads is not None and created_executions >= max_threads:
             break
 
-        original_status = task.get("status") or "open"
-        original_title = task.get("title") or ""
-        workflow = task.get("workflow_key") or ""
+        original_status = thread.get("status") or "open"
+        original_title = thread.get("title") or ""
+        workflow = thread.get("workflow_key") or ""
 
-        # Ensure /runs/start will reuse the existing Task in schemas without intent_key.
-        canonical_title = canonicalize_task_title(original_title)
+        # Ensure /executions/start will reuse the existing Thread in schemas without intent_key.
+        canonical_title = canonicalize_thread_title(original_title)
         uuids_in_title = extract_uuids(original_title)
         group_key = (workflow, canonical_title)
         if group_key in handled_groups:
@@ -186,7 +187,7 @@ def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tas
 
         try:
             if canonical_title != original_title.strip():
-                # Patch title to match /runs/start grouping when intent_key is missing.
+                # Patch title to match /executions/start grouping when intent_key is missing.
                 systems_updates: dict[str, Any] = {}
                 if uuids_in_title:
                     systems_updates["original_title"] = original_title
@@ -194,34 +195,34 @@ def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tas
                     systems_updates["target_id"] = uuids_in_title[0]
 
                 if not dry_run:
-                    merged_systems = _merge_systems_touched(task.get("systems_touched") or {}, systems_updates)
+                    merged_systems = _merge_systems_touched(thread.get("systems_touched") or {}, systems_updates)
                     _request(
                         cfg,
                         "PATCH",
-                        f"/api/v1/tasks/{task_id}",
+                        f"/api/v1/threads/{thread_id}",
                         body={"title": canonical_title, "systems_touched": merged_systems},
                     )
-                task["title"] = canonical_title
-                task["systems_touched"] = _merge_systems_touched(task.get("systems_touched") or {}, systems_updates)
+                thread["title"] = canonical_title
+                thread["systems_touched"] = _merge_systems_touched(thread.get("systems_touched") or {}, systems_updates)
                 patched_titles += 1
 
-            # Fill missing Task details (only when blank).
-            goal = task.get("goal")
-            ac = task.get("acceptance_criteria")
-            systems = task.get("systems_touched") or {}
+            # Fill missing Thread details (only when blank).
+            goal = thread.get("goal")
+            ac = thread.get("acceptance_criteria")
+            systems = thread.get("systems_touched") or {}
             if (not goal) or (not ac) or (not systems):
-                mem = sorted(library_by_task.get(task_id, []), key=lambda li: li.get("created_at") or "")
+                mem = sorted(artifacts_by_thread.get(thread_id, []), key=lambda li: li.get("created_at") or "")
                 if not goal:
                     if mem:
                         goal = f"See linked memory: {mem[0].get('title')}"
                     else:
-                        goal = task.get("title")
+                        goal = thread.get("title")
                 if not ac:
                     if mem:
                         titles = [m.get("title") for m in mem if m.get("title")]
                         ac = "Linked memory items:\n- " + "\n- ".join(titles) if titles else None
                     else:
-                        ac = "1) A Run exists for this Task.\n2) Any associated memory is linked to that Run."
+                        ac = "1) An Execution exists for this Thread.\n2) Any associated Artifacts are linked."
                 if not systems:
                     systems = {}
                 # Merge in any useful tags from memory items, but only if keys are absent.
@@ -235,68 +236,68 @@ def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tas
                     _request(
                         cfg,
                         "PATCH",
-                        f"/api/v1/tasks/{task_id}",
+                        f"/api/v1/threads/{thread_id}",
                         body={"goal": goal, "acceptance_criteria": ac, "systems_touched": systems},
                     )
                 patched_details += 1
 
-            # Create the Run via /runs/start.
+            # Create the Execution via /executions/start.
             targets: list[Any] = []
             if uuids_in_title:
                 targets = [uuids_in_title[0]]
 
-            run_summary = "Backfill: created missing Run for existing Task; original run details/events were not recorded."
+            run_summary = "Backfill: created missing Execution for existing Thread; original details/events were not recorded."
             payload = {
-                "task": {
-                    "title": task.get("title") or original_title,
+                "thread": {
+                    "title": thread.get("title") or original_title,
                     "workflow_key": workflow,
                 },
-                "run": {"targets": targets, "status": "success", "summary": run_summary},
+                "execution": {"targets": targets, "status": "success", "summary": run_summary},
                 "reuse_within_seconds": None,
             }
 
             if dry_run:
                 # Pretend a run was created; skip writes.
-                created_runs += 1
+                created_executions += 1
                 handled_groups.add(group_key)
                 continue
 
-            res = _request(cfg, "POST", "/api/v1/runs/start", body=payload)
-            returned_task_id = str((res.get("task") or {}).get("id") or "")
-            run_id = str((res.get("run") or {}).get("id") or "")
-            if not run_id:
-                raise RuntimeError(f"/runs/start returned no run.id for task_id={task_id}")
+            res = _request(cfg, "POST", "/api/v1/executions/start", body=payload)
+            returned_thread_id = str((res.get("thread") or {}).get("id") or "")
+            execution_id = str((res.get("execution") or {}).get("id") or "")
+            if not execution_id:
+                raise RuntimeError(f"/executions/start returned no execution.id for thread_id={thread_id}")
             handled_groups.add(group_key)
 
-            created_runs += 1
+            created_executions += 1
             # Ensure ended_at gets populated for terminal statuses.
-            _request(cfg, "PATCH", f"/api/v1/runs/{run_id}", body={"status": "success"})
+            _request(cfg, "PATCH", f"/api/v1/executions/{execution_id}", body={"status": "success"})
 
-            if returned_task_id != task_id:
-                # This happens when duplicate Task rows exist for the same (workflow_key, title):
-                # /runs/start will reuse whichever Task has the latest last_touched_at.
+            if returned_thread_id != thread_id:
+                # This happens when duplicate Thread rows exist for the same (workflow_key, title):
+                # /executions/start will reuse whichever Thread has the latest last_touched_at.
                 collision_reused_other_task += 1
-                runs_by_task.setdefault(returned_task_id, []).append({"id": run_id})
+                executions_by_thread.setdefault(returned_thread_id, []).append({"id": execution_id})
                 # Don't attempt to attach memory or restore status to the wrong Task id.
                 continue
 
-            runs_by_task.setdefault(task_id, []).append({"id": run_id})
+            executions_by_thread.setdefault(thread_id, []).append({"id": execution_id})
 
-            # Restore Task status if /runs/start reopened a done Task.
+            # Restore Thread status if /executions/start reopened a done Thread.
             if original_status == "done":
-                _request(cfg, "PATCH", f"/api/v1/tasks/{task_id}", body={"status": "done"})
+                _request(cfg, "PATCH", f"/api/v1/threads/{thread_id}", body={"status": "done"})
                 restored_status += 1
 
-            # Attach any Library memory items that explicitly reference this Task.
-            for li in sorted(library_by_task.get(task_id, []), key=lambda x: x.get("created_at") or ""):
+            # Attach any Artifacts that explicitly reference this Thread.
+            for li in sorted(artifacts_by_thread.get(thread_id, []), key=lambda x: x.get("created_at") or ""):
                 li_id = str(li["id"])
                 created_at = li.get("created_at")
                 _request(
                     cfg,
                     "POST",
-                    f"/api/v1/runs/{run_id}/memory-links",
+                    f"/api/v1/executions/{execution_id}/artifact-links",
                     body={
-                        "library_item_id": li_id,
+                        "artifact_id": li_id,
                         "relation": "created",
                         "created_at": created_at,
                     },
@@ -309,18 +310,18 @@ def backfill(cfg: ApiConfig, *, dry_run: bool, workflow_key: str | None, max_tas
             continue
 
     print("Backfill summary")
-    print("  tasks_total:", len(tasks))
-    print("  tasks_skipped_has_runs:", skipped)
-    print("  runs_created:", created_runs)
-    print("  task_titles_canonicalized:", patched_titles)
-    print("  tasks_details_patched:", patched_details)
-    print("  tasks_status_restored_done:", restored_status)
+    print("  threads_total:", len(threads))
+    print("  threads_skipped_has_executions:", skipped)
+    print("  executions_created:", created_executions)
+    print("  thread_titles_canonicalized:", patched_titles)
+    print("  threads_details_patched:", patched_details)
+    print("  threads_status_restored_done:", restored_status)
     print("  duplicate_group_skipped:", duplicate_group_skipped)
     print("  collisions_reused_other_task:", collision_reused_other_task)
-    print("  memory_links_created:", created_links)
-    print("  tasks_failed:", failed)
+    print("  artifact_links_created:", created_links)
+    print("  threads_failed:", failed)
     if failures:
-        print("  failed_task_ids:")
+        print("  failed_thread_ids:")
         for tid, desc in failures[:20]:
             print("   -", tid, desc)
 
@@ -333,7 +334,7 @@ def main(argv: Iterable[str]) -> int:
     p.add_argument("--base-url", default=os.environ.get("ENDERAI_BASE_URL") or DEFAULT_BASE_URL)
     p.add_argument("--workflow-key", default=None)
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--max-tasks", type=int, default=None)
+    p.add_argument("--max-threads", type=int, default=None)
     args = p.parse_args(list(argv))
 
     token = os.environ.get(TOKEN_ENV)
@@ -342,7 +343,7 @@ def main(argv: Iterable[str]) -> int:
         return 2
 
     cfg = ApiConfig(base_url=args.base_url, token=token)
-    return backfill(cfg, dry_run=args.dry_run, workflow_key=args.workflow_key, max_tasks=args.max_tasks)
+    return backfill(cfg, dry_run=args.dry_run, workflow_key=args.workflow_key, max_threads=args.max_threads)
 
 
 if __name__ == "__main__":

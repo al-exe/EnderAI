@@ -80,19 +80,19 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
   // Per-session state: createSession() constructs a new server instance per MCP session.
   const auditState: {
-    runId?: string;
-    taskId?: string;
+    executionId?: string;
+    threadId?: string;
     depth: number;
   } = { depth: 0 };
 
   async function tryCreateRunEvent(params: {
     bearerToken?: string;
-    runId?: string;
+    executionId?: string;
     type: string;
     message: string;
     data: unknown;
   }): Promise<void> {
-    if (!params.runId) return;
+    if (!params.executionId) return;
     if (!params.bearerToken) return;
     if (auditState.depth > 0) return;
 
@@ -100,7 +100,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     try {
       await enderaiFetch({
         method: "POST",
-        path: `/api/v1/runs/${params.runId}/events`,
+        path: `/api/v1/executions/${params.executionId}/events`,
         bearerToken: params.bearerToken,
         json: {
           type: params.type,
@@ -117,21 +117,21 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
   async function tryAutoLinkLibraryItem(params: {
     bearerToken?: string;
-    runId?: string;
-    libraryItemId?: string;
+    executionId?: string;
+    artifactId?: string;
     createdAt?: string | null;
   }): Promise<unknown | null> {
-    if (!params.runId || !params.libraryItemId || !params.bearerToken) return null;
+    if (!params.executionId || !params.artifactId || !params.bearerToken) return null;
     if (auditState.depth > 0) return null;
 
     auditState.depth += 1;
     try {
       const res = await enderaiFetch({
         method: "POST",
-        path: `/api/v1/runs/${params.runId}/memory-links`,
+        path: `/api/v1/executions/${params.executionId}/artifact-links`,
         bearerToken: params.bearerToken,
         json: {
-          library_item_id: params.libraryItemId,
+          artifact_id: params.artifactId,
           relation: "created",
           created_at: params.createdAt ?? null,
         },
@@ -145,11 +145,15 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     }
   }
 
-  function extractRunStartIds(resData: unknown): { runId?: string; taskId?: string } {
+  function extractExecutionStartIds(
+    resData: unknown,
+  ): { executionId?: string; threadId?: string } {
     const d = resData as any;
-    const runId = typeof d?.run?.id === "string" ? d.run.id : undefined;
-    const taskId = typeof d?.task?.id === "string" ? d.task.id : undefined;
-    return { runId, taskId };
+    const executionId =
+      typeof d?.execution?.id === "string" ? d.execution.id : undefined;
+    const threadId =
+      typeof d?.thread?.id === "string" ? d.thread.id : undefined;
+    return { executionId, threadId };
   }
 
   const EnderaiRequestArgsSchema = z
@@ -166,7 +170,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         .object({
           // Short human-readable reason for the call; becomes the Run event message.
           intent: z.string().min(1).optional(),
-          // Override the current Run id (also updates the session's run context).
+          // Override the current Execution id (also updates the session's context).
+          execution_id: z.string().uuid().optional(),
+          // Backward-compat (deprecated): old name for execution_id.
           run_id: z.string().uuid().optional(),
         })
         .optional(),
@@ -190,7 +196,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               path: {
                 type: "string",
                 description:
-                  'Request path starting with "/". Example: "/api/v1/tasks/".',
+                  'Request path starting with "/". Example: "/api/v1/threads/".',
               },
               query: {
                 type: "object",
@@ -217,7 +223,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               audit: {
                 type: "object",
                 description:
-                  "Optional per-call audit metadata. When a Run id is known, this server can append an audit event with request/response (secrets redacted).",
+                  "Optional per-call audit metadata. When an Execution id is known, this server can append an Event with request/response (secrets redacted).",
                 additionalProperties: false,
                 properties: {
                   intent: {
@@ -227,7 +233,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                   run_id: {
                     type: "string",
                     description:
-                      "Override the current Run id (also updates session context).",
+                      "Deprecated: use execution_id. Overrides the current Execution id (also updates session context).",
+                  },
+                  execution_id: {
+                    type: "string",
+                    description:
+                      "Override the current Execution id (also updates session context).",
                   },
                 },
               },
@@ -258,12 +269,14 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const { audit, ...reqArgs } = args;
         const sessionToken = opts.backendBearerTokenProvider?.();
         const bearerToken = reqArgs.bearerToken ?? sessionToken;
-        const auditRunId = audit?.run_id ?? auditState.runId;
+        const auditExecutionId =
+          audit?.execution_id ?? audit?.run_id ?? auditState.executionId;
         const auditIntent = audit?.intent;
 
         // Allow the caller to explicitly set the run context (useful for clients that
         // start a run outside of MCP, then want MCP calls to attach to it).
-        if (audit?.run_id) auditState.runId = audit.run_id;
+        if (audit?.execution_id) auditState.executionId = audit.execution_id;
+        if (audit?.run_id) auditState.executionId = audit.run_id;
 
         const res = await enderaiFetch({
           ...reqArgs,
@@ -271,30 +284,30 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         });
 
         // If this call started a run, update session context so subsequent calls auto-attach.
-        const isRunStart =
+        const isExecutionStart =
           args.method.toUpperCase() === "POST" &&
-          args.path.replace(/\/+$/, "") === "/api/v1/runs/start";
-        if (isRunStart && res.ok) {
-          const ids = extractRunStartIds(res.data);
-          if (ids.runId) auditState.runId = ids.runId;
-          if (ids.taskId) auditState.taskId = ids.taskId;
+          args.path.replace(/\/+$/, "") === "/api/v1/executions/start";
+        if (isExecutionStart && res.ok) {
+          const ids = extractExecutionStartIds(res.data);
+          if (ids.executionId) auditState.executionId = ids.executionId;
+          if (ids.threadId) auditState.threadId = ids.threadId;
         }
 
         const auto: Record<string, unknown> = {};
         const normalizedPath = args.path.replace(/\/+$/, "");
-        const isLibraryCreate =
-          args.method.toUpperCase() === "POST" && normalizedPath === "/api/v1/library";
-        if (isLibraryCreate && res.ok) {
+        const isArtifactCreate =
+          args.method.toUpperCase() === "POST" && normalizedPath === "/api/v1/artifacts";
+        if (isArtifactCreate && res.ok) {
           const d = res.data as any;
-          const liId = typeof d?.id === "string" ? d.id : undefined;
+          const artifactId = typeof d?.id === "string" ? d.id : undefined;
           const createdAt = typeof d?.created_at === "string" ? d.created_at : null;
           const linkRes = await tryAutoLinkLibraryItem({
             bearerToken,
-            runId: auditRunId ?? auditState.runId,
-            libraryItemId: liId,
+            executionId: auditExecutionId ?? auditState.executionId,
+            artifactId,
             createdAt,
           });
-          if (linkRes) auto.memory_link = capJson(redactSecrets(linkRes));
+          if (linkRes) auto.artifact_link = capJson(redactSecrets(linkRes));
         }
 
         // Best-effort: append MCP call as a Run event when we have a run id.
@@ -314,16 +327,16 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             },
             response: res,
             auto,
-            run_context: {
-              run_id: auditRunId ?? auditState.runId ?? null,
-              task_id: auditState.taskId ?? null,
+            execution_context: {
+              execution_id: auditExecutionId ?? auditState.executionId ?? null,
+              thread_id: auditState.threadId ?? null,
             },
           }),
         );
         const msg = auditIntent?.trim() || `${args.method.toUpperCase()} ${args.path}`;
         await tryCreateRunEvent({
           bearerToken,
-          runId: auditRunId ?? auditState.runId,
+          executionId: auditExecutionId ?? auditState.executionId,
           type: "mcp",
           message: msg,
           data: auditData,
@@ -343,7 +356,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         await tryCreateRunEvent({
           bearerToken,
-          runId: auditState.runId,
+          executionId: auditState.executionId,
           type: "mcp",
           message: "Fetch OpenAPI schema",
           data: capJson(
@@ -351,7 +364,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               tool: "enderai_openapi",
               request: { method: "GET", path: "/api/v1/openapi.json" },
               response: res,
-              run_context: { run_id: auditState.runId ?? null, task_id: auditState.taskId ?? null },
+              execution_context: { execution_id: auditState.executionId ?? null, thread_id: auditState.threadId ?? null },
             }),
           ),
         });
@@ -370,7 +383,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         await tryCreateRunEvent({
           bearerToken,
-          runId: auditState.runId,
+          executionId: auditState.executionId,
           type: "mcp",
           message: "Health check",
           data: capJson(
@@ -378,7 +391,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               tool: "enderai_health_check",
               request: { method: "GET", path: "/api/v1/utils/health-check/" },
               response: res,
-              run_context: { run_id: auditState.runId ?? null, task_id: auditState.taskId ?? null },
+              execution_context: { execution_id: auditState.executionId ?? null, thread_id: auditState.threadId ?? null },
             }),
           ),
         });

@@ -8,10 +8,11 @@ def _ensure_task_table(db: Session) -> None:
     db.connection().execute(
         text(
             """
-            create table if not exists public.task (
+            create table if not exists public.thread (
               id uuid primary key,
               title text not null,
               workflow_key text not null,
+              intent_key text,
               goal text null,
               acceptance_criteria text null,
               systems_touched jsonb not null default '{}'::jsonb,
@@ -32,7 +33,7 @@ def test_patch_task_title_persists(client, normal_user_token_headers, db: Sessio
     task_id = uuid.uuid4()
     db.connection().execute(
         text(
-            "insert into public.task (id, title, workflow_key) "
+            "insert into public.thread (id, title, workflow_key) "
             "values (:id, :title, :workflow_key)"
         ),
         {"id": task_id, "title": "Old title", "workflow_key": "tasks_demo"},
@@ -40,7 +41,7 @@ def test_patch_task_title_persists(client, normal_user_token_headers, db: Sessio
     db.commit()
 
     res = client.patch(
-        f"/api/v1/tasks/{task_id}",
+        f"/api/v1/threads/{task_id}",
         headers=normal_user_token_headers,
         json={"title": "New title"},
     )
@@ -51,10 +52,10 @@ def test_patch_task_title_persists(client, normal_user_token_headers, db: Sessio
 
     persisted = (
         db.connection()
-        .execute(text("select title from public.task where id = :id"), {"id": task_id})
+        .execute(text("select title from public.thread where id = :id"), {"id": task_id})
         .scalar_one()
     )
     assert persisted == "New title"
 
-    db.connection().execute(text("delete from public.task where id = :id"), {"id": task_id})
+    db.connection().execute(text("delete from public.thread where id = :id"), {"id": task_id})
     db.commit()
