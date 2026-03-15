@@ -162,6 +162,8 @@ DDL = [
     );
     """,
     "alter table public.thread add column if not exists intent_key text;",
+    "alter table public.thread add column if not exists topic_data jsonb not null default '{}'::jsonb;",
+    "alter table public.thread add column if not exists topic_rollup jsonb not null default '{}'::jsonb;",
     """
     create table if not exists public.execution (
       id uuid primary key,

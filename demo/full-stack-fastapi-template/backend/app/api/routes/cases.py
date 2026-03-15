@@ -15,6 +15,7 @@ from app.core.cases import (
     render_case_hydration,
     render_case_memo,
 )
+from app.core.topics import refresh_topic_rollup
 from app.models import CaseHydrationView, CaseMemoView, CasePublic, CasesPublic, CaseUpdate
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -238,6 +239,7 @@ def update_case(
         execution_row = (
             session.connection().execute(stmt, params).mappings().first()
         )
+        refresh_topic_rollup(session, thread_row["id"], persist=True)
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):

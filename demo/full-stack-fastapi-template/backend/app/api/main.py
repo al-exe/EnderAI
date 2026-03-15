@@ -3,12 +3,14 @@ from fastapi import APIRouter
 from app.api.routes import (
     agent_credentials,
     cases,
+    context_packs,
     items,
     library,
     login,
     private,
     runs,
     tasks,
+    topics,
     users,
     utils,
     workflow_buckets,
@@ -20,11 +22,13 @@ api_router.include_router(login.router)
 api_router.include_router(users.router)
 api_router.include_router(agent_credentials.router)
 api_router.include_router(cases.router)
+api_router.include_router(context_packs.router)
 api_router.include_router(utils.router)
 api_router.include_router(items.router)
 api_router.include_router(library.router)
 api_router.include_router(workflow_buckets.router)
 api_router.include_router(tasks.router)
+api_router.include_router(topics.router)
 api_router.include_router(runs.router)
 
 
