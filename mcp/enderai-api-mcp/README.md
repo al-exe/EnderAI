@@ -160,6 +160,13 @@ This is the generic hosted-MCP flow. The hosted EnderAI MCP service is already r
 
 Use this generic hosted-client flow or the Codex CLI flow below, not both.
 
+Important distinction:
+
+- terminal `codex` CLI inherits the shell environment that launches it, so env-var-based auth works well there
+- the Codex VS Code extension runs under the VS Code extension host, not the integrated terminal shell, so exporting vars in an already-open terminal does not update that running extension process
+
+If you want the safest setup with env vars and no plaintext token values in config files, prefer terminal `codex` CLI.
+
 ### Per-User Backend Access (Hosted MCP)
 
 When deploying the MCP server as a shared hosted service, MCP auth (to the MCP server) is **not** the same as backend auth (to the EnderAI API).
@@ -197,9 +204,9 @@ Create a **new Render Web Service** pointing at this repo (`al-exe/EnderAI`), wi
   - `ENDERAI_TIMEOUT_MS=30000`
   - `MCP_BEARER_TOKEN=<random-long-secret>`
 
-## Use From VS Code (Codex CLI)
+## Use From Codex CLI (Local MCP)
 
-If you are using VS Code and running Codex via the integrated terminal, you can register this server with the **Codex CLI** (it stores MCP servers in `~/.codex/config.toml`):
+If you are using terminal `codex`, you can register this server with the **Codex CLI** (it stores MCP servers in `~/.codex/config.toml`):
 
 ```sh
 codex mcp add enderai-api \
@@ -222,11 +229,25 @@ Use the MCP server `enderai-api` in this session. First confirm the server is av
 
 ### Codex CLI (Hosted MCP URL)
 
-If you are using the hosted Streamable HTTP MCP server (for example `https://enderai-mcp.onrender.com/mcp`), register it by URL.
+If you are using terminal `codex` with the hosted Streamable HTTP MCP server (for example `https://enderai-mcp.onrender.com/mcp`), register it by URL.
 
 This is a different client-specific setup from the JSON `inputs` example above. Codex does not use that JSON block; it uses `~/.codex/config.toml` plus local environment variables.
 
 Use this Codex flow instead of the generic JSON `inputs` flow above.
+
+Clean setup from scratch for terminal `codex`:
+
+1. Optional reset: remove any old local registration with `codex mcp remove enderai-api`.
+2. Optional reset: in any already-open terminal, run `unset ENDERAI_BACKEND_TOKEN ENDERAI_MCP_TOKEN`.
+3. In the EnderAI web app, open `Settings -> Connect Agent`.
+4. Select the `Codex CLI` tab.
+5. Create or rotate an agent credential.
+6. Run the generated `export ENDERAI_*` lines in the terminal that will launch `codex`.
+7. Add the generated TOML block to `~/.codex/config.toml`.
+8. Launch `codex` from that same terminal session.
+9. Verify the new session can see `enderai-api` and can call `enderai_health_check` plus `enderai_openapi`.
+
+This hosted-MCP path does not require the user to start the EnderAI MCP server locally.
 
 ```sh
 codex mcp add enderai-api --url https://enderai-mcp.onrender.com/mcp
@@ -239,9 +260,10 @@ Per-user backend auth (recommended for shared hosted MCP):
     - `env_http_headers = { "X-EnderAI-Backend-Token" = "ENDERAI_BACKEND_TOKEN" }`
   - Then export: `ENDERAI_BACKEND_TOKEN="<access_token from /api/v1/login/access-token>"`
 
-Non-interactive tip (Codex doesn’t see your interactive shell env):
-- If a non-interactive agent run can’t see `ENDERAI_BACKEND_TOKEN`, set it at invocation time.
-- One pattern is to store the token in a local file with tight perms and read it when launching Codex:
+Non-interactive tip:
+- terminal `codex` does inherit env vars from the shell that launches it
+- if you want to avoid keeping secrets exported in a long-lived shell, set them only at invocation time
+- one pattern is to store the token in a local file with tight perms and read it when launching Codex:
   - `~/.enderai_backend_token` (chmod `600`)
   - Example: `ENDERAI_BACKEND_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_backend_token)" codex exec ...`
 
@@ -258,7 +280,18 @@ Debug tip:
 
 Security note:
 - `codex mcp get` / `codex mcp list --json` may print resolved header values; avoid running those commands when `ENDERAI_BACKEND_TOKEN` is set.
-- After adding the hosted MCP config, start a new Codex session before asking the agent to use `enderai-api`.
+- After adding the hosted MCP config, launch a new terminal `codex` session before asking the agent to use `enderai-api`.
+
+### Codex VS Code Extension Caveat
+
+The Codex VS Code extension is a separate integration path from terminal `codex` CLI.
+
+Current findings:
+- the sidebar chat runs under the VS Code extension host, not the integrated terminal shell
+- exporting `ENDERAI_*` vars in an already-open terminal does not update an already-running extension host
+- `chatgpt.cliExecutable` is documented by the extension as development-only, so it should not be the primary production auth path
+
+If you need the VS Code extension specifically, use a startup-time secret source such as a supported secret store or keychain integration. Until that path is standardized, terminal `codex` CLI is the cleaner env-var-based setup.
 
 ## Notes
 

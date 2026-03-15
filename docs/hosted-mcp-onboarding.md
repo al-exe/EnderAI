@@ -91,6 +91,13 @@ The user should choose exactly one client path:
 
 They should not do both.
 
+Important distinction:
+
+- terminal `codex` CLI is a good fit for env-var-based auth because it inherits the shell environment that launches it
+- the Codex VS Code extension is a different process under the VS Code extension host, so exporting vars in an already-open integrated terminal does not update that running extension process
+
+Today, if the user wants the safest setup with env vars and no plaintext token values in config files, recommend terminal `codex` CLI instead of the VS Code sidebar chat.
+
 ## Two Tokens
 
 The current hosted setup uses two different tokens:
@@ -172,7 +179,9 @@ This keeps the local step simple without requiring EnderAI to ship a local insta
 
 ### Client-Specific Note: Codex CLI
 
-Codex CLI does not use the generic JSON `inputs` block above.
+This section refers to terminal `codex` CLI.
+
+Codex CLI does not use the generic JSON `inputs` block above or a generic `mcp.json` snippet by itself.
 
 It is a separate setup path, not an extra step after the generic JSON flow.
 
@@ -188,13 +197,34 @@ At minimum, the generated setup should cover:
 
 In other words, the generic onboarding should say "install local MCP config", and the Codex-specific onboarding should concretely emit the `config.toml` instructions needed for Codex.
 
-The onboarding flow for Codex users should be explicit:
+The onboarding flow for Codex CLI users should be explicit:
 
 1. In the EnderAI web app, generate the hosted MCP credentials and the Codex-specific setup snippet.
-2. Have the user export `ENDERAI_BACKEND_TOKEN` and, if enabled, `ENDERAI_MCP_TOKEN` in the shell that launches Codex.
+2. Have the user export `ENDERAI_BACKEND_TOKEN` and, if enabled, `ENDERAI_MCP_TOKEN` in the shell that will launch `codex`.
 3. Have the user add the generated MCP entry to `~/.codex/config.toml`.
-4. Start a new Codex session so the new MCP server is loaded.
+4. Launch a new terminal `codex` session so the new MCP server is loaded with those env vars.
 5. In that new session, verify the MCP connection by asking the agent to confirm the server is available, list its tools, and run `enderai_health_check` plus `enderai_openapi`.
+
+### Codex CLI (Terminal) Setup From Scratch
+
+If the user wants terminal `codex` CLI to use EnderAI, this is the path to follow.
+
+Do not use the generic JSON `inputs` flow for this case.
+
+From a clean machine-local setup, the steps are:
+
+1. Optional reset: remove any old local registration with `codex mcp remove enderai-api` and, if present from an older setup, `codex mcp remove enderai-mcp`.
+2. Optional reset: in any already-open terminal, run `unset ENDERAI_BACKEND_TOKEN ENDERAI_MCP_TOKEN`.
+3. In the EnderAI web app, open `Settings -> Connect Agent`.
+4. Select the `Codex CLI` tab.
+5. Create a new agent credential or rotate an existing one.
+6. Copy the generated shell export block and run it in the terminal session that will launch Codex.
+7. Copy the generated TOML block into `~/.codex/config.toml`. If an older EnderAI block already exists there, replace it instead of merging with it.
+8. Launch `codex` from that same terminal session. If you later open a second shell, re-export the vars there before launching `codex` again.
+9. Verify the setup by asking the new terminal `codex` session to confirm `enderai-api`, list its tools, and run `enderai_health_check` plus `enderai_openapi`.
+10. If verification fails, inspect the active registration with `codex mcp list` and `codex mcp get enderai-api --json`. The registration should point at the hosted MCP URL and use `bearer_token_env_var` plus `env_http_headers`, not a stale hardcoded `Authorization` header.
+
+This is the minimum hosted-MCP setup for Codex. The user does not start the EnderAI MCP server locally in this flow.
 
 Example shell exports:
 
@@ -231,6 +261,24 @@ Suggested verification prompt for the next Codex session:
 ```text
 Use the MCP server `enderai-api` in this session. First confirm the server is available. Then list every tool exposed by that server. After that, call `enderai_health_check` and `enderai_openapi` and summarize the results. Use the MCP tools directly rather than reading the repo unless the MCP call fails.
 ```
+
+### Codex VS Code Extension Caveat
+
+The Codex VS Code extension is a separate integration path from terminal `codex` CLI.
+
+Current findings:
+
+- the extension chat runs under the VS Code extension host, not the integrated terminal shell
+- exporting `ENDERAI_*` vars in an already-open terminal tab does not update an already-running extension host
+- `chatgpt.cliExecutable` is documented by the extension itself as development-only, so it should not be the primary production auth path
+
+That means the extension path needs a startup-time secret source of its own, such as:
+
+- a VS Code supported secret-store integration
+- an OS keychain or secret-manager lookup at startup
+- a locked-down local token file as a fallback if convenience matters more than perfect secret-at-rest handling
+
+Until that exists, the recommended secure path for Codex is terminal `codex` CLI with env vars.
 
 ## Optional Future UX: Published `enderai connect`
 
