@@ -4,9 +4,33 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 
 ## Tools
 
-- `enderai_request`: Make an HTTP request to the configured backend.
+- `enderai_begin_case`: Start a guided Topic/Case workflow, create a new case, and hydrate it with a compact `ContextPack`.
+- `enderai_update_case`: Patch the active case document with evidence, commands, hypotheses, changes, and progress notes.
+- `enderai_finish_case`: Apply final case updates, close the active case with a terminal status, and clear the active case context.
+- `enderai_request`: Make a lower-level HTTP request to the configured backend when you need an endpoint the guided tools do not cover yet.
 - `enderai_openapi`: Fetch `/api/v1/openapi.json`.
 - `enderai_health_check`: Fetch `/api/v1/utils/health-check/`.
+
+### Guided Case Workflow
+
+The new guided tools are meant to mirror the Topic / Case docs:
+
+1. `enderai_begin_case`
+   - starts an execution-backed case
+   - seeds the canonical case document
+   - builds and attaches a `ContextPack` by default
+   - remembers the returned `case_id` and `topic_id` for this MCP session
+2. `enderai_update_case`
+   - patches the active case document
+   - optionally appends a progress event
+   - refuses to close a case so the workflow stays explicit
+3. `enderai_finish_case`
+   - applies final case updates
+   - requires a terminal status such as `done` or `failed`
+   - optionally appends a closing event
+   - clears the active case context so the next case must start with `enderai_begin_case`
+
+If the caller skips a step or tries to switch cases mid-session, the tool returns a clear sequencing error instead of guessing.
 
 ### Backward-Compatibility Path Rewrites
 
