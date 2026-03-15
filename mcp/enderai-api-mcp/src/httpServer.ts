@@ -5,6 +5,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { validateIncomingMcpBearerToken } from "./mcpAuth.js";
 import { createMcpServer } from "./mcpServer.js";
+import { resolveSessionBackendBearerToken } from "./sessionAuth.js";
 
 // The MCP SDK's Streamable HTTP implementation expects a global `crypto` with `randomUUID()`.
 // Some Node runtimes (and some TS loaders) do not expose `globalThis.crypto` by default.
@@ -34,22 +35,6 @@ function readBearer(req: http.IncomingMessage): string | undefined {
   const h = req.headers.authorization;
   if (!h) return undefined;
   const m = /^Bearer\s+(.+)$/.exec(h);
-  return m?.[1]?.trim() || undefined;
-}
-
-function readBackendBearerToken(req: http.IncomingMessage): string | undefined {
-  // Allow passing the EnderAI backend token separately from the MCP server auth header.
-  // This is required for a hosted MCP server to act "per user".
-  const raw = getHeaderString(req, "x-enderai-backend-token")?.trim();
-  if (raw) {
-    // Be tolerant: some clients include the "Bearer " prefix even on the token header.
-    const m = /^Bearer\s+(.+)$/.exec(raw);
-    return m?.[1]?.trim() || raw;
-  }
-
-  const auth = getHeaderString(req, "x-enderai-backend-authorization")?.trim();
-  if (!auth) return undefined;
-  const m = /^Bearer\s+(.+)$/.exec(auth);
   return m?.[1]?.trim() || undefined;
 }
 
@@ -137,7 +122,10 @@ async function main(): Promise<void> {
       // Some clients (Cursor) send Mcp-Session-Id even on the initial initialize.
       // Allow creating the session in that case.
       if (isInitialize) {
-        session = await createSession(sessionIdHeader, readBackendBearerToken(req));
+        session = await createSession(
+          sessionIdHeader,
+          resolveSessionBackendBearerToken({ req, mcpAuth }),
+        );
         createdSession = true;
       } else if (sessionIdHeader && method === "GET") {
         // Some clients probe with a GET *and* include a random Mcp-Session-Id header
@@ -160,7 +148,7 @@ async function main(): Promise<void> {
     }
 
     // Allow rotating/updating backend token mid-session (client may refresh tokens).
-    const backendBearerToken = readBackendBearerToken(req);
+    const backendBearerToken = resolveSessionBackendBearerToken({ req, mcpAuth });
     if (backendBearerToken) session.backendBearerToken = backendBearerToken;
 
     session.lastUsedAtMs = Date.now();

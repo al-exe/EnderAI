@@ -1,7 +1,15 @@
 import { enderaiFetch } from "./http.js";
 
 export type McpAuthorizationResult =
-  | { ok: true; via: "shared" | "per_user" }
+  | {
+      ok: true;
+      via: "shared";
+    }
+  | {
+      ok: true;
+      via: "per_user";
+      backendBearerToken: string;
+    }
   | { ok: false; statusCode: number; message: string };
 
 export async function validateIncomingMcpBearerToken(args: {
@@ -24,7 +32,11 @@ export async function validateIncomingMcpBearerToken(args: {
       bearerToken: providedBearerToken,
     });
     if (res.ok) {
-      return { ok: true, via: "per_user" };
+      return {
+        ok: true,
+        via: "per_user",
+        backendBearerToken: providedBearerToken,
+      };
     }
     if (res.status >= 500) {
       return {

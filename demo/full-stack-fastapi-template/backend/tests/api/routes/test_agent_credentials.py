@@ -68,7 +68,7 @@ def test_backend_agent_token_authenticates_and_updates_last_used_at(
     assert credential.last_used_at is not None
 
 
-def test_mcp_agent_token_validates_but_cannot_call_backend(
+def test_mcp_agent_token_validates_and_can_call_backend(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     create_res = client.post(
@@ -92,8 +92,7 @@ def test_mcp_agent_token_validates_but_cannot_call_backend(
         f"{settings.API_V1_STR}/login/test-token",
         headers={"Authorization": f"Bearer {mcp_token}"},
     )
-    assert backend_res.status_code == 403
-    assert backend_res.json() == {"detail": "Could not validate credentials"}
+    assert backend_res.status_code == 200
 
     db.expire_all()
     credential = db.get(AgentCredential, uuid.UUID(credential_id))

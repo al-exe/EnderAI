@@ -49,7 +49,11 @@ describe("validateIncomingMcpBearerToken", () => {
       sharedBearerToken: "shared-token",
     });
 
-    expect(result).toEqual({ ok: true, via: "per_user" });
+    expect(result).toEqual({
+      ok: true,
+      via: "per_user",
+      backendBearerToken: "user-mcp-token",
+    });
 
     const call = mockFetch.mock.calls[0];
     expect(call[0].toString()).toContain(

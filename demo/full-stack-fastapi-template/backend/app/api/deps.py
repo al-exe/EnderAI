@@ -1,4 +1,4 @@
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from typing import Annotated
 
 import jwt
@@ -41,9 +41,18 @@ def decode_token_payload(token: str) -> TokenPayload:
 
 
 def validate_agent_credential_token(
-    session: SessionDep, token_data: TokenPayload, *, expected_token_kind: str
+    session: SessionDep,
+    token_data: TokenPayload,
+    *,
+    expected_token_kind: str | Iterable[str],
 ) -> AgentCredential:
-    if token_data.token_kind != expected_token_kind:
+    expected_token_kinds = (
+        {expected_token_kind}
+        if isinstance(expected_token_kind, str)
+        else set(expected_token_kind)
+    )
+
+    if token_data.token_kind not in expected_token_kinds:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
@@ -79,9 +88,11 @@ def validate_agent_credential_token(
 def get_current_user(session: SessionDep, token: TokenDep) -> User:
     token_data = decode_token_payload(token)
 
-    if token_data.token_kind == "agent_credential":
+    if token_data.token_kind in {"agent_credential", "agent_mcp"}:
         validate_agent_credential_token(
-            session, token_data, expected_token_kind="agent_credential"
+            session,
+            token_data,
+            expected_token_kind={"agent_credential", "agent_mcp"},
         )
     elif token_data.token_kind is not None:
         raise HTTPException(

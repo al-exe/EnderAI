@@ -135,12 +135,6 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
       "id": "enderai_mcp_token",
       "description": "EnderAI MCP token",
       "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "enderai_backend_token",
-      "description": "EnderAI backend token",
-      "password": true
     }
   ],
   "servers": {
@@ -148,33 +142,34 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
       "type": "http",
       "url": "https://YOUR-MCP-SERVICE.onrender.com/mcp",
       "headers": {
-        "Authorization": "Bearer ${input:enderai_mcp_token}",
-        "X-EnderAI-Backend-Token": "${input:enderai_backend_token}"
+        "Authorization": "Bearer ${input:enderai_mcp_token}"
       }
     }
   }
 }
 ```
 
-This is the generic hosted-MCP flow. The hosted EnderAI MCP service is already running at that URL, so the user does not start the MCP server locally. They only paste this config into their MCP client and provide the prompted tokens when the client connects.
+This is the recommended generic hosted-MCP flow. The hosted EnderAI MCP service is already running at that URL, so the user does not start the MCP server locally. They only paste this config into their MCP client and provide the prompted token when the client connects.
 
 Use this generic hosted-client flow or the Codex CLI flow below, not both.
 
 Important distinction:
 
-- terminal `codex` CLI inherits the shell environment that launches it, so env-var-based auth works well there
-- the Codex VS Code extension runs under the VS Code extension host, not the integrated terminal shell, so exporting vars in an already-open terminal does not update that running extension process
-
-If you want the safest setup with env vars and no plaintext token values in config files, prefer terminal `codex` CLI.
+- generic MCP clients can prompt for the MCP token directly, so they do not need env vars in this hosted flow
+- Codex in this phase means terminal `codex` CLI, which inherits the shell environment that launches it
 
 ### Per-User Backend Access (Hosted MCP)
 
-When deploying the MCP server as a shared hosted service, MCP auth (to the MCP server) is **not** the same as backend auth (to the EnderAI API).
+Recommended hosted flow:
 
-To access a specific user's account resources through the hosted MCP, send the user's backend access token on each request using:
-- `X-EnderAI-Backend-Token: <enderai_backend_access_token>`
+- send the user-scoped EnderAI MCP token in `Authorization: Bearer ...`
+- the hosted MCP validates that token and reuses it for backend API calls on behalf of that user
 
-If a client cannot prompt for both values directly, env interpolation for headers also works; for example:
+Legacy compatibility flow:
+
+- if you still need a separate backend token, the hosted MCP also accepts `X-EnderAI-Backend-Token: <enderai_backend_access_token>`
+
+If a client still needs the older dual-token setup, env interpolation for headers also works; for example:
 
 ```json
 {
@@ -242,7 +237,7 @@ Clean setup from scratch for terminal `codex`:
 3. In the EnderAI web app, open `Settings -> Connect Agent`.
 4. Select the `Codex CLI` tab.
 5. Create or rotate an agent credential.
-6. Run the generated `export ENDERAI_*` lines in the terminal that will launch `codex`.
+6. Run the generated `export ENDERAI_MCP_TOKEN=...` line in the terminal that will launch `codex`.
 7. Add the generated TOML block to `~/.codex/config.toml`.
 8. Launch `codex` from that same terminal session.
 9. Verify the new session can see `enderai-api` and can call `enderai_health_check` plus `enderai_openapi`.
@@ -255,22 +250,29 @@ codex mcp list
 ```
 
 Per-user backend auth (recommended for shared hosted MCP):
-- Configure Codex to send the backend access token on each MCP request:
-  - In `~/.codex/config.toml`:
-    - `env_http_headers = { "X-EnderAI-Backend-Token" = "ENDERAI_BACKEND_TOKEN" }`
-  - Then export: `ENDERAI_BACKEND_TOKEN="<access_token from /api/v1/login/access-token>"`
+- the recommended hosted setup no longer needs `X-EnderAI-Backend-Token`
+- use a user-scoped `ENDERAI_MCP_TOKEN` and let the hosted MCP reuse it for backend API calls
 
 Non-interactive tip:
 - terminal `codex` does inherit env vars from the shell that launches it
 - if you want to avoid keeping secrets exported in a long-lived shell, set them only at invocation time
 - one pattern is to store the token in a local file with tight perms and read it when launching Codex:
-  - `~/.enderai_backend_token` (chmod `600`)
-  - Example: `ENDERAI_BACKEND_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_backend_token)" codex exec ...`
+  - `~/.enderai_mcp_token` (chmod `600`)
+  - Example: `ENDERAI_MCP_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_mcp_token)" codex exec ...`
 
 Optional MCP endpoint protection:
-- If the hosted MCP is protected with a static bearer token (recommended), set:
+- user-scoped MCP tokens are already bearer tokens, so the recommended Codex block is:
   - `bearer_token_env_var = "ENDERAI_MCP_TOKEN"`
   - And export: `ENDERAI_MCP_TOKEN="..."`
+
+Legacy dual-token Codex block:
+
+```toml
+[mcp_servers.enderai-api]
+url = "https://enderai-mcp.onrender.com/mcp"
+env_http_headers = { "X-EnderAI-Backend-Token" = "ENDERAI_BACKEND_TOKEN" }
+bearer_token_env_var = "ENDERAI_MCP_TOKEN"
+```
 
 Debug tip:
 - `POST /api/v1/login/test-token` should return:
@@ -282,16 +284,17 @@ Security note:
 - `codex mcp get` / `codex mcp list --json` may print resolved header values; avoid running those commands when `ENDERAI_BACKEND_TOKEN` is set.
 - After adding the hosted MCP config, launch a new terminal `codex` session before asking the agent to use `enderai-api`.
 
-### Codex VS Code Extension Caveat
+### Native Codex OAuth Roadmap
 
-The Codex VS Code extension is a separate integration path from terminal `codex` CLI.
+The single-token hosted flow removes the extra backend header, but a user still has to supply `ENDERAI_MCP_TOKEN` to Codex today.
 
-Current findings:
-- the sidebar chat runs under the VS Code extension host, not the integrated terminal shell
-- exporting `ENDERAI_*` vars in an already-open terminal does not update an already-running extension host
-- `chatgpt.cliExecutable` is documented by the extension as development-only, so it should not be the primary production auth path
+The long-term first-class Codex path is:
+- expose OAuth authorization-server endpoints from EnderAI
+- advertise OAuth protected-resource metadata from the hosted MCP
+- let the user run `codex mcp login enderai-api`
+- have the hosted MCP derive backend identity from that OAuth access token without any extra header wiring
 
-If you need the VS Code extension specifically, use a startup-time secret source such as a supported secret store or keychain integration. Until that path is standardized, terminal `codex` CLI is the cleaner env-var-based setup.
+That OAuth path is still future work. The single-token hosted flow above is the current simplification step.
 
 ## Notes
 
