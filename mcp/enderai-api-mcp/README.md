@@ -135,6 +135,12 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
       "id": "enderai_mcp_token",
       "description": "EnderAI MCP token",
       "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "enderai_backend_token",
+      "description": "EnderAI backend token",
+      "password": true
     }
   ],
   "servers": {
@@ -142,12 +148,17 @@ If your friends are using VS Code's `mcp.json`, they can point to your deployed 
       "type": "http",
       "url": "https://YOUR-MCP-SERVICE.onrender.com/mcp",
       "headers": {
-        "Authorization": "Bearer ${input:enderai_mcp_token}"
+        "Authorization": "Bearer ${input:enderai_mcp_token}",
+        "X-EnderAI-Backend-Token": "${input:enderai_backend_token}"
       }
     }
   }
 }
 ```
+
+This is the generic hosted-MCP flow. The hosted EnderAI MCP service is already running at that URL, so the user does not start the MCP server locally. They only paste this config into their MCP client and provide the prompted tokens when the client connects.
+
+Use this generic hosted-client flow or the Codex CLI flow below, not both.
 
 ### Per-User Backend Access (Hosted MCP)
 
@@ -156,7 +167,7 @@ When deploying the MCP server as a shared hosted service, MCP auth (to the MCP s
 To access a specific user's account resources through the hosted MCP, send the user's backend access token on each request using:
 - `X-EnderAI-Backend-Token: <enderai_backend_access_token>`
 
-Some clients support env interpolation for headers; for example:
+If a client cannot prompt for both values directly, env interpolation for headers also works; for example:
 
 ```json
 {
@@ -165,7 +176,7 @@ Some clients support env interpolation for headers; for example:
       "type": "http",
       "url": "https://YOUR-MCP-SERVICE.onrender.com/mcp",
       "headers": {
-        "Authorization": "Bearer ${input:enderai_mcp_token}",
+        "Authorization": "Bearer ${env:ENDERAI_MCP_TOKEN}",
         "X-EnderAI-Backend-Token": "${env:ENDERAI_BACKEND_TOKEN}"
       }
     }
@@ -174,6 +185,8 @@ Some clients support env interpolation for headers; for example:
 ```
 
 ## Deploy (Render MVP)
+
+This section is for the EnderAI operator who is deploying the hosted MCP service, not for an end user connecting to an already-hosted MCP URL.
 
 Create a **new Render Web Service** pointing at this repo (`al-exe/EnderAI`), with root directory `mcp/enderai-api-mcp`:
 
@@ -200,13 +213,23 @@ codex mcp get enderai-api --json
 
 Notes:
 - This avoids storing auth tokens in config. If you need auth, call the login endpoint and pass the token per-call via the `bearerToken` argument to `enderai_request`, or set `ENDERAI_BEARER_TOKEN` via your environment.
+- Start a new Codex session after registration. The current session will not pick up MCP servers that were added after it started.
+- A simple verification prompt for the next Codex session is:
+
+```text
+Use the MCP server `enderai-api` in this session. First confirm the server is available. Then list every tool exposed by that server. After that, call `enderai_health_check` and `enderai_openapi` and summarize the results. Use the MCP tools directly rather than reading the repo unless the MCP call fails.
+```
 
 ### Codex CLI (Hosted MCP URL)
 
-If you are using the hosted Streamable HTTP MCP server (for example `https://enderai-mcp.onrender.com/mcp`), register it by URL:
+If you are using the hosted Streamable HTTP MCP server (for example `https://enderai-mcp.onrender.com/mcp`), register it by URL.
+
+This is a different client-specific setup from the JSON `inputs` example above. Codex does not use that JSON block; it uses `~/.codex/config.toml` plus local environment variables.
+
+Use this Codex flow instead of the generic JSON `inputs` flow above.
 
 ```sh
-codex mcp add enderai-mcp --url https://enderai-mcp.onrender.com/mcp
+codex mcp add enderai-api --url https://enderai-mcp.onrender.com/mcp
 codex mcp list
 ```
 
@@ -235,6 +258,7 @@ Debug tip:
 
 Security note:
 - `codex mcp get` / `codex mcp list --json` may print resolved header values; avoid running those commands when `ENDERAI_BACKEND_TOKEN` is set.
+- After adding the hosted MCP config, start a new Codex session before asking the agent to use `enderai-api`.
 
 ## Notes
 
