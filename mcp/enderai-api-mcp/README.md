@@ -238,16 +238,26 @@ Clean setup from scratch for terminal `codex`:
 4. Select the `Codex CLI` tab.
 5. Create or rotate an agent credential.
 6. Run the generated `export ENDERAI_MCP_TOKEN=...` line in the terminal that will launch `codex`.
-7. Add the generated TOML block to `~/.codex/config.toml`.
+7. Register the hosted MCP URL with Codex CLI using the env-var name, not the token value.
 8. Launch `codex` from that same terminal session.
 9. Verify the new session can see `enderai-api` and can call `enderai_health_check` plus `enderai_openapi`.
 
 This hosted-MCP path does not require the user to start the EnderAI MCP server locally.
 
 ```sh
-codex mcp add enderai-api --url https://enderai-mcp.onrender.com/mcp
+export ENDERAI_MCP_TOKEN='YOUR_ENDERAI_MCP_TOKEN'
+
+codex mcp add enderai-api \
+  --url https://enderai-mcp.onrender.com/mcp \
+  --bearer-token-env-var ENDERAI_MCP_TOKEN
+
 codex mcp list
 ```
+
+Important:
+- `--bearer-token-env-var` expects the environment variable name, for example `ENDERAI_MCP_TOKEN`.
+- Do not paste the raw JWT directly after `--bearer-token-env-var` or Codex will treat it as a missing flag value and the MCP handshake will fail.
+- Start a fresh Codex session after registration; already-running sessions will not pick up newly added MCP servers.
 
 Per-user backend auth (recommended for shared hosted MCP):
 - the recommended hosted setup no longer needs `X-EnderAI-Backend-Token`
@@ -259,6 +269,20 @@ Non-interactive tip:
 - one pattern is to store the token in a local file with tight perms and read it when launching Codex:
   - `~/.enderai_mcp_token` (chmod `600`)
   - Example: `ENDERAI_MCP_TOKEN="$(tr -d '\\r\\n' < ~/.enderai_mcp_token)" codex exec ...`
+
+Persistent shell setup for local dev:
+- if you want new terminals to pick up the token automatically, keep the secret in `~/.enderai_mcp_token` and load it from `~/.bashrc`
+
+```sh
+printf '%s\n' 'YOUR_ENDERAI_MCP_TOKEN' > ~/.enderai_mcp_token
+chmod 600 ~/.enderai_mcp_token
+echo 'export ENDERAI_MCP_TOKEN="$(tr -d "\\r\\n" < ~/.enderai_mcp_token)"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Pitfall of the simpler `~/.bashrc` version:
+- directly writing `export ENDERAI_MCP_TOKEN="..."` into `~/.bashrc` also works, but the secret then lives in a config file that is more likely to be copied, synced, diffed, screenshared, or shared for debugging
+- a dedicated token file is not stronger against a full same-user compromise, but it is better at reducing accidental disclosure during normal development workflows
 
 Optional MCP endpoint protection:
 - user-scoped MCP tokens are already bearer tokens, so the recommended Codex block is:
