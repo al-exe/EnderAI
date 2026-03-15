@@ -8,6 +8,43 @@ Local MCP server that proxies tool calls to an EnderAI backend (for example the 
 - `enderai_openapi`: Fetch `/api/v1/openapi.json`.
 - `enderai_health_check`: Fetch `/api/v1/utils/health-check/`.
 
+### Backward-Compatibility Path Rewrites
+
+`enderai_request` will transparently rewrite a few older (pre-migration) API paths:
+
+- `/api/v1/me` -> `/api/v1/users/me`
+- `/api/v1/runs/*` -> `/api/v1/executions/*`
+- `/api/v1/tasks/*` -> `/api/v1/threads/*` (and `/api/v1/tasks/{id}/runs/*` -> `/api/v1/threads/{id}/executions/*`)
+- `/api/v1/library/*` -> `/api/v1/artifacts/*`
+
+## Execution Event Log (Optional)
+
+This MCP server can help keep an **event log per Execution** (EnderAI `event` rows):
+
+- If you call `POST /api/v1/executions/start` via `enderai_request`, the server will remember the returned `execution.id` (per MCP session).
+- For subsequent `enderai_request` calls, you can pass an `audit` object:
+  - `audit.intent`: short human-readable reason for the call (becomes the Event message)
+  - `audit.run_id`: optional override for the current Execution id (also updates session context)
+- When an Execution id is known, the server will append an `event` of type `mcp` containing:
+  - the request args (method/path/query/headers/body)
+  - the response summary (status/ok/data)
+  - secrets redacted (`Authorization`, tokens, passwords, etc.)
+  - payloads capped to keep DB/UI healthy (large JSON like OpenAPI is truncated)
+
+Additionally, when you `POST /api/v1/artifacts/` and an Execution id is known, the server will auto-link
+the created Artifact to the current Execution (`relation=created`).
+
+Example (pseudo-code):
+
+```json
+{
+  "method": "GET",
+  "path": "/api/v1/items/",
+  "query": { "skip": 0, "limit": 25 },
+  "audit": { "intent": "List items to find the oldest two" }
+}
+```
+
 ## Environment
 
 - `ENDERAI_BASE_URL` (default: `https://enderai-backend.onrender.com`)

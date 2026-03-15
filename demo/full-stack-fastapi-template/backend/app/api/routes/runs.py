@@ -10,24 +10,24 @@ from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.models import (
-    LibraryItemPublic,
+    ArtifactPublic,
+    EventCreate,
+    EventPublic,
+    EventsPublic,
+    ExecutionArtifactLinkCreate,
+    ExecutionArtifactLinkPublic,
+    ExecutionArtifactLinksPublic,
+    ExecutionDetailPublic,
+    ExecutionPublic,
+    ExecutionsPublic,
     Message,
-    RunDetailPublic,
-    RunEventCreate,
-    RunEventPublic,
-    RunEventsPublic,
-    RunMemoryLinkCreate,
-    RunMemoryLinkPublic,
-    RunMemoryLinksPublic,
-    RunPublic,
-    RunsPublic,
-    RunStartPublic,
-    RunStartRequest,
-    RunUpdate,
-    TaskPublic,
+    ExecutionStartPublic,
+    ExecutionStartRequest,
+    ExecutionUpdate,
+    ThreadPublic,
 )
 
-router = APIRouter(prefix="/runs", tags=["runs"])
+router = APIRouter(prefix="/executions", tags=["executions"])
 
 _UUID_RE = re.compile(
     r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
@@ -45,18 +45,18 @@ def _is_missing_column_error(err: Exception, *, column: str) -> bool:
     return "does not exist" in message and "column" in message and column.lower() in message
 
 
-def _task_has_intent_key_column(session: SessionDep) -> bool:
-    # Keep /runs/start backward-compatible with older DB schemas. Mirrors routes/tasks.py.
+def _thread_has_intent_key_column(session: SessionDep) -> bool:
+    # Keep /executions/start backward-compatible with older DB schemas. Mirrors routes/tasks.py.
     stmt = text(
         "select 1 "
         "from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key' "
+        "where table_schema = 'public' and table_name = 'thread' and column_name = 'intent_key' "
         "limit 1"
     )
     return session.connection().execute(stmt).first() is not None
 
 
-def _canonicalize_task_title(title: str) -> str:
+def _canonicalize_thread_title(title: str) -> str:
     # Keep this conservative: only strip UUID-like tokens and normalize whitespace.
     cleaned = _UUID_RE.sub("", title).strip()
     cleaned = re.sub(r"\\s+", " ", cleaned)
@@ -65,30 +65,30 @@ def _canonicalize_task_title(title: str) -> str:
 
 def _default_intent_key(title: str) -> str:
     # Stable-ish machine key derived from the title, with UUIDs removed.
-    base = _canonicalize_task_title(title).lower()
+    base = _canonicalize_thread_title(title).lower()
     base = re.sub(r"[^a-z0-9]+", "_", base).strip("_")
     return base or "task"
 
 
-@router.get("/", response_model=RunsPublic)
-def read_runs(
+@router.get("/", response_model=ExecutionsPublic)
+def read_executions(
     session: SessionDep,
     current_user: CurrentUser,
-    task_id: uuid.UUID | None = None,
+    thread_id: uuid.UUID | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 100,
 ) -> Any:
     """
-    Retrieve Runs.
+    Retrieve Executions.
     """
 
     clauses: list[str] = []
     params: dict[str, Any] = {"skip": skip, "limit": limit}
 
-    if task_id:
-        clauses.append("r.task_id = :task_id")
-        params["task_id"] = task_id
+    if thread_id:
+        clauses.append("r.thread_id = :thread_id")
+        params["thread_id"] = thread_id
     if status:
         status = status.strip()
         if status:
@@ -98,13 +98,13 @@ def read_runs(
     where_sql = f" where {' and '.join(clauses)}" if clauses else ""
 
     try:
-        count_stmt = text(f"select count(*) from public.run r{where_sql}")
+        count_stmt = text(f"select count(*) from public.execution r{where_sql}")
         count = session.connection().execute(count_stmt, params).scalar_one()
 
         data_stmt = text(
             "select "
-            "r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
-            "from public.run r"
+            "r.id, r.thread_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
+            "from public.execution r"
             f"{where_sql} "
             "order by r.started_at desc nulls last "
             "offset :skip limit :limit"
@@ -112,57 +112,57 @@ def read_runs(
         rows = session.connection().execute(data_stmt, params).mappings().all()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return RunsPublic(data=[], count=0)
+            return ExecutionsPublic(data=[], count=0)
         raise
 
-    runs = [RunPublic(**dict(row)) for row in rows]
-    return RunsPublic(data=runs, count=count)
+    executions = [ExecutionPublic(**dict(row)) for row in rows]
+    return ExecutionsPublic(data=executions, count=count)
 
 
-@router.post("/start", response_model=RunStartPublic, status_code=201)
-def start_run(
+@router.post("/start", response_model=ExecutionStartPublic, status_code=201)
+def start_execution(
     session: SessionDep,
     current_user: CurrentUser,
-    payload: RunStartRequest,
+    payload: ExecutionStartRequest,
 ) -> Any:
     """
-    Start a Run, reusing an existing Task when appropriate.
+    Start an Execution, reusing an existing Thread when appropriate.
 
-    This is the primary "Task vs Run" grouping mechanism:
-    - Task groups repeated work by (workflow_key, intent_key).
-    - Run captures a single execution/attempt with per-instance targets.
+    This is the primary "Thread vs Execution" grouping mechanism:
+    - Thread groups repeated work by (workflow_key, intent_key).
+    - Execution captures a single attempt with per-instance targets.
     """
 
-    task_in = payload.task
-    run_in = payload.run
+    thread_in = payload.thread
+    execution_in = payload.execution
 
-    workflow_key = task_in.workflow_key.strip()
-    title_raw = task_in.title.strip()
+    workflow_key = thread_in.workflow_key.strip()
+    title_raw = thread_in.title.strip()
     if not workflow_key:
         raise HTTPException(status_code=422, detail="workflow_key must not be empty")
     if not title_raw:
         raise HTTPException(status_code=422, detail="Title must not be empty")
 
     intent_key = (
-        task_in.intent_key.strip()
-        if isinstance(task_in.intent_key, str) and task_in.intent_key.strip()
+        thread_in.intent_key.strip()
+        if isinstance(thread_in.intent_key, str) and thread_in.intent_key.strip()
         else _default_intent_key(title_raw)
     )
-    task_title = _canonicalize_task_title(title_raw)
-    has_intent_key = _task_has_intent_key_column(session)
+    thread_title = _canonicalize_thread_title(title_raw)
+    has_intent_key = _thread_has_intent_key_column(session)
 
     now = datetime.now(timezone.utc)
     reuse_within_seconds = payload.reuse_within_seconds
 
-    task_row = None
-    reused_task = False
+    thread_row = None
+    reused_thread = False
     try:
         if has_intent_key:
             stmt = text(
                 "select "
                 "t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria, "
                 "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-                "from public.task t "
+                "from public.thread t "
                 "where t.workflow_key = :workflow_key and t.intent_key = :intent_key "
                 "order by t.last_touched_at desc nulls last "
                 "limit 1"
@@ -174,43 +174,43 @@ def start_run(
                 "select "
                 "t.id, t.title, t.workflow_key, t.goal, t.acceptance_criteria, "
                 "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
-                "from public.task t "
+                "from public.thread t "
                 "where t.workflow_key = :workflow_key and t.title = :title "
                 "order by t.last_touched_at desc nulls last "
                 "limit 1"
             )
-            params = {"workflow_key": workflow_key, "title": task_title}
-        task_row = session.connection().execute(stmt, params).mappings().first()
+            params = {"workflow_key": workflow_key, "title": thread_title}
+        thread_row = session.connection().execute(stmt, params).mappings().first()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+            raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
-    if task_row is not None and reuse_within_seconds is not None:
-        last_touched_at = task_row.get("last_touched_at")
+    if thread_row is not None and reuse_within_seconds is not None:
+        last_touched_at = thread_row.get("last_touched_at")
         if last_touched_at is not None:
             age_s = (now - last_touched_at).total_seconds()
             if age_s > reuse_within_seconds:
-                task_row = None
+                thread_row = None
 
-    # Create a new Task if none is eligible for reuse.
-    if task_row is None:
+    # Create a new Thread if none is eligible for reuse.
+    if thread_row is None:
         # Keep behavior stable even if clients send empty strings.
-        goal = task_in.goal.strip() if isinstance(task_in.goal, str) and task_in.goal.strip() else None
+        goal = thread_in.goal.strip() if isinstance(thread_in.goal, str) and thread_in.goal.strip() else None
         acceptance_criteria = (
-            task_in.acceptance_criteria.strip()
-            if isinstance(task_in.acceptance_criteria, str) and task_in.acceptance_criteria.strip()
+            thread_in.acceptance_criteria.strip()
+            if isinstance(thread_in.acceptance_criteria, str) and thread_in.acceptance_criteria.strip()
             else None
         )
-        risk_level = task_in.risk_level.strip() or "read_only"
-        status = task_in.status.strip() or "open"
-        systems_touched = task_in.systems_touched or {}
+        risk_level = thread_in.risk_level.strip() or "read_only"
+        status = thread_in.status.strip() or "open"
+        systems_touched = thread_in.systems_touched or {}
 
-        task_id = uuid.uuid4()
+        thread_id = uuid.uuid4()
         try:
             if has_intent_key:
                 insert_stmt = text(
-                    "insert into public.task ("
+                    "insert into public.thread ("
                     "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                     ") values ("
                     ":id, :title, :workflow_key, :intent_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -220,7 +220,7 @@ def start_run(
                 )
             else:
                 insert_stmt = text(
-                    "insert into public.task ("
+                    "insert into public.thread ("
                     "id, title, workflow_key, goal, acceptance_criteria, systems_touched, risk_level, status"
                     ") values ("
                     ":id, :title, :workflow_key, :goal, :acceptance_criteria, cast(:systems_touched as jsonb), :risk_level, :status"
@@ -228,14 +228,14 @@ def start_run(
                     "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
                     "risk_level, status, created_at, last_touched_at"
                 )
-            task_row = (
+            thread_row = (
                 session.connection()
                 .execute(
                     insert_stmt,
                     (
                         {
-                            "id": task_id,
-                            "title": task_title,
+                            "id": thread_id,
+                            "title": thread_title,
                             "workflow_key": workflow_key,
                             "intent_key": intent_key,
                             "goal": goal,
@@ -246,8 +246,8 @@ def start_run(
                         }
                         if has_intent_key
                         else {
-                            "id": task_id,
-                            "title": task_title,
+                            "id": thread_id,
+                            "title": thread_title,
                             "workflow_key": workflow_key,
                             "goal": goal,
                             "acceptance_criteria": acceptance_criteria,
@@ -262,37 +262,41 @@ def start_run(
             )
         except ProgrammingError as e:
             if _is_missing_table_error(e):
-                raise HTTPException(status_code=501, detail="Tasks table not initialized")
+                raise HTTPException(status_code=501, detail="Threads table not initialized")
             raise
 
-        if task_row is None:
-            raise HTTPException(status_code=500, detail="Failed to create task")
+        if thread_row is None:
+            raise HTTPException(status_code=500, detail="Failed to create thread")
     else:
-        reused_task = True
+        reused_thread = True
 
-    task_id = task_row["id"]
+    thread_id = thread_row["id"]
 
-    # Create the Run.
-    targets = run_in.targets or []
-    run_status = run_in.status.strip() or "running"
-    summary = run_in.summary.strip() if isinstance(run_in.summary, str) and run_in.summary.strip() else None
-    run_id = uuid.uuid4()
+    # Create the Execution.
+    targets = execution_in.targets or []
+    execution_status = execution_in.status.strip() or "running"
+    summary = (
+        execution_in.summary.strip()
+        if isinstance(execution_in.summary, str) and execution_in.summary.strip()
+        else thread_title
+    )
+    execution_id = uuid.uuid4()
 
     try:
-        run_stmt = text(
-            "insert into public.run (id, task_id, targets, status, summary) "
-            "values (:id, :task_id, cast(:targets as jsonb), :status, :summary) "
-            "returning id, task_id, targets, started_at, ended_at, status, summary"
+        execution_stmt = text(
+            "insert into public.execution (id, thread_id, targets, status, summary) "
+            "values (:id, :thread_id, cast(:targets as jsonb), :status, :summary) "
+            "returning id, thread_id, targets, started_at, ended_at, status, summary"
         )
-        run_row = (
+        execution_row = (
             session.connection()
             .execute(
-                run_stmt,
+                execution_stmt,
                 {
-                    "id": run_id,
-                    "task_id": task_id,
+                    "id": execution_id,
+                    "thread_id": thread_id,
                     "targets": json.dumps(targets),
-                    "status": run_status,
+                    "status": execution_status,
                     "summary": summary,
                 },
             )
@@ -301,89 +305,98 @@ def start_run(
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Runs table not initialized")
+            raise HTTPException(status_code=501, detail="Executions table not initialized")
         raise
 
-    if run_row is None:
-        raise HTTPException(status_code=500, detail="Failed to create run")
+    if execution_row is None:
+        raise HTTPException(status_code=500, detail="Failed to create execution")
 
-    # Touch the Task (and reopen "done" tasks) to keep ordering/grouping sensible.
+    # Touch the Thread (and reopen "done" threads) to keep ordering/grouping sensible.
     try:
         if has_intent_key:
             touch_stmt = text(
-                "update public.task "
+                "update public.thread "
                 "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
-                "where id = :task_id "
+                "where id = :thread_id "
                 "returning "
                 "id, title, workflow_key, intent_key, goal, acceptance_criteria, systems_touched, "
                 "risk_level, status, created_at, last_touched_at"
             )
         else:
             touch_stmt = text(
-                "update public.task "
+                "update public.thread "
                 "set last_touched_at = now(), status = (case when status = 'done' then 'open' else status end) "
-                "where id = :task_id "
+                "where id = :thread_id "
                 "returning "
                 "id, title, workflow_key, goal, acceptance_criteria, systems_touched, "
                 "risk_level, status, created_at, last_touched_at"
             )
         touched = (
-            session.connection().execute(touch_stmt, {"task_id": task_id}).mappings().first()
+            session.connection().execute(touch_stmt, {"thread_id": thread_id}).mappings().first()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=501, detail="Tasks table not initialized")
+            raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
     session.commit()
 
-    task_public = TaskPublic(**dict(touched or task_row))
-    run_public = RunPublic(**dict(run_row))
-    return RunStartPublic(task=task_public, run=run_public, reused_task=reused_task)
+    thread_public = ThreadPublic(**dict(touched or thread_row))
+    execution_public = ExecutionPublic(**dict(execution_row))
+    return ExecutionStartPublic(
+        thread=thread_public,
+        execution=execution_public,
+        reused_thread=reused_thread,
+    )
 
 
-@router.get("/{run_id}", response_model=RunPublic)
-def read_run(session: SessionDep, current_user: CurrentUser, run_id: uuid.UUID) -> Any:
+@router.get("/{execution_id}", response_model=ExecutionPublic)
+def read_execution(session: SessionDep, current_user: CurrentUser, execution_id: uuid.UUID) -> Any:
     """
-    Get a Run by ID.
+    Get an Execution by ID.
     """
 
     try:
         stmt = text(
             "select "
-            "r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
-            "from public.run r "
-            "where r.id = :run_id "
+            "e.id, e.thread_id, e.targets, e.started_at, e.ended_at, e.status, e.summary "
+            "from public.execution e "
+            "where e.id = :execution_id "
             "limit 1"
         )
-        row = session.connection().execute(stmt, {"run_id": run_id}).mappings().first()
+        row = (
+            session.connection()
+            .execute(stmt, {"execution_id": execution_id})
+            .mappings()
+            .first()
+        )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return RunPublic(**dict(row))
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return ExecutionPublic(**dict(row))
 
 
-@router.patch("/{run_id}", response_model=RunPublic)
-def update_run(
+@router.patch("/{execution_id}", response_model=ExecutionPublic)
+def update_execution(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
-    run_in: RunUpdate,
+    execution_id: uuid.UUID,
+    execution_in: ExecutionUpdate,
 ) -> Any:
     """
-    Update a Run.
+    Update an Execution.
     """
 
-    update = run_in.model_dump(exclude_unset=True)
+    update = execution_in.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=422, detail="No fields to update")
 
     clauses: list[str] = []
-    params: dict[str, Any] = {"run_id": run_id}
+    params: dict[str, Any] = {"execution_id": execution_id}
 
     if "targets" in update:
         targets = update.get("targets")
@@ -422,96 +435,101 @@ def update_run(
 
     try:
         stmt = text(
-            "update public.run "
+            "update public.execution "
             f"set {', '.join(clauses)} "
-            "where id = :run_id "
-            "returning id, task_id, targets, started_at, ended_at, status, summary"
+            "where id = :execution_id "
+            "returning id, thread_id, targets, started_at, ended_at, status, summary"
         )
-        row = session.connection().execute(stmt, params).mappings().first()
+        row = (
+            session.connection()
+            .execute(stmt, params)
+            .mappings()
+            .first()
+        )
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return RunPublic(**dict(row))
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return ExecutionPublic(**dict(row))
 
 
-@router.delete("/{run_id}", response_model=Message)
-def delete_run(session: SessionDep, current_user: CurrentUser, run_id: uuid.UUID) -> Any:
+@router.delete("/{execution_id}", response_model=Message)
+def delete_execution(session: SessionDep, current_user: CurrentUser, execution_id: uuid.UUID) -> Any:
     """
-    Delete a Run.
+    Delete an Execution.
 
-    Note: restricted to superusers; deleting runs removes audit trail for that run.
+    Note: restricted to superusers; deleting executions removes audit trail for that execution.
     """
 
     get_current_active_superuser(current_user)
     try:
-        stmt = text("delete from public.run where id = :run_id returning id")
-        deleted = session.connection().execute(stmt, {"run_id": run_id}).first()
+        stmt = text("delete from public.execution where id = :execution_id returning id")
+        deleted = session.connection().execute(stmt, {"execution_id": execution_id}).first()
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
     if deleted is None:
-        raise HTTPException(status_code=404, detail="Run not found")
-    return Message(message="Run deleted successfully")
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return Message(message="Execution deleted successfully")
 
 
-@router.get("/{run_id}/events", response_model=RunEventsPublic)
-def read_run_events(
+@router.get("/{execution_id}/events", response_model=EventsPublic)
+def read_execution_events(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
+    execution_id: uuid.UUID,
     skip: int = 0,
     limit: int = 1000,
 ) -> Any:
     """
-    Retrieve Run events.
+    Retrieve Events for an Execution.
     """
 
     try:
-        count_stmt = text("select count(*) from public.run_event e where e.run_id = :run_id")
+        count_stmt = text("select count(*) from public.event e where e.execution_id = :execution_id")
         count = (
             session.connection()
-            .execute(count_stmt, {"run_id": run_id})
+            .execute(count_stmt, {"execution_id": execution_id})
             .scalar_one()
         )
         stmt = text(
-            "select e.id, e.run_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id "
-            "from public.run_event e "
-            "where e.run_id = :run_id "
+            "select e.id, e.execution_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id "
+            "from public.event e "
+            "where e.execution_id = :execution_id "
             "order by e.ts asc nulls last, e.id asc "
             "offset :skip limit :limit"
         )
         rows = (
             session.connection()
-            .execute(stmt, {"run_id": run_id, "skip": skip, "limit": limit})
+            .execute(stmt, {"execution_id": execution_id, "skip": skip, "limit": limit})
             .mappings()
             .all()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return RunEventsPublic(data=[], count=0)
+            return EventsPublic(data=[], count=0)
         raise
 
-    events = [RunEventPublic(**dict(row)) for row in rows]
-    return RunEventsPublic(data=events, count=count)
+    events = [EventPublic(**dict(row)) for row in rows]
+    return EventsPublic(data=events, count=count)
 
 
-@router.post("/{run_id}/events", response_model=RunEventPublic, status_code=201)
-def create_run_event(
+@router.post("/{execution_id}/events", response_model=EventPublic, status_code=201)
+def create_execution_event(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
-    event_in: RunEventCreate,
+    execution_id: uuid.UUID,
+    event_in: EventCreate,
 ) -> Any:
     """
-    Append a Run event (audit log).
+    Append an Event (audit log) to an Execution.
     """
 
     type_ = event_in.type.strip()
@@ -523,25 +541,24 @@ def create_run_event(
     supersedes_event_id = event_in.supersedes_event_id
 
     try:
-        # Fail cleanly on missing run instead of bubbling FK violations.
         exists = session.connection().execute(
-            text("select 1 from public.run r where r.id = :run_id limit 1"),
-            {"run_id": run_id},
+            text("select 1 from public.execution e where e.id = :execution_id limit 1"),
+            {"execution_id": execution_id},
         ).first()
         if exists is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
 
         stmt = text(
-            "insert into public.run_event (run_id, ts, type, message, data, supersedes_event_id) "
-            "values (:run_id, coalesce(:ts, now()), :type, :message, cast(:data as jsonb), :supersedes_event_id) "
-            "returning id, run_id, ts, type, message, data, supersedes_event_id"
+            "insert into public.event (execution_id, ts, type, message, data, supersedes_event_id) "
+            "values (:execution_id, coalesce(:ts, now()), :type, :message, cast(:data as jsonb), :supersedes_event_id) "
+            "returning id, execution_id, ts, type, message, data, supersedes_event_id"
         )
         row = (
             session.connection()
             .execute(
                 stmt,
                 {
-                    "run_id": run_id,
+                    "execution_id": execution_id,
                     "ts": event_in.ts,
                     "type": type_,
                     "message": message,
@@ -552,72 +569,94 @@ def create_run_event(
             .mappings()
             .first()
         )
+
+        # Best-effort: improve the Execution summary for UIs that list executions by summary.
+        # Only sets a summary when it's missing or still on a generic placeholder.
+        summary_candidate = message
+        if summary_candidate is None:
+            intent = payload.get("intent")
+            if isinstance(intent, str) and intent.strip():
+                summary_candidate = intent.strip()
+        if isinstance(summary_candidate, str) and summary_candidate.strip():
+            summary_candidate = summary_candidate.strip()[:255]
+            session.connection().execute(
+                text(
+                    "update public.execution "
+                    "set summary = :summary "
+                    "where id = :execution_id and (summary is null or btrim(summary) = '' or summary = 'Execution')"
+                ),
+                {"execution_id": execution_id, "summary": summary_candidate},
+            )
         session.commit()
     except IntegrityError:
-        # Covers bad supersedes_event_id foreign key, etc.
-        raise HTTPException(status_code=409, detail="Invalid run event linkage")
+        raise HTTPException(status_code=409, detail="Invalid event linkage")
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=500, detail="Failed to create run event")
-    return RunEventPublic(**dict(row))
+        raise HTTPException(status_code=500, detail="Failed to create event")
+    return EventPublic(**dict(row))
 
 
-@router.post("/{run_id}/events/{event_id}/supersede", response_model=RunEventPublic, status_code=201)
-def supersede_run_event(
+@router.post("/{execution_id}/events/{event_id}/supersede", response_model=EventPublic, status_code=201)
+def supersede_execution_event(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
+    execution_id: uuid.UUID,
     event_id: int,
-    event_in: RunEventCreate,
+    event_in: EventCreate,
 ) -> Any:
     """
-    "Update" a Run event by creating a new event that supersedes it.
+    "Update" an Event by creating a new Event that supersedes it.
     """
 
-    # Ensure the superseded event exists for this run.
     try:
         existing = (
             session.connection()
             .execute(
                 text(
-                    "select 1 from public.run_event e where e.id = :event_id and e.run_id = :run_id limit 1"
+                    "select 1 from public.event e "
+                    "where e.id = :event_id and e.execution_id = :execution_id "
+                    "limit 1"
                 ),
-                {"event_id": event_id, "run_id": run_id},
+                {"event_id": event_id, "execution_id": execution_id},
             )
             .first()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run event not found")
+            raise HTTPException(status_code=404, detail="Event not found")
         raise
 
     if existing is None:
-        raise HTTPException(status_code=404, detail="Run event not found")
+        raise HTTPException(status_code=404, detail="Event not found")
 
-    # Force supersedes_event_id to the target event.
-    patched = RunEventCreate(
+    patched = EventCreate(
         ts=event_in.ts,
         type=event_in.type,
         message=event_in.message,
         data=event_in.data,
         supersedes_event_id=event_id,
     )
-    return create_run_event(session=session, current_user=current_user, run_id=run_id, event_in=patched)
+    return create_execution_event(
+        session=session,
+        current_user=current_user,
+        execution_id=execution_id,
+        event_in=patched,
+    )
 
 
-@router.delete("/{run_id}/events/{event_id}", response_model=Message)
-def delete_run_event(
+@router.delete("/{execution_id}/events/{event_id}", response_model=Message)
+def delete_execution_event(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
+    execution_id: uuid.UUID,
     event_id: int,
 ) -> Any:
     """
-    Delete a Run event.
+    Delete an Event.
 
     Note: restricted to superusers; prefer superseding events instead of deleting.
     """
@@ -625,78 +664,80 @@ def delete_run_event(
     get_current_active_superuser(current_user)
     try:
         stmt = text(
-            "delete from public.run_event "
-            "where id = :event_id and run_id = :run_id "
+            "delete from public.event "
+            "where id = :event_id and execution_id = :execution_id "
             "returning id"
         )
         deleted = (
             session.connection()
-            .execute(stmt, {"event_id": event_id, "run_id": run_id})
+            .execute(stmt, {"event_id": event_id, "execution_id": execution_id})
             .first()
         )
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run event not found")
+            raise HTTPException(status_code=404, detail="Event not found")
         raise
 
     if deleted is None:
-        raise HTTPException(status_code=404, detail="Run event not found")
-    return Message(message="Run event deleted successfully")
+        raise HTTPException(status_code=404, detail="Event not found")
+    return Message(message="Event deleted successfully")
 
 
-@router.get("/{run_id}/memory-links", response_model=RunMemoryLinksPublic)
-def read_run_memory_links(
+@router.get("/{execution_id}/artifact-links", response_model=ExecutionArtifactLinksPublic)
+def read_execution_artifact_links(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
+    execution_id: uuid.UUID,
     skip: int = 0,
     limit: int = 1000,
 ) -> Any:
     """
-    Retrieve memory links for a Run.
+    Retrieve artifact links for an Execution.
     """
 
     try:
-        count_stmt = text("select count(*) from public.run_library_link l where l.run_id = :run_id")
-        count = session.connection().execute(count_stmt, {"run_id": run_id}).scalar_one()
+        count_stmt = text(
+            "select count(*) from public.execution_artifact_link l where l.execution_id = :execution_id"
+        )
+        count = session.connection().execute(count_stmt, {"execution_id": execution_id}).scalar_one()
 
         stmt = text(
             "select "
             "l.relation as relation, "
             "l.created_at as created_at, "
-            "li.id as library_item_id, "
-            "li.workflow_key as workflow_key, "
-            "li.kind as kind, "
-            "li.title as title, "
-            "li.body_mdc as body_mdc, "
-            "li.tags as tags, "
-            "li.source_refs as source_refs, "
-            "li.promotion_mode as promotion_mode, "
-            "li.created_at as library_created_at, "
-            "li.last_used_at as last_used_at, "
-            "li.superseded_by_id as superseded_by_id "
-            "from public.run_library_link l "
-            "join public.library_item li on li.id = l.library_item_id "
-            "where l.run_id = :run_id "
+            "a.id as artifact_id, "
+            "a.workflow_key as workflow_key, "
+            "a.kind as kind, "
+            "a.title as title, "
+            "a.body_mdc as body_mdc, "
+            "a.tags as tags, "
+            "a.source_refs as source_refs, "
+            "a.promotion_mode as promotion_mode, "
+            "a.created_at as artifact_created_at, "
+            "a.last_used_at as last_used_at, "
+            "a.superseded_by_id as superseded_by_id "
+            "from public.execution_artifact_link l "
+            "join public.artifact a on a.id = l.artifact_id "
+            "where l.execution_id = :execution_id "
             "order by l.relation asc, l.created_at desc "
             "offset :skip limit :limit"
         )
         rows = (
             session.connection()
-            .execute(stmt, {"run_id": run_id, "skip": skip, "limit": limit})
+            .execute(stmt, {"execution_id": execution_id, "skip": skip, "limit": limit})
             .mappings()
             .all()
         )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            return RunMemoryLinksPublic(data=[], count=0)
+            return ExecutionArtifactLinksPublic(data=[], count=0)
         raise
 
-    links: list[RunMemoryLinkPublic] = []
+    links: list[ExecutionArtifactLinkPublic] = []
     for row in rows:
-        library_item = LibraryItemPublic(
-            id=row["library_item_id"],
+        artifact = ArtifactPublic(
+            id=row["artifact_id"],
             workflow_key=row["workflow_key"],
             kind=row["kind"],
             title=row["title"],
@@ -704,62 +745,62 @@ def read_run_memory_links(
             tags=row.get("tags") or {},
             source_refs=row.get("source_refs") or [],
             promotion_mode=row["promotion_mode"],
-            created_at=row["library_created_at"],
+            created_at=row["artifact_created_at"],
             last_used_at=row["last_used_at"],
             superseded_by_id=row["superseded_by_id"],
         )
         links.append(
-            RunMemoryLinkPublic(
+            ExecutionArtifactLinkPublic(
                 relation=row["relation"],
                 created_at=row["created_at"],
-                library_item=library_item,
+                artifact=artifact,
             )
         )
 
-    return RunMemoryLinksPublic(data=links, count=count)
+    return ExecutionArtifactLinksPublic(data=links, count=count)
 
 
-@router.post("/{run_id}/memory-links", response_model=RunMemoryLinkPublic, status_code=201)
-def create_run_memory_link(
+@router.post("/{execution_id}/artifact-links", response_model=ExecutionArtifactLinkPublic, status_code=201)
+def create_execution_artifact_link(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
-    link_in: RunMemoryLinkCreate,
+    execution_id: uuid.UUID,
+    link_in: ExecutionArtifactLinkCreate,
 ) -> Any:
     """
-    Create a memory link (run_library_link) for a Run.
+    Create an artifact link (execution_artifact_link) for an Execution.
     """
 
     created_at = link_in.created_at
     relation = link_in.relation
-    library_item_id = link_in.library_item_id
+    artifact_id = link_in.artifact_id
 
     try:
         exists = session.connection().execute(
-            text("select 1 from public.run r where r.id = :run_id limit 1"),
-            {"run_id": run_id},
+            text("select 1 from public.execution e where e.id = :execution_id limit 1"),
+            {"execution_id": execution_id},
         ).first()
         if exists is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
 
-        li_exists = session.connection().execute(
-            text("select 1 from public.library_item li where li.id = :id limit 1"),
-            {"id": library_item_id},
+        a_exists = session.connection().execute(
+            text("select 1 from public.artifact a where a.id = :id limit 1"),
+            {"id": artifact_id},
         ).first()
-        if li_exists is None:
-            raise HTTPException(status_code=404, detail="Library item not found")
+        if a_exists is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
 
         stmt = text(
-            "insert into public.run_library_link (run_id, library_item_id, relation, created_at) "
-            "values (:run_id, :library_item_id, :relation, coalesce(:created_at, now())) "
-            "on conflict (run_id, library_item_id, relation) do update set "
-            "created_at = least(public.run_library_link.created_at, excluded.created_at)"
+            "insert into public.execution_artifact_link (execution_id, artifact_id, relation, created_at) "
+            "values (:execution_id, :artifact_id, :relation, coalesce(:created_at, now())) "
+            "on conflict (execution_id, artifact_id, relation) do update set "
+            "created_at = least(public.execution_artifact_link.created_at, excluded.created_at)"
         )
         session.connection().execute(
             stmt,
             {
-                "run_id": run_id,
-                "library_item_id": library_item_id,
+                "execution_id": execution_id,
+                "artifact_id": artifact_id,
                 "relation": relation,
                 "created_at": created_at,
             },
@@ -767,52 +808,52 @@ def create_run_memory_link(
 
         if relation == "used":
             session.connection().execute(
-                text("update public.library_item set last_used_at = now() where id = :id"),
-                {"id": library_item_id},
+                text("update public.artifact set last_used_at = now() where id = :id"),
+                {"id": artifact_id},
             )
 
         row_stmt = text(
             "select "
             "l.relation as relation, "
             "l.created_at as created_at, "
-            "li.id as library_item_id, "
-            "li.workflow_key as workflow_key, "
-            "li.kind as kind, "
-            "li.title as title, "
-            "li.body_mdc as body_mdc, "
-            "li.tags as tags, "
-            "li.source_refs as source_refs, "
-            "li.promotion_mode as promotion_mode, "
-            "li.created_at as library_created_at, "
-            "li.last_used_at as last_used_at, "
-            "li.superseded_by_id as superseded_by_id "
-            "from public.run_library_link l "
-            "join public.library_item li on li.id = l.library_item_id "
-            "where l.run_id = :run_id and l.library_item_id = :library_item_id and l.relation = :relation "
+            "a.id as artifact_id, "
+            "a.workflow_key as workflow_key, "
+            "a.kind as kind, "
+            "a.title as title, "
+            "a.body_mdc as body_mdc, "
+            "a.tags as tags, "
+            "a.source_refs as source_refs, "
+            "a.promotion_mode as promotion_mode, "
+            "a.created_at as artifact_created_at, "
+            "a.last_used_at as last_used_at, "
+            "a.superseded_by_id as superseded_by_id "
+            "from public.execution_artifact_link l "
+            "join public.artifact a on a.id = l.artifact_id "
+            "where l.execution_id = :execution_id and l.artifact_id = :artifact_id and l.relation = :relation "
             "limit 1"
         )
         row = (
             session.connection()
             .execute(
                 row_stmt,
-                {"run_id": run_id, "library_item_id": library_item_id, "relation": relation},
+                {"execution_id": execution_id, "artifact_id": artifact_id, "relation": relation},
             )
             .mappings()
             .first()
         )
         session.commit()
     except IntegrityError:
-        raise HTTPException(status_code=409, detail="Invalid memory link")
+        raise HTTPException(status_code=409, detail="Invalid artifact link")
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Memory link not created")
+        raise HTTPException(status_code=404, detail="Artifact link not created")
 
-    library_item = LibraryItemPublic(
-        id=row["library_item_id"],
+    artifact = ArtifactPublic(
+        id=row["artifact_id"],
         workflow_key=row["workflow_key"],
         kind=row["kind"],
         title=row["title"],
@@ -820,27 +861,27 @@ def create_run_memory_link(
         tags=row.get("tags") or {},
         source_refs=row.get("source_refs") or [],
         promotion_mode=row["promotion_mode"],
-        created_at=row["library_created_at"],
+        created_at=row["artifact_created_at"],
         last_used_at=row["last_used_at"],
         superseded_by_id=row["superseded_by_id"],
     )
-    return RunMemoryLinkPublic(
+    return ExecutionArtifactLinkPublic(
         relation=row["relation"],
         created_at=row["created_at"],
-        library_item=library_item,
+        artifact=artifact,
     )
 
 
-@router.delete("/{run_id}/memory-links/{library_item_id}", response_model=Message)
-def delete_run_memory_link(
+@router.delete("/{execution_id}/artifact-links/{artifact_id}", response_model=Message)
+def delete_execution_artifact_link(
     session: SessionDep,
     current_user: CurrentUser,
-    run_id: uuid.UUID,
-    library_item_id: uuid.UUID,
+    execution_id: uuid.UUID,
+    artifact_id: uuid.UUID,
     relation: str,
 ) -> Any:
     """
-    Delete a memory link (run_library_link).
+    Delete an artifact link (execution_artifact_link).
 
     Note: restricted to superusers; deleting links harms auditability.
     """
@@ -852,89 +893,126 @@ def delete_run_memory_link(
 
     try:
         stmt = text(
-            "delete from public.run_library_link "
-            "where run_id = :run_id and library_item_id = :library_item_id and relation = :relation "
+            "delete from public.execution_artifact_link "
+            "where execution_id = :execution_id and artifact_id = :artifact_id and relation = :relation "
             "returning 1"
         )
         deleted = (
             session.connection()
             .execute(
                 stmt,
-                {"run_id": run_id, "library_item_id": library_item_id, "relation": relation},
+                {"execution_id": execution_id, "artifact_id": artifact_id, "relation": relation},
             )
             .first()
         )
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Memory link not found")
+            raise HTTPException(status_code=404, detail="Artifact link not found")
         raise
 
     if deleted is None:
-        raise HTTPException(status_code=404, detail="Memory link not found")
-    return Message(message="Memory link deleted successfully")
+        raise HTTPException(status_code=404, detail="Artifact link not found")
+    return Message(message="Artifact link deleted successfully")
 
 
-@router.get("/{run_id}/detail", response_model=RunDetailPublic)
-def read_run_detail(session: SessionDep, current_user: CurrentUser, run_id: uuid.UUID) -> Any:
+@router.get("/{execution_id}/detail", response_model=ExecutionDetailPublic)
+def read_execution_detail(
+    session: SessionDep,
+    current_user: CurrentUser,
+    execution_id: uuid.UUID,
+) -> Any:
     """
-    Retrieve a Run, its append-only events, and its memory links (Used/Created/Promoted/Superseded).
+    Retrieve an Execution, its Thread, its append-only Events, and its artifact links.
     """
 
     try:
-        run_stmt = text(
+        execution_stmt = text(
             "select "
-            "r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary "
-            "from public.run r "
-            "where r.id = :run_id "
+            "e.id, e.thread_id, e.targets, e.started_at, e.ended_at, e.status, e.summary "
+            "from public.execution e "
+            "where e.id = :execution_id "
             "limit 1"
         )
-        run_row = session.connection().execute(run_stmt, {"run_id": run_id}).mappings().first()
-        if run_row is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+        execution_row = (
+            session.connection()
+            .execute(execution_stmt, {"execution_id": execution_id})
+            .mappings()
+            .first()
+        )
+        if execution_row is None:
+            raise HTTPException(status_code=404, detail="Execution not found")
+
+        thread_stmt = text(
+            "select "
+            "t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria, "
+            "t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at "
+            "from public.thread t "
+            "where t.id = :thread_id "
+            "limit 1"
+        )
+        thread_row = (
+            session.connection()
+            .execute(thread_stmt, {"thread_id": execution_row["thread_id"]})
+            .mappings()
+            .first()
+        )
+        if thread_row is None:
+            raise HTTPException(status_code=404, detail="Thread not found")
 
         events_stmt = text(
             "select "
-            "e.id, e.run_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id "
-            "from public.run_event e "
-            "where e.run_id = :run_id "
+            "e.id, e.execution_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id "
+            "from public.event e "
+            "where e.execution_id = :execution_id "
             "order by e.ts asc nulls last, e.id asc"
         )
-        event_rows = session.connection().execute(events_stmt, {"run_id": run_id}).mappings().all()
+        event_rows = (
+            session.connection()
+            .execute(events_stmt, {"execution_id": execution_id})
+            .mappings()
+            .all()
+        )
 
         links_stmt = text(
             "select "
             "l.relation as relation, "
             "l.created_at as created_at, "
-            "li.id as library_item_id, "
-            "li.workflow_key as workflow_key, "
-            "li.kind as kind, "
-            "li.title as title, "
-            "li.body_mdc as body_mdc, "
-            "li.tags as tags, "
-            "li.source_refs as source_refs, "
-            "li.promotion_mode as promotion_mode, "
-            "li.created_at as library_created_at, "
-            "li.last_used_at as last_used_at, "
-            "li.superseded_by_id as superseded_by_id "
-            "from public.run_library_link l "
-            "join public.library_item li on li.id = l.library_item_id "
-            "where l.run_id = :run_id "
+            "a.id as artifact_id, "
+            "a.workflow_key as workflow_key, "
+            "a.kind as kind, "
+            "a.title as title, "
+            "a.body_mdc as body_mdc, "
+            "a.tags as tags, "
+            "a.source_refs as source_refs, "
+            "a.promotion_mode as promotion_mode, "
+            "a.created_at as artifact_created_at, "
+            "a.last_used_at as last_used_at, "
+            "a.superseded_by_id as superseded_by_id "
+            "from public.execution_artifact_link l "
+            "join public.artifact a on a.id = l.artifact_id "
+            "where l.execution_id = :execution_id "
             "order by l.relation asc, l.created_at desc"
         )
-        link_rows = session.connection().execute(links_stmt, {"run_id": run_id}).mappings().all()
+        link_rows = (
+            session.connection()
+            .execute(links_stmt, {"execution_id": execution_id})
+            .mappings()
+            .all()
+        )
     except ProgrammingError as e:
         if _is_missing_table_error(e):
-            raise HTTPException(status_code=404, detail="Run not found")
+            raise HTTPException(status_code=404, detail="Execution not found")
         raise
 
-    run = RunPublic(**dict(run_row))
-    events = [RunEventPublic(**dict(row)) for row in event_rows]
+    execution = ExecutionPublic(**dict(execution_row))
+    thread = ThreadPublic(**dict(thread_row))
+    events = [EventPublic(**dict(row)) for row in event_rows]
 
-    links: list[RunMemoryLinkPublic] = []
+    links: list[ExecutionArtifactLinkPublic] = []
     for row in link_rows:
-        library_item = LibraryItemPublic(
-            id=row["library_item_id"],
+        artifact = ArtifactPublic(
+            id=row["artifact_id"],
             workflow_key=row["workflow_key"],
             kind=row["kind"],
             title=row["title"],
@@ -942,16 +1020,21 @@ def read_run_detail(session: SessionDep, current_user: CurrentUser, run_id: uuid
             tags=row.get("tags") or {},
             source_refs=row.get("source_refs") or [],
             promotion_mode=row["promotion_mode"],
-            created_at=row["library_created_at"],
+            created_at=row["artifact_created_at"],
             last_used_at=row["last_used_at"],
             superseded_by_id=row["superseded_by_id"],
         )
         links.append(
-            RunMemoryLinkPublic(
+            ExecutionArtifactLinkPublic(
                 relation=row["relation"],
                 created_at=row["created_at"],
-                library_item=library_item,
+                artifact=artifact,
             )
         )
 
-    return RunDetailPublic(run=run, events=events, memory_links=links)
+    return ExecutionDetailPublic(
+        execution=execution,
+        thread=thread,
+        events=events,
+        artifact_links=links,
+    )

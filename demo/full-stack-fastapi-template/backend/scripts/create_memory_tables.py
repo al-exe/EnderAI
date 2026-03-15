@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-Bootstrap/upgrade DB-backed memory tables used by Tasks/Runs/Library.
+Bootstrap/upgrade DB-backed memory tables used by:
 
-This is intentionally idempotent: safe to run multiple times.
+- Threads (formerly Tasks)
+- Executions (formerly Runs)
+- Artifacts (formerly Library items / memory)
+- Events (formerly Run events / audit log)
+
+This is intentionally idempotent and includes a best-effort rename from the
+legacy table/column names used in early iterations of the system.
 """
 
 from sqlalchemy import text
@@ -11,9 +17,137 @@ from app.core.db import engine
 
 
 DDL = [
-    # Task table (the key migration for /runs/start is intent_key).
+    # ---- Legacy -> current renames (best-effort) ----
     """
-    create table if not exists public.task (
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'task'
+      ) and not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'thread'
+      ) then
+        alter table public.task rename to thread;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run'
+      ) and not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution'
+      ) then
+        alter table public.run rename to execution;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_event'
+      ) and not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'event'
+      ) then
+        alter table public.run_event rename to event;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'library_item'
+      ) and not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'artifact'
+      ) then
+        alter table public.library_item rename to artifact;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_library_link'
+      ) and not exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution_artifact_link'
+      ) then
+        alter table public.run_library_link rename to execution_artifact_link;
+      end if;
+    end $$;
+    """,
+    # Column renames (after table renames).
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution' and column_name = 'task_id'
+      ) and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution' and column_name = 'thread_id'
+      ) then
+        alter table public.execution rename column task_id to thread_id;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'event' and column_name = 'run_id'
+      ) and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'event' and column_name = 'execution_id'
+      ) then
+        alter table public.event rename column run_id to execution_id;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution_artifact_link' and column_name = 'run_id'
+      ) and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution_artifact_link' and column_name = 'execution_id'
+      ) then
+        alter table public.execution_artifact_link rename column run_id to execution_id;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution_artifact_link' and column_name = 'library_item_id'
+      ) and not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'execution_artifact_link' and column_name = 'artifact_id'
+      ) then
+        alter table public.execution_artifact_link rename column library_item_id to artifact_id;
+      end if;
+    end $$;
+    """,
+    # ---- Canonical tables (Thread/Execution/Artifact/Event) ----
+    """
+    create table if not exists public.thread (
       id uuid primary key,
       title text not null,
       workflow_key text not null,
@@ -27,12 +161,11 @@ DDL = [
       last_touched_at timestamptz not null default now()
     );
     """,
-    "alter table public.task add column if not exists intent_key text;",
-    # Runs + audit log.
+    "alter table public.thread add column if not exists intent_key text;",
     """
-    create table if not exists public.run (
+    create table if not exists public.execution (
       id uuid primary key,
-      task_id uuid not null references public.task(id) on delete cascade,
+      thread_id uuid not null references public.thread(id) on delete cascade,
       targets jsonb not null default '[]'::jsonb,
       started_at timestamptz not null default now(),
       ended_at timestamptz,
@@ -41,19 +174,18 @@ DDL = [
     );
     """,
     """
-    create table if not exists public.run_event (
+    create table if not exists public.event (
       id bigserial primary key,
-      run_id uuid not null references public.run(id) on delete cascade,
+      execution_id uuid not null references public.execution(id) on delete cascade,
       ts timestamptz not null default now(),
       type text not null,
       message text,
       data jsonb not null default '{}'::jsonb,
-      supersedes_event_id bigint references public.run_event(id)
+      supersedes_event_id bigint references public.event(id)
     );
     """,
-    # Library items + run<->memory linkage.
     """
-    create table if not exists public.library_item (
+    create table if not exists public.artifact (
       id uuid primary key,
       workflow_key text not null,
       kind text not null,
@@ -64,17 +196,147 @@ DDL = [
       created_at timestamptz not null default now(),
       last_used_at timestamptz,
       promotion_mode text not null default 'auto',
-      superseded_by_id uuid references public.library_item(id)
+      superseded_by_id uuid references public.artifact(id)
     );
     """,
     """
-    create table if not exists public.run_library_link (
-      run_id uuid not null references public.run(id) on delete cascade,
-      library_item_id uuid not null references public.library_item(id) on delete cascade,
+    create table if not exists public.execution_artifact_link (
+      execution_id uuid not null references public.execution(id) on delete cascade,
+      artifact_id uuid not null references public.artifact(id) on delete cascade,
       relation text not null,
       created_at timestamptz not null default now(),
-      primary key (run_id, library_item_id, relation)
+      primary key (execution_id, artifact_id, relation)
     );
+    """,
+    # ---- Data migration (handles the "both old and new tables exist" case) ----
+    # This can happen if a previous deploy created the new tables but did not rename the legacy ones.
+    """
+    do $$
+    declare has_intent boolean;
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'task'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'thread'
+      ) then
+        select exists (
+          select 1 from information_schema.columns
+          where table_schema = 'public' and table_name = 'task' and column_name = 'intent_key'
+        ) into has_intent;
+
+        if has_intent then
+          insert into public.thread (
+            id, title, workflow_key, intent_key, goal, acceptance_criteria,
+            systems_touched, risk_level, status, created_at, last_touched_at
+          )
+          select
+            t.id, t.title, t.workflow_key, t.intent_key, t.goal, t.acceptance_criteria,
+            t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at
+          from public.task t
+          where not exists (select 1 from public.thread th where th.id = t.id);
+        else
+          insert into public.thread (
+            id, title, workflow_key, intent_key, goal, acceptance_criteria,
+            systems_touched, risk_level, status, created_at, last_touched_at
+          )
+          select
+            t.id, t.title, t.workflow_key, null, t.goal, t.acceptance_criteria,
+            t.systems_touched, t.risk_level, t.status, t.created_at, t.last_touched_at
+          from public.task t
+          where not exists (select 1 from public.thread th where th.id = t.id);
+        end if;
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution'
+      ) then
+        insert into public.execution (
+          id, thread_id, targets, started_at, ended_at, status, summary
+        )
+        select
+          r.id, r.task_id, r.targets, r.started_at, r.ended_at, r.status, r.summary
+        from public.run r
+        where not exists (select 1 from public.execution e where e.id = r.id);
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_event'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'event'
+      ) then
+        insert into public.event (
+          id, execution_id, ts, type, message, data, supersedes_event_id
+        )
+        select
+          e.id, e.run_id, e.ts, e.type, e.message, e.data, e.supersedes_event_id
+        from public.run_event e
+        where not exists (select 1 from public.event ev where ev.id = e.id);
+
+        perform setval(
+          pg_get_serial_sequence('public.event', 'id'),
+          greatest(coalesce((select max(id) from public.event), 0), 1),
+          true
+        );
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'library_item'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'artifact'
+      ) then
+        insert into public.artifact (
+          id, workflow_key, kind, title, body_mdc, tags, source_refs,
+          created_at, last_used_at, promotion_mode, superseded_by_id
+        )
+        select
+          li.id, li.workflow_key, li.kind, li.title, li.body_mdc, li.tags, li.source_refs,
+          li.created_at, li.last_used_at, li.promotion_mode, li.superseded_by_id
+        from public.library_item li
+        where not exists (select 1 from public.artifact a where a.id = li.id);
+      end if;
+    end $$;
+    """,
+    """
+    do $$
+    begin
+      if exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'run_library_link'
+      ) and exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = 'execution_artifact_link'
+      ) then
+        insert into public.execution_artifact_link (
+          execution_id, artifact_id, relation, created_at
+        )
+        select
+          l.run_id, l.library_item_id, l.relation, l.created_at
+        from public.run_library_link l
+        on conflict (execution_id, artifact_id, relation) do nothing;
+      end if;
+    end $$;
     """,
 ]
 
@@ -88,4 +350,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
