@@ -27,44 +27,67 @@ SessionDep = Annotated[Session, Depends(get_db)]
 TokenDep = Annotated[str, Depends(reusable_oauth2)]
 
 
-def get_current_user(session: SessionDep, token: TokenDep) -> User:
+def decode_token_payload(token: str) -> TokenPayload:
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[security.ALGORITHM]
         )
-        token_data = TokenPayload(**payload)
+        return TokenPayload(**payload)
     except (InvalidTokenError, ValidationError):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
 
+
+def validate_agent_credential_token(
+    session: SessionDep, token_data: TokenPayload, *, expected_token_kind: str
+) -> AgentCredential:
+    if token_data.token_kind != expected_token_kind:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+    if (
+        token_data.agent_credential_id is None
+        or token_data.agent_credential_version is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+
+    credential = session.get(AgentCredential, token_data.agent_credential_id)
+    if (
+        not credential
+        or credential.user_id != token_data.sub
+        or credential.revoked_at is not None
+        or credential.token_version != token_data.agent_credential_version
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+
+    credential.last_used_at = get_datetime_utc()
+    credential.updated_at = credential.last_used_at
+    session.add(credential)
+    session.commit()
+    return credential
+
+
+def get_current_user(session: SessionDep, token: TokenDep) -> User:
+    token_data = decode_token_payload(token)
+
     if token_data.token_kind == "agent_credential":
-        if (
-            token_data.agent_credential_id is None
-            or token_data.agent_credential_version is None
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Could not validate credentials",
-            )
-
-        credential = session.get(AgentCredential, token_data.agent_credential_id)
-        if (
-            not credential
-            or credential.user_id != token_data.sub
-            or credential.revoked_at is not None
-            or credential.token_version != token_data.agent_credential_version
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Could not validate credentials",
-            )
-
-        credential.last_used_at = get_datetime_utc()
-        credential.updated_at = credential.last_used_at
-        session.add(credential)
-        session.commit()
+        validate_agent_credential_token(
+            session, token_data, expected_token_kind="agent_credential"
+        )
+    elif token_data.token_kind is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
 
     user = session.get(User, token_data.sub)
     if not user:

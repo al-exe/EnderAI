@@ -4,7 +4,13 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import (
+    CurrentUser,
+    SessionDep,
+    TokenDep,
+    decode_token_payload,
+    validate_agent_credential_token,
+)
 from app.core import security
 from app.core.config import settings
 from app.models import (
@@ -13,6 +19,7 @@ from app.models import (
     AgentCredentialIssueResult,
     AgentCredentialPublic,
     AgentCredentialsPublic,
+    AgentMcpTokenValidationResult,
     Message,
     User,
     get_datetime_utc,
@@ -25,7 +32,7 @@ def _to_public(credential: AgentCredential) -> AgentCredentialPublic:
     return AgentCredentialPublic.model_validate(credential)
 
 
-def _issue_agent_token(credential: AgentCredential) -> str:
+def _issue_agent_tokens(credential: AgentCredential) -> tuple[str, str]:
     expires_delta = timedelta(days=settings.AGENT_CREDENTIAL_EXPIRE_DAYS)
     now = get_datetime_utc()
     expires_at = now + expires_delta
@@ -35,7 +42,7 @@ def _issue_agent_token(credential: AgentCredential) -> str:
     credential.last_rotated_at = now
     credential.current_token_expires_at = expires_at
 
-    return security.create_access_token(
+    backend_access_token = security.create_access_token(
         credential.user_id,
         expires_delta=expires_delta,
         extra_claims={
@@ -43,6 +50,30 @@ def _issue_agent_token(credential: AgentCredential) -> str:
             "agent_credential_id": str(credential.id),
             "agent_credential_version": credential.token_version,
         },
+    )
+    mcp_access_token = security.create_access_token(
+        credential.user_id,
+        expires_delta=expires_delta,
+        extra_claims={
+            "token_kind": "agent_mcp",
+            "agent_credential_id": str(credential.id),
+            "agent_credential_version": credential.token_version,
+        },
+    )
+    return backend_access_token, mcp_access_token
+
+
+def _to_issue_result(
+    credential: AgentCredential,
+    *,
+    backend_access_token: str,
+    mcp_access_token: str,
+) -> AgentCredentialIssueResult:
+    return AgentCredentialIssueResult(
+        credential=_to_public(credential),
+        access_token=backend_access_token,
+        backend_access_token=backend_access_token,
+        mcp_access_token=mcp_access_token,
     )
 
 
@@ -91,13 +122,14 @@ def create_agent_credential(
         updated_at=now,
         last_rotated_at=now,
     )
-    access_token = _issue_agent_token(credential)
+    backend_access_token, mcp_access_token = _issue_agent_tokens(credential)
     session.add(credential)
     session.commit()
     session.refresh(credential)
-    return AgentCredentialIssueResult(
-        credential=_to_public(credential),
-        access_token=access_token,
+    return _to_issue_result(
+        credential,
+        backend_access_token=backend_access_token,
+        mcp_access_token=mcp_access_token,
     )
 
 
@@ -114,13 +146,28 @@ def rotate_agent_credential(
             status_code=400, detail="Revoked agent credentials cannot be rotated"
         )
 
-    access_token = _issue_agent_token(credential)
+    backend_access_token, mcp_access_token = _issue_agent_tokens(credential)
     session.add(credential)
     session.commit()
     session.refresh(credential)
-    return AgentCredentialIssueResult(
-        credential=_to_public(credential),
-        access_token=access_token,
+    return _to_issue_result(
+        credential,
+        backend_access_token=backend_access_token,
+        mcp_access_token=mcp_access_token,
+    )
+
+
+@router.post("/validate-mcp-token", response_model=AgentMcpTokenValidationResult)
+def validate_mcp_token(
+    *, session: SessionDep, token: TokenDep
+) -> AgentMcpTokenValidationResult:
+    token_data = decode_token_payload(token)
+    credential = validate_agent_credential_token(
+        session, token_data, expected_token_kind="agent_mcp"
+    )
+    return AgentMcpTokenValidationResult(
+        credential_id=credential.id,
+        user_id=credential.user_id,
     )
 
 
