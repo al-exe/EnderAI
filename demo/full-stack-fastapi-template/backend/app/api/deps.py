@@ -11,7 +11,7 @@ from sqlmodel import Session
 from app.core import security
 from app.core.config import settings
 from app.core.db import engine
-from app.models import TokenPayload, User
+from app.models import AgentCredential, TokenPayload, User, get_datetime_utc
 
 reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/login/access-token"
@@ -38,6 +38,34 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Could not validate credentials",
         )
+
+    if token_data.token_kind == "agent_credential":
+        if (
+            token_data.agent_credential_id is None
+            or token_data.agent_credential_version is None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Could not validate credentials",
+            )
+
+        credential = session.get(AgentCredential, token_data.agent_credential_id)
+        if (
+            not credential
+            or credential.user_id != token_data.sub
+            or credential.revoked_at is not None
+            or credential.token_version != token_data.agent_credential_version
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Could not validate credentials",
+            )
+
+        credential.last_used_at = get_datetime_utc()
+        credential.updated_at = credential.last_used_at
+        session.add(credential)
+        session.commit()
+
     user = session.get(User, token_data.sub)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

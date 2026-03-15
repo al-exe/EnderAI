@@ -1,0 +1,138 @@
+import uuid
+from datetime import timedelta
+
+from fastapi import APIRouter, HTTPException, status
+from sqlmodel import select
+
+from app.api.deps import CurrentUser, SessionDep
+from app.core import security
+from app.core.config import settings
+from app.models import (
+    AgentCredential,
+    AgentCredentialCreate,
+    AgentCredentialIssueResult,
+    AgentCredentialPublic,
+    AgentCredentialsPublic,
+    Message,
+    User,
+    get_datetime_utc,
+)
+
+router = APIRouter(prefix="/agent-credentials", tags=["agent-credentials"])
+
+
+def _to_public(credential: AgentCredential) -> AgentCredentialPublic:
+    return AgentCredentialPublic.model_validate(credential)
+
+
+def _issue_agent_token(credential: AgentCredential) -> str:
+    expires_delta = timedelta(days=settings.AGENT_CREDENTIAL_EXPIRE_DAYS)
+    now = get_datetime_utc()
+    expires_at = now + expires_delta
+
+    credential.token_version += 1
+    credential.updated_at = now
+    credential.last_rotated_at = now
+    credential.current_token_expires_at = expires_at
+
+    return security.create_access_token(
+        credential.user_id,
+        expires_delta=expires_delta,
+        extra_claims={
+            "token_kind": "agent_credential",
+            "agent_credential_id": str(credential.id),
+            "agent_credential_version": credential.token_version,
+        },
+    )
+
+
+def _get_owned_credential(
+    session: SessionDep, current_user: User, credential_id: uuid.UUID
+) -> AgentCredential:
+    credential = session.get(AgentCredential, credential_id)
+    if not credential or credential.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Agent credential not found")
+    return credential
+
+
+@router.get("/", response_model=AgentCredentialsPublic)
+def read_agent_credentials(
+    session: SessionDep, current_user: CurrentUser
+) -> AgentCredentialsPublic:
+    statement = (
+        select(AgentCredential)
+        .where(AgentCredential.user_id == current_user.id)
+        .order_by(AgentCredential.created_at.desc())
+    )
+    credentials = session.exec(statement).all()
+    return AgentCredentialsPublic(
+        data=[_to_public(credential) for credential in credentials],
+        count=len(credentials),
+    )
+
+
+@router.post(
+    "/",
+    response_model=AgentCredentialIssueResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_agent_credential(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: AgentCredentialCreate,
+) -> AgentCredentialIssueResult:
+    now = get_datetime_utc()
+    credential = AgentCredential(
+        user_id=current_user.id,
+        label=body.label,
+        token_version=0,
+        created_at=now,
+        updated_at=now,
+        last_rotated_at=now,
+    )
+    access_token = _issue_agent_token(credential)
+    session.add(credential)
+    session.commit()
+    session.refresh(credential)
+    return AgentCredentialIssueResult(
+        credential=_to_public(credential),
+        access_token=access_token,
+    )
+
+
+@router.post("/{credential_id}/rotate", response_model=AgentCredentialIssueResult)
+def rotate_agent_credential(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    credential_id: uuid.UUID,
+) -> AgentCredentialIssueResult:
+    credential = _get_owned_credential(session, current_user, credential_id)
+    if credential.revoked_at is not None:
+        raise HTTPException(
+            status_code=400, detail="Revoked agent credentials cannot be rotated"
+        )
+
+    access_token = _issue_agent_token(credential)
+    session.add(credential)
+    session.commit()
+    session.refresh(credential)
+    return AgentCredentialIssueResult(
+        credential=_to_public(credential),
+        access_token=access_token,
+    )
+
+
+@router.delete("/{credential_id}", response_model=Message)
+def revoke_agent_credential(
+    *, session: SessionDep, current_user: CurrentUser, credential_id: uuid.UUID
+) -> Message:
+    credential = _get_owned_credential(session, current_user, credential_id)
+    if credential.revoked_at is None:
+        now = get_datetime_utc()
+        credential.revoked_at = now
+        credential.updated_at = now
+        session.add(credential)
+        session.commit()
+    return Message(message="Agent credential revoked successfully")
