@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
+from app.core.cases import build_default_case_data, execution_has_column
 from app.models import (
     ArtifactPublic,
     EventCreate,
@@ -282,24 +283,47 @@ def start_execution(
     )
     execution_id = uuid.uuid4()
 
+    has_execution_updated_at = execution_has_column(session, "updated_at")
+    has_case_data = execution_has_column(session, "case_data")
+    has_context_pack_snapshot = execution_has_column(session, "context_pack_snapshot")
+    default_case_data = build_default_case_data(
+        {"id": execution_id, "summary": summary, "actor_id": current_user.id},
+        {"id": thread_id, "title": thread_title},
+    )
+    context_pack_snapshot = {"topic_id": str(thread_id), "case_id": str(execution_id)}
+
     try:
+        execution_columns = ["id", "thread_id", "targets", "status", "summary"]
+        execution_values = [":id", ":thread_id", "cast(:targets as jsonb)", ":status", ":summary"]
+        execution_params: dict[str, Any] = {
+            "id": execution_id,
+            "thread_id": thread_id,
+            "targets": json.dumps(targets),
+            "status": execution_status,
+            "summary": summary,
+        }
+        if has_execution_updated_at:
+            execution_columns.append("updated_at")
+            execution_values.append("now()")
+        if has_case_data:
+            execution_columns.append("case_data")
+            execution_values.append("cast(:case_data as jsonb)")
+            execution_params["case_data"] = json.dumps(default_case_data)
+        if has_context_pack_snapshot:
+            execution_columns.append("context_pack_snapshot")
+            execution_values.append("cast(:context_pack_snapshot as jsonb)")
+            execution_params["context_pack_snapshot"] = json.dumps(context_pack_snapshot)
+
         execution_stmt = text(
-            "insert into public.execution (id, thread_id, targets, status, summary) "
-            "values (:id, :thread_id, cast(:targets as jsonb), :status, :summary) "
-            "returning id, thread_id, targets, started_at, ended_at, status, summary"
+            "insert into public.execution ("
+            + ", ".join(execution_columns)
+            + ") values ("
+            + ", ".join(execution_values)
+            + ") returning id, thread_id, targets, started_at, ended_at, status, summary"
         )
         execution_row = (
             session.connection()
-            .execute(
-                execution_stmt,
-                {
-                    "id": execution_id,
-                    "thread_id": thread_id,
-                    "targets": json.dumps(targets),
-                    "status": execution_status,
-                    "summary": summary,
-                },
-            )
+            .execute(execution_stmt, execution_params)
             .mappings()
             .first()
         )
@@ -423,6 +447,9 @@ def update_execution(
         ended_at = update.get("ended_at")
         clauses.append("ended_at = :ended_at")
         params["ended_at"] = ended_at
+
+    if execution_has_column(session, "updated_at"):
+        clauses.append("updated_at = now()")
 
     # Convenience: if status is being set to a terminal state and ended_at wasn't explicitly set, set it.
     if "status" in update and "ended_at" not in update:
@@ -586,6 +613,11 @@ def create_execution_event(
                     "where id = :execution_id and (summary is null or btrim(summary) = '' or summary = 'Execution')"
                 ),
                 {"execution_id": execution_id, "summary": summary_candidate},
+            )
+        if execution_has_column(session, "updated_at"):
+            session.connection().execute(
+                text("update public.execution set updated_at = now() where id = :execution_id"),
+                {"execution_id": execution_id},
             )
         session.commit()
     except IntegrityError:

@@ -173,6 +173,9 @@ DDL = [
       summary text
     );
     """,
+    "alter table public.execution add column if not exists updated_at timestamptz not null default now();",
+    "alter table public.execution add column if not exists case_data jsonb not null default '{}'::jsonb;",
+    "alter table public.execution add column if not exists context_pack_snapshot jsonb not null default '{}'::jsonb;",
     """
     create table if not exists public.event (
       id bigserial primary key,

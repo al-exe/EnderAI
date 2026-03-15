@@ -428,6 +428,138 @@ class ExecutionDetailPublic(SQLModel):
     artifact_links: list[ExecutionArtifactLinkPublic]
 
 
+HypothesisStatus = Literal["open", "supported", "disproven"]
+ChangeKind = Literal["code", "config", "infra", "docs", "test"]
+
+
+class CommandRecord(SQLModel):
+    cmd: str = Field(min_length=1)
+    purpose: str | None = None
+    salient_result: str | None = None
+    ts: datetime | None = None
+
+
+class HypothesisRecord(SQLModel):
+    statement: str = Field(min_length=1)
+    status: HypothesisStatus = "open"
+    evidence: str | None = None
+    ts: datetime | None = None
+
+
+class ChangeRecord(SQLModel):
+    kind: ChangeKind = "code"
+    summary: str = Field(min_length=1)
+    files: list[str] = Field(default_factory=list)
+    refs: list[str] = Field(default_factory=list)
+    ts: datetime | None = None
+
+
+class ContextPackSnapshot(SQLModel):
+    topic_id: uuid.UUID | None = None
+    case_id: uuid.UUID | None = None
+    topic_summary: str | None = None
+    matched_signals: list[str] = Field(default_factory=list)
+    representative_cases: list[uuid.UUID] = Field(default_factory=list)
+    recent_cases: list[uuid.UUID] = Field(default_factory=list)
+    canonical_files: list[str] = Field(default_factory=list)
+    canonical_symbols: list[str] = Field(default_factory=list)
+    canonical_errors: list[str] = Field(default_factory=list)
+    canonical_symptoms: list[str] = Field(default_factory=list)
+    pinned_takeaways: list[str] = Field(default_factory=list)
+    negative_history: list[str] = Field(default_factory=list)
+    builder_version: str | None = None
+    created_at: datetime | None = None
+
+
+class CasePublic(SQLModel):
+    id: uuid.UUID
+    topic_id: uuid.UUID
+    title: str
+    opened_at: datetime | None = None
+    updated_at: datetime | None = None
+    closed_at: datetime | None = None
+    status: str = "open"
+    actor_id: uuid.UUID | None = None
+    source: str | None = None
+    input_summary: str | None = None
+    summary_current: str | None = None
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    commands: list[CommandRecord] = Field(default_factory=list)
+    hypotheses: list[HypothesisRecord] = Field(default_factory=list)
+    changes: list[ChangeRecord] = Field(default_factory=list)
+    outcome: str | None = None
+    next_steps: list[str] = Field(default_factory=list)
+    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+
+
+class CasesPublic(SQLModel):
+    data: list[CasePublic]
+    count: int
+
+
+class CaseUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    status: str | None = Field(default=None, min_length=1)
+    actor_id: uuid.UUID | None = None
+    source: str | None = Field(default=None, min_length=1)
+    input_summary: str | None = None
+    summary_current: str | None = None
+    files: list[str] | None = None
+    symbols: list[str] | None = None
+    errors: list[str] | None = None
+    symptoms: list[str] | None = None
+    commands: list[CommandRecord] | None = None
+    hypotheses: list[HypothesisRecord] | None = None
+    changes: list[ChangeRecord] | None = None
+    outcome: str | None = None
+    next_steps: list[str] | None = None
+    context_pack_snapshot: ContextPackSnapshot | None = None
+
+
+class CaseMemoView(SQLModel):
+    case_id: uuid.UUID
+    topic_id: uuid.UUID
+    title: str
+    status: str = "open"
+    opened_at: datetime | None = None
+    updated_at: datetime | None = None
+    input_summary: str | None = None
+    summary_current: str | None = None
+    files: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    commands: list[CommandRecord] = Field(default_factory=list)
+    hypotheses: list[HypothesisRecord] = Field(default_factory=list)
+    changes: list[ChangeRecord] = Field(default_factory=list)
+    outcome: str | None = None
+    next_steps: list[str] = Field(default_factory=list)
+
+
+class CaseHydrationSignals(SQLModel):
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+
+
+class CaseHydrationView(SQLModel):
+    case_id: uuid.UUID
+    topic_id: uuid.UUID
+    title: str
+    input_summary: str | None = None
+    summary_current: str | None = None
+    matched_signals: list[str] = Field(default_factory=list)
+    signals: CaseHydrationSignals = Field(default_factory=CaseHydrationSignals)
+    supported_hypotheses: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    recent_changes: list[ChangeRecord] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+
+
 # Generic message
 class Message(SQLModel):
     message: str
