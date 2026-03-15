@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core.cases import build_default_case_data, execution_has_column
+from app.core.topics import refresh_topic_rollup
 from app.models import (
     ArtifactPublic,
     EventCreate,
@@ -363,6 +364,7 @@ def start_execution(
             raise HTTPException(status_code=501, detail="Threads table not initialized")
         raise
 
+    refresh_topic_rollup(session, thread_id, persist=True)
     session.commit()
 
     thread_public = ThreadPublic(**dict(touched or thread_row))
@@ -473,6 +475,8 @@ def update_execution(
             .mappings()
             .first()
         )
+        if row is not None:
+            refresh_topic_rollup(session, row["thread_id"], persist=True)
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
@@ -568,11 +572,11 @@ def create_execution_event(
     supersedes_event_id = event_in.supersedes_event_id
 
     try:
-        exists = session.connection().execute(
-            text("select 1 from public.execution e where e.id = :execution_id limit 1"),
+        execution_lookup = session.connection().execute(
+            text("select e.thread_id from public.execution e where e.id = :execution_id limit 1"),
             {"execution_id": execution_id},
-        ).first()
-        if exists is None:
+        ).mappings().first()
+        if execution_lookup is None:
             raise HTTPException(status_code=404, detail="Execution not found")
 
         stmt = text(
@@ -619,6 +623,7 @@ def create_execution_event(
                 text("update public.execution set updated_at = now() where id = :execution_id"),
                 {"execution_id": execution_id},
             )
+        refresh_topic_rollup(session, execution_lookup["thread_id"], persist=True)
         session.commit()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Invalid event linkage")

@@ -430,6 +430,7 @@ class ExecutionDetailPublic(SQLModel):
 
 HypothesisStatus = Literal["open", "supported", "disproven"]
 ChangeKind = Literal["code", "config", "infra", "docs", "test"]
+ConfidenceLevel = Literal["high", "medium", "low"]
 
 
 class CommandRecord(SQLModel):
@@ -454,18 +455,35 @@ class ChangeRecord(SQLModel):
     ts: datetime | None = None
 
 
+class RelevantCaseSummary(SQLModel):
+    case_id: uuid.UUID
+    title: str
+    short_summary: str | None = None
+    outcome: str | None = None
+    key_files: list[str] = Field(default_factory=list)
+    key_symbols: list[str] = Field(default_factory=list)
+    key_errors: list[str] = Field(default_factory=list)
+    key_commands: list[str] = Field(default_factory=list)
+    why_selected: str | None = None
+
+
 class ContextPackSnapshot(SQLModel):
     topic_id: uuid.UUID | None = None
     case_id: uuid.UUID | None = None
+    confidence: ConfidenceLevel | None = None
+    alternative_topic_ids: list[uuid.UUID] = Field(default_factory=list)
     topic_summary: str | None = None
     matched_signals: list[str] = Field(default_factory=list)
     representative_cases: list[uuid.UUID] = Field(default_factory=list)
     recent_cases: list[uuid.UUID] = Field(default_factory=list)
+    relevant_cases: list[RelevantCaseSummary] = Field(default_factory=list)
     canonical_files: list[str] = Field(default_factory=list)
     canonical_symbols: list[str] = Field(default_factory=list)
     canonical_errors: list[str] = Field(default_factory=list)
     canonical_symptoms: list[str] = Field(default_factory=list)
     pinned_takeaways: list[str] = Field(default_factory=list)
+    ambiguities: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
     negative_history: list[str] = Field(default_factory=list)
     builder_version: str | None = None
     created_at: datetime | None = None
@@ -557,6 +575,108 @@ class CaseHydrationView(SQLModel):
     open_questions: list[str] = Field(default_factory=list)
     recent_changes: list[ChangeRecord] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+
+
+class TopicRollupPublic(SQLModel):
+    brief: str | None = None
+    canonical_files: list[str] = Field(default_factory=list)
+    canonical_symbols: list[str] = Field(default_factory=list)
+    canonical_errors: list[str] = Field(default_factory=list)
+    canonical_symptoms: list[str] = Field(default_factory=list)
+    pinned_takeaways: list[str] = Field(default_factory=list)
+    negative_history: list[str] = Field(default_factory=list)
+    representative_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    vocabulary: list[str] = Field(default_factory=list)
+    ambiguity_notes: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    case_count: int = 0
+    recent_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class TopicPublic(SQLModel):
+    id: uuid.UUID
+    title: str
+    slug: str
+    description: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    status: str = "open"
+    workflow_key: str
+    owner_ids: list[uuid.UUID] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_used_at: datetime | None = None
+    rollup_summary: str | None = None
+    rollup_version: int = 1
+    canonical_files: list[str] = Field(default_factory=list)
+    canonical_symbols: list[str] = Field(default_factory=list)
+    canonical_errors: list[str] = Field(default_factory=list)
+    canonical_symptoms: list[str] = Field(default_factory=list)
+    pinned_takeaways: list[str] = Field(default_factory=list)
+    ambiguity_notes: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    negative_history: list[str] = Field(default_factory=list)
+    representative_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    recent_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    vocabulary: list[str] = Field(default_factory=list)
+    case_count: int = 0
+
+
+class TopicsPublic(SQLModel):
+    data: list[TopicPublic]
+    count: int
+
+
+class TopicMatchRequest(SQLModel):
+    title: str | None = None
+    request_summary: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    limit: int = 5
+
+
+class TopicHydrationPolicy(SQLModel):
+    confidence: ConfidenceLevel = "low"
+    max_topics: int = 1
+
+
+class TopicMatchCandidate(SQLModel):
+    topic: TopicPublic
+    score: float
+    confidence: ConfidenceLevel
+    matched_signals: list[str] = Field(default_factory=list)
+    reasoning: list[str] = Field(default_factory=list)
+
+
+class TopicMatchResult(SQLModel):
+    policy: TopicHydrationPolicy = Field(default_factory=TopicHydrationPolicy)
+    candidates: list[TopicMatchCandidate] = Field(default_factory=list)
+
+
+class ContextPackBuildRequest(SQLModel):
+    topic_id: uuid.UUID | None = None
+    title: str | None = None
+    request_summary: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    max_topics: int | None = None
+    max_cases_per_topic: int = 3
+
+
+class ContextPackBuildResult(SQLModel):
+    policy: TopicHydrationPolicy = Field(default_factory=TopicHydrationPolicy)
+    matched_topics: list[TopicMatchCandidate] = Field(default_factory=list)
+    selected_topic_ids: list[uuid.UUID] = Field(default_factory=list)
+    selected_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    relevant_cases: list[RelevantCaseSummary] = Field(default_factory=list)
     context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
 
 
