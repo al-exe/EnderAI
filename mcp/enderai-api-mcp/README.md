@@ -300,3 +300,32 @@ That OAuth path is still future work. The single-token hosted flow above is the 
 
 - Requests are restricted to `path` values that start with `/` to prevent accidental full-URL overrides.
 - Prefer `ENDERAI_BEARER_TOKEN` via MCP client env instead of passing tokens as tool arguments.
+
+## Implementation Status: 2026-03-15
+
+The interim hosted-MCP rollout described in this README is now implemented.
+
+Current defaults:
+
+- one user-scoped MCP token for the recommended hosted flow
+- prompted JSON `inputs` for generic hosted MCP clients
+- terminal `codex` CLI for Codex users in this phase
+- legacy dual-token support kept for backward compatibility
+
+Current behavior:
+
+- validated per-user MCP bearer tokens are reused for downstream backend API calls
+- `X-EnderAI-Backend-Token` still works as a legacy override when a client intentionally sends it
+- EnderAI backend auth now accepts `agent_mcp` tokens for normal authenticated API access
+
+Explicitly deferred:
+
+- native Codex OAuth / `codex mcp login`
+- a polished VS Code Codex sidebar auth path
+
+Implementation verification that was completed:
+
+- backend agent-credential route tests
+- MCP vitest coverage, including backend-token precedence behavior
+- frontend build
+- targeted `Connect Agent` Playwright coverage for the default and legacy flows

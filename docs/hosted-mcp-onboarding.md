@@ -432,3 +432,33 @@ The main risks still outside the onboarding flow are:
 - multi-user isolation and permission boundaries must be strong enough before broad paid rollout
 
 These do not block a small trusted pilot, but they should be addressed before a larger hosted multi-user launch.
+
+## Implementation Status: 2026-03-15
+
+The interim hosted-MCP simplification described above is now implemented.
+
+Current product state:
+
+- recommended hosted flow: one user-scoped MCP token
+- recommended generic client path: prompted JSON `inputs`
+- supported Codex path in this phase: terminal `codex` CLI
+- legacy compatibility path: dual-token flow with `X-EnderAI-Backend-Token`
+
+What changed in the implementation:
+
+- backend auth now accepts `agent_mcp` tokens anywhere normal bearer-auth user resolution runs
+- hosted MCP validates the incoming per-user MCP bearer token and reuses that same token for backend API calls
+- if a client still sends `X-EnderAI-Backend-Token`, that legacy header still overrides the session backend token
+- the EnderAI `Connect Agent` UI now defaults to the one-token hosted flow and keeps the dual-token setup behind a legacy toggle
+
+What is intentionally not solved in this phase:
+
+- native Codex OAuth
+- a first-class VS Code Codex sidebar auth flow
+
+Validation completed during implementation:
+
+- backend credential/auth route tests passed with a disposable local Postgres instance
+- MCP package tests passed, including auth precedence coverage
+- frontend production build passed
+- targeted `Connect Agent` Playwright coverage passed for the one-token default flow and the legacy fallback
