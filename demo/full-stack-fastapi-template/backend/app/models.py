@@ -69,6 +69,81 @@ class UsersPublic(SQLModel):
     count: int
 
 
+class AgentCredentialBase(SQLModel):
+    label: str = Field(min_length=1, max_length=255)
+
+
+class AgentCredentialCreate(AgentCredentialBase):
+    pass
+
+
+class AgentCredential(AgentCredentialBase, table=True):
+    __tablename__ = "agent_credential"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        ondelete="CASCADE",
+        index=True,
+    )
+    token_version: int = Field(default=1, nullable=False)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    last_rotated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    current_token_expires_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    last_used_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    revoked_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class AgentCredentialPublic(AgentCredentialBase):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_rotated_at: datetime | None = None
+    current_token_expires_at: datetime | None = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class AgentCredentialsPublic(SQLModel):
+    data: list[AgentCredentialPublic]
+    count: int
+
+
+class AgentCredentialIssueResult(SQLModel):
+    credential: AgentCredentialPublic
+    access_token: str
+    backend_access_token: str
+    mcp_access_token: str
+    token_type: str = "bearer"
+
+
+class AgentMcpTokenValidationResult(SQLModel):
+    valid: bool = True
+    credential_id: uuid.UUID
+    user_id: uuid.UUID
+
+
 # Shared properties
 class ItemBase(SQLModel):
     title: str = Field(min_length=1, max_length=255)
@@ -369,6 +444,9 @@ class TokenPayload(SQLModel):
     # Access tokens are issued with `sub` = user id (UUID string). Keep it typed so
     # malformed tokens fail auth with 403 instead of leaking into DB lookups.
     sub: uuid.UUID
+    token_kind: str | None = None
+    agent_credential_id: uuid.UUID | None = None
+    agent_credential_version: int | None = None
 
 
 class NewPassword(SQLModel):

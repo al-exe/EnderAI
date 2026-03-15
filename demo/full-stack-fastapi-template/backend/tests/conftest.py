@@ -1,22 +1,36 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlmodel import Session, delete
 
 from app.core.config import settings
 from app.core.db import engine, init_db
 from app.main import app
-from app.models import Item, User
+from app.models import AgentCredential, Item, User
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import get_superuser_token_headers
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def _run_migrations() -> None:
+    alembic_cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(BACKEND_DIR / "app/alembic"))
+    command.upgrade(alembic_cfg, "head")
 
 
 @pytest.fixture(scope="session", autouse=True)
 def db() -> Generator[Session, None, None]:
+    _run_migrations()
     with Session(engine) as session:
         init_db(session)
         yield session
+        statement = delete(AgentCredential)
+        session.execute(statement)
         statement = delete(Item)
         session.execute(statement)
         statement = delete(User)

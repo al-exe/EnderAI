@@ -3,6 +3,7 @@ import { randomUUID, webcrypto } from "node:crypto";
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
+import { validateIncomingMcpBearerToken } from "./mcpAuth.js";
 import { createMcpServer } from "./mcpServer.js";
 
 // The MCP SDK's Streamable HTTP implementation expects a global `crypto` with `randomUUID()`.
@@ -85,13 +86,14 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (mcpBearerToken) {
-      const got = readBearer(req);
-      if (!got || got !== mcpBearerToken) {
-        res.writeHead(401, { "content-type": "text/plain" });
-        res.end("Unauthorized");
-        return;
-      }
+    const mcpAuth = await validateIncomingMcpBearerToken({
+      providedBearerToken: readBearer(req),
+      sharedBearerToken: mcpBearerToken,
+    });
+    if (!mcpAuth.ok) {
+      res.writeHead(mcpAuth.statusCode, { "content-type": "text/plain" });
+      res.end(mcpAuth.message);
+      return;
     }
 
     const sessionIdHeader = getHeaderString(req, "mcp-session-id");
