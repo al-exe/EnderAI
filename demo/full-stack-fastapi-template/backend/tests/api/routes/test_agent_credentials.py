@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.config import settings
-from app.models import AgentCredential
+from app.models import AgentCredential, User
 from tests.utils.user import authentication_token_from_email
 
 
@@ -98,6 +98,52 @@ def test_mcp_agent_token_validates_and_can_call_backend(
     credential = db.get(AgentCredential, uuid.UUID(credential_id))
     assert credential is not None
     assert credential.last_used_at is not None
+
+
+def test_inactive_user_agent_tokens_are_rejected(
+    client: TestClient, normal_user_token_headers: dict[str, str], db: Session
+) -> None:
+    create_res = client.post(
+        f"{settings.API_V1_STR}/agent-credentials/",
+        headers=normal_user_token_headers,
+        json={"label": "Inactive user credential"},
+    )
+    payload = create_res.json()
+    backend_token = payload["backend_access_token"]
+    mcp_token = payload["mcp_access_token"]
+    credential_id = payload["credential"]["id"]
+    user_id = payload["credential"]["user_id"]
+
+    user = db.get(User, uuid.UUID(user_id))
+    assert user is not None
+    user.is_active = False
+    db.add(user)
+    db.commit()
+
+    validate_res = client.post(
+        f"{settings.API_V1_STR}/agent-credentials/validate-mcp-token",
+        headers={"Authorization": f"Bearer {mcp_token}"},
+    )
+    assert validate_res.status_code == 400
+    assert validate_res.json() == {"detail": "Inactive user"}
+
+    auth_res = client.post(
+        f"{settings.API_V1_STR}/login/test-token",
+        headers={"Authorization": f"Bearer {backend_token}"},
+    )
+    assert auth_res.status_code == 400
+    assert auth_res.json() == {"detail": "Inactive user"}
+
+    db.expire_all()
+    credential = db.get(AgentCredential, uuid.UUID(credential_id))
+    assert credential is not None
+    assert credential.last_used_at is None
+
+    user = db.get(User, uuid.UUID(user_id))
+    assert user is not None
+    user.is_active = True
+    db.add(user)
+    db.commit()
 
 
 def test_backend_agent_token_cannot_validate_as_mcp_token(
