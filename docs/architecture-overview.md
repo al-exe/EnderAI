@@ -2,35 +2,34 @@
 
 ## Purpose
 
-This document is the current cross-repo map of EnderAI as it exists today.
+This document is the current cross-repo map of EnderAI.
 
 It explains:
 
 - which repository owns which runtime surface
-- how the web app, backend, database, and hosted MCP service fit together
-- which names are internal implementation terms versus user-facing product terms
-- where the main productionization seams still are
-
-This is a living architecture note, not a final design spec.
+- how the frontend, backend, database, and hosted MCP service fit together
+- which concepts are user-facing versus internal
+- which deployment and operational boundaries matter today
 
 ## Repositories and Responsibilities
 
 ### `EnderAI`
 
-This repo currently owns the backend and hosted MCP integration.
+This repo owns the backend, database migrations, hosted MCP bridge, and product docs.
 
 Primary areas:
 
 - `demo/full-stack-fastapi-template/backend`
   - FastAPI backend
   - SQLModel models and Alembic migrations
-  - REST API routes for auth, items, agent credentials, threads, executions, artifacts, and workflow buckets
+  - canonical Topic / Case / ContextPack API
+  - auth, users, and agent credential flows
 - `mcp/enderai-api-mcp`
   - hosted MCP bridge for EnderAI backend access
   - streamable HTTP MCP server
-  - auth validation, session handling, and path compatibility logic
+  - session handling and per-user backend auth forwarding
 - `docs`
-  - product, onboarding, and architecture notes
+  - architecture, onboarding, and product notes
 
 ### `EnderAI-frontend`
 
@@ -43,13 +42,13 @@ Primary areas:
 - `src/components`
   - page and UI components
 - `src/api`
-  - handwritten API wrappers for domain screens
+  - handwritten API wrappers for product screens
 - `src/client`
-  - generated OpenAPI client code
+  - generated OpenAPI client code for shared auth/admin flows
 - `.github/workflows/deploy-frontend-pages.yml`
   - GitHub Pages deployment workflow
 
-The frontend is the repo that serves the Pages-hosted UI.
+The frontend repo serves the Pages-hosted UI.
 
 ## System Context
 
@@ -65,149 +64,100 @@ local or remote agent client
   -> Postgres
 ```
 
-The browser and MCP client both converge on the same backend API. The frontend is a UI client. The hosted MCP service is an agent-oriented API bridge, not a separate source of truth.
+The browser and MCP client converge on the same backend API. The frontend is the product UI. The hosted MCP service is an agent-oriented API bridge, not a separate source of truth.
 
-## Runtime Surfaces
+## Product Surface
 
-### Web App Flow
-
-1. A user opens the static frontend deployed from `EnderAI-frontend`.
-2. The frontend authenticates against the backend login endpoints.
-3. The frontend reads and mutates backend resources over `/api/v1/...`.
-4. The backend persists state in Postgres.
-5. The frontend presents translated product language on top of some still-legacy route and API names.
-
-### Hosted MCP Flow
-
-1. A user gets a user-scoped agent credential from EnderAI.
-2. The frontend shows setup snippets for generic MCP clients and Codex CLI.
-3. For Codex CLI, the currently recommended persistent setup stores the token in `~/.enderai_mcp_token`, protects it with `chmod 600`, and loads it into the shell from `~/.bashrc`.
-4. The agent client sends `Authorization: Bearer <mcp token>` to the hosted MCP service.
-5. The hosted MCP validates that token with the backend and reuses the resulting identity for backend API calls.
-6. When execution-scoped auditing is provided, MCP-originated backend calls can be appended to the execution timeline.
-
-This file-based local token setup is the current supported operator guidance and should remain intact until it is intentionally replaced by a different auth flow.
-
-## Current Backend Shape
-
-The backend currently exposes these major route groups:
-
-- `/login` and user management
-- `/agent-credentials`
-- `/items`
-- `/artifacts`
-- `/workflow-buckets`
-- `/threads`
-- `/executions`
-- `/utils`
-
-The most important currently persisted product-adjacent records are:
-
-- `Item`
-  - separate demo/app data surface
-- `AgentCredential`
-  - user-scoped credential metadata for hosted MCP access
-- `WorkflowBucket`
-  - workflow grouping metadata
-- `Thread`
-  - current stored parent record for what the UI now raises as a `Topic`
-- `Execution`
-  - current stored work-session record for what the UI now raises as a `Case`
-- `Event`
-  - execution timeline/audit entries
-- `Artifact`
-  - saved memory/knowledge objects that are still API-level artifacts today
-
-## Current Frontend Shape
-
-The frontend now raises the following primary navigation concepts:
+The user-facing product surface is now:
 
 - `Dashboard`
-- `Items`
 - `Topics`
 - `Cases`
 
-Notes remain contextual rather than a primary top-level sidebar concept.
+There is no product-facing parallel top-level object model outside Dashboard, Topics, and Cases.
 
-Important implementation detail: the user-facing copy has moved faster than the internal route names. Today that means:
+## Canonical Domain Model
 
-- the Topics screen still lives on the `tasks` route
-- the Cases screen still lives on the `executions` route
-- the Notes screen still lives on the `library` route
+### `Topic`
 
-That compatibility layer is acceptable for now, but it is intentionally temporary.
+A Topic is the reusable area of work.
 
-## Product Language vs Implementation Language
+It groups related cases, tracks accumulated rollup knowledge, and anchors context selection.
 
-### Current user-facing language
+### `Case`
 
-The current intended product language is:
+A Case is a bounded work session under a Topic.
 
-- `Topic`
-- `Case`
-- `Note` as contextual content, not a primary navigation object
+It carries the current summary, evidence, hypotheses, commands, changes, and the per-case hydration snapshot.
 
-### Current implementation language
+### `ContextPack`
 
-Large parts of the backend and frontend API surface still use:
+A ContextPack is synthesized hydration context for a Case.
 
-- `Thread`
-- `Execution`
-- `Artifact`
+It is built from the Topic plus relevant prior cases and persisted as a case snapshot so the agent can reconstruct why a case started with a given context.
 
-### Working translation
+## Backend API Surface
 
-```text
-Thread    -> Topic
-Execution -> Case
-Artifact  -> Note or case/topic memory, depending on presentation
-```
+The canonical product/domain endpoints are:
 
-This translation is what allows the UI and docs to move toward the target product model without forcing an unsafe one-shot backend rename.
+- `/api/v1/topics`
+- `/api/v1/topics/{topic_id}`
+- `/api/v1/topics/{topic_id}/rollup`
+- `/api/v1/topics/match`
+- `/api/v1/cases`
+- `/api/v1/cases/{case_id}`
+- `/api/v1/cases/{case_id}/memo`
+- `/api/v1/cases/{case_id}/hydration`
+- `/api/v1/cases/{case_id}/events`
+- `/api/v1/context-packs/build`
 
-## Target Model Direction
+Additional non-domain route groups remain for platform concerns such as:
 
-The intended direction remains the Topic / Case / ContextPack model.
+- login
+- users
+- agent credentials
+- utils
 
-In that model:
+## Persistence Shape
 
-- `Topic` is the reusable area of work
-- `Case` is a bounded work session under a topic
-- `ContextPack` is synthesized hydration context for a new case
-- note-like memory should support the work, but does not need to become a primary navigation primitive
+The canonical domain tables are:
 
-The detailed model draft lives in `docs/topic-case-contextpack-model.md`.
+- `topic`
+- `case_record`
+- `case_event`
 
-## Important Current Seams
+These are the only active product-domain tables the runtime depends on.
 
-### 1. Naming drift between UI and backend
+## Frontend Shape
 
-The UI is already raising Topics and Cases, while the stored/API model is still mostly Threads and Executions.
+The frontend uses:
 
-### 2. Schema lifecycle debt
+- `/topics` for Topic browsing and detail
+- `/cases` for Case browsing and detail
+- `Dashboard` as the entry view
 
-Some memory-related table creation and backfill logic still lives in startup scripts rather than fully in migrations and operator runbooks.
+The main app shell should not surface any retired demo-template concepts.
 
-### 3. Onboarding complexity is concentrated in one place
+## Hosted MCP Shape
 
-The Connect Agent flow is valuable, but its implementation and explanatory burden are still concentrated in a relatively large frontend surface.
+The hosted MCP service exposes:
 
-### 4. MCP compatibility shims still exist
+- `enderai_begin_case`
+- `enderai_update_case`
+- `enderai_finish_case`
+- `enderai_request`
+- `enderai_openapi`
+- `enderai_health_check`
 
-The hosted MCP layer still carries compatibility helpers such as deprecated path rewriting while the backend/API naming transition is incomplete.
+Its guided workflow is aligned to the same Topic / Case / ContextPack model as the backend and frontend.
 
-## Recommended Near-Term Principles
+## Auth and Token Flow
 
-- Keep one source of truth for persisted state: the backend database.
-- Treat the hosted MCP service as a transport and auth bridge, not as an independent domain layer.
-- Continue raising `Topic` and `Case` to users.
-- Keep `Note` contextual and out of the main sidebar unless the product model changes.
-- Preserve the current `chmod 600` token-file setup until a deliberate replacement is designed and shipped.
-- Remove compatibility debt in phases rather than with a big-bang rename.
+The current hosted MCP token flow remains supported as-is:
 
-## Related Docs
+- the user stores the MCP token locally in `~/.enderai_mcp_token`
+- the file is protected with `chmod 600`
+- shell startup loads it into the local environment for clients like Codex CLI
+- the hosted MCP validates that token and reuses the corresponding backend identity
 
-- `docs/topic-case-contextpack-model.md`
-- `docs/hosted-mcp-onboarding.md`
-- `mcp/enderai-api-mcp/README.md`
-- `demo/full-stack-fastapi-template/backend/README.md`
+This file-based setup remains the current supported guidance until intentionally replaced.

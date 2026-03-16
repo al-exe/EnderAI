@@ -1,4 +1,3 @@
-import json
 import re
 import uuid
 from collections import Counter
@@ -6,68 +5,67 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
-from sqlalchemy import text
-from sqlmodel import Session
+from sqlmodel import Session, col, or_, select
 
-from app.core.cases import build_case_public, execution_has_column
+from app.core.cases import build_case_public
 from app.models import (
     CasePublic,
+    CaseRecord,
     ContextPackBuildRequest,
     ContextPackBuildResult,
     ContextPackSnapshot,
     RelevantCaseSummary,
+    Topic,
     TopicHydrationPolicy,
     TopicMatchCandidate,
     TopicMatchRequest,
     TopicMatchResult,
     TopicPublic,
     TopicRollupPublic,
+    get_datetime_utc,
 )
 
 TOKEN_RE = re.compile(r"[a-z0-9_./-]+")
 
 
-def thread_has_column(session: Session, column_name: str) -> bool:
-    stmt = text(
-        "select 1 "
-        "from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'thread' and column_name = :column_name "
-        "limit 1"
-    )
-    return (
-        session.connection().execute(stmt, {"column_name": column_name}).first() is not None
-    )
+def allocate_topic_identity(
+    session: Session,
+    title: str,
+    workflow_key: str | None,
+) -> tuple[str, str]:
+    base_workflow_key = _slugify(workflow_key or title)
+    workflow_candidate = base_workflow_key
+    suffix = 2
+    while _topic_exists_with_workflow_key(session, workflow_candidate):
+        workflow_candidate = f"{base_workflow_key}-{suffix}"
+        suffix += 1
+
+    base_slug = _slugify(title)
+    slug_candidate = base_slug
+    suffix = 2
+    while _topic_exists_with_slug(session, slug_candidate):
+        slug_candidate = f"{base_slug}-{suffix}"
+        suffix += 1
+
+    return slug_candidate, workflow_candidate
 
 
-def build_topic_public(thread_row: dict[str, Any]) -> TopicPublic:
-    topic_data = _default_topic_data(thread_row)
-    topic_data.update(_json_object(thread_row.get("topic_data")))
-    rollup_payload = _default_rollup(thread_row)
-    rollup_payload.update(_json_object(thread_row.get("topic_rollup")))
-
-    aliases = _dedupe_preserve_order(
-        [
-            *(_string_list(topic_data.get("aliases"))),
-            *(_string_list(rollup_payload.get("aliases"))),
-            thread_row.get("workflow_key"),
-        ]
-    )
-    rollup = TopicRollupPublic(**rollup_payload)
-
+def build_topic_public(topic: Topic) -> TopicPublic:
+    rollup = build_topic_rollup_public(topic)
     return TopicPublic(
-        id=thread_row["id"],
-        title=thread_row["title"],
-        slug=_slugify(thread_row.get("workflow_key") or thread_row["title"]),
-        description=_clean_optional_string(topic_data.get("description")),
-        aliases=aliases,
-        status=_clean_optional_string(thread_row.get("status")) or "open",
-        workflow_key=thread_row.get("workflow_key") or _slugify(thread_row["title"]),
-        owner_ids=_uuid_list(topic_data.get("owner_ids")),
-        created_at=thread_row.get("created_at"),
-        updated_at=rollup.updated_at or thread_row.get("last_touched_at"),
-        last_used_at=thread_row.get("last_touched_at"),
-        rollup_summary=rollup.brief,
-        rollup_version=1,
+        id=topic.id,
+        title=topic.title,
+        slug=topic.slug,
+        description=_clean_optional_string(topic.description),
+        aliases=_dedupe_preserve_order([*(_string_list(topic.aliases)), *rollup.aliases, topic.workflow_key]),
+        status=_clean_optional_string(topic.status) or "open",
+        workflow_key=topic.workflow_key,
+        owner_ids=_uuid_list(topic.owner_ids),
+        created_at=topic.created_at,
+        updated_at=topic.updated_at,
+        last_used_at=topic.last_used_at,
+        rollup_summary=topic.rollup_summary or rollup.brief,
+        rollup_version=topic.rollup_version,
         canonical_files=rollup.canonical_files,
         canonical_symbols=rollup.canonical_symbols,
         canonical_errors=rollup.canonical_errors,
@@ -83,54 +81,80 @@ def build_topic_public(thread_row: dict[str, Any]) -> TopicPublic:
     )
 
 
-def build_topic_rollup_public(thread_row: dict[str, Any]) -> TopicRollupPublic:
-    rollup_payload = _default_rollup(thread_row)
-    rollup_payload.update(_json_object(thread_row.get("topic_rollup")))
+def build_topic_rollup_public(topic: Topic) -> TopicRollupPublic:
+    rollup_payload = _default_rollup(topic)
+    rollup_payload.update(_json_object(topic.rollup_data))
     return TopicRollupPublic(**rollup_payload)
 
 
-def list_topic_rows(session: Session, *, status: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
-    clauses: list[str] = []
-    params: dict[str, Any] = {}
+def list_topic_models(
+    session: Session,
+    *,
+    status: str | None = None,
+    q: str | None = None,
+    workflow_key: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[Topic]:
+    statement = select(Topic)
     if status:
-        clauses.append("t.status = :status")
-        params["status"] = status.strip()
+        statement = statement.where(Topic.status == status.strip())
+    if workflow_key:
+        statement = statement.where(Topic.workflow_key == workflow_key.strip())
     if q:
-        clauses.append(
-            "(t.title ilike :q or t.workflow_key ilike :q or coalesce(t.goal, '') ilike :q or coalesce(t.acceptance_criteria, '') ilike :q)"
+        like = f"%{q.strip()}%"
+        statement = statement.where(
+            or_(
+                Topic.title.ilike(like),
+                Topic.workflow_key.ilike(like),
+                Topic.description.ilike(like),
+            )
         )
-        params["q"] = f"%{q.strip()}%"
-
-    where_sql = f" where {' and '.join(clauses)}" if clauses else ""
-    stmt = text(
-        "select " + _thread_columns_sql(session) + " from public.thread t" + where_sql + " order by t.last_touched_at desc nulls last"
-    )
-    return [dict(row) for row in session.connection().execute(stmt, params).mappings().all()]
+    statement = statement.order_by(col(Topic.last_used_at).desc(), col(Topic.updated_at).desc())
+    statement = statement.offset(skip).limit(limit)
+    return list(session.exec(statement).all())
 
 
-def read_topic_row(session: Session, topic_id: uuid.UUID) -> dict[str, Any] | None:
-    stmt = text(
-        "select " + _thread_columns_sql(session) + " from public.thread t where t.id = :topic_id limit 1"
-    )
-    row = session.connection().execute(stmt, {"topic_id": topic_id}).mappings().first()
-    return dict(row) if row is not None else None
+def count_topics(
+    session: Session,
+    *,
+    status: str | None = None,
+    q: str | None = None,
+    workflow_key: str | None = None,
+) -> int:
+    statement = select(Topic)
+    if status:
+        statement = statement.where(Topic.status == status.strip())
+    if workflow_key:
+        statement = statement.where(Topic.workflow_key == workflow_key.strip())
+    if q:
+        like = f"%{q.strip()}%"
+        statement = statement.where(
+            or_(
+                Topic.title.ilike(like),
+                Topic.workflow_key.ilike(like),
+                Topic.description.ilike(like),
+            )
+        )
+    return len(session.exec(statement).all())
+
+
+def read_topic_model(session: Session, topic_id: uuid.UUID) -> Topic | None:
+    return session.get(Topic, topic_id)
 
 
 def list_cases_for_topic(session: Session, topic_id: uuid.UUID) -> list[CasePublic]:
-    thread_row = read_topic_row(session, topic_id)
-    if thread_row is None:
+    topic = read_topic_model(session, topic_id)
+    if topic is None:
         return []
 
-    order_column = "coalesce(e.updated_at, e.started_at)" if execution_has_column(session, "updated_at") else "e.started_at"
-    stmt = text(
-        "select "
-        + _execution_columns_sql(session)
-        + " from public.execution e where e.thread_id = :topic_id order by "
-        + order_column
-        + " desc nulls last"
+    statement = (
+        select(CaseRecord)
+        .where(CaseRecord.topic_id == topic_id)
+        .order_by(col(CaseRecord.updated_at).desc(), col(CaseRecord.opened_at).desc())
     )
-    rows = session.connection().execute(stmt, {"topic_id": topic_id}).mappings().all()
-    return [build_case_public(dict(row), thread_row) for row in rows]
+    rows = session.exec(statement).all()
+    return [build_case_public(row, topic) for row in rows]
 
 
 def refresh_topic_rollup(
@@ -139,13 +163,11 @@ def refresh_topic_rollup(
     *,
     persist: bool = True,
 ) -> TopicRollupPublic | None:
-    thread_row = read_topic_row(session, topic_id)
-    if thread_row is None:
+    topic = read_topic_model(session, topic_id)
+    if topic is None:
         return None
 
-    existing_rollup = build_topic_rollup_public(thread_row)
-    topic_data = _default_topic_data(thread_row)
-    topic_data.update(_json_object(thread_row.get("topic_data")))
+    existing_rollup = build_topic_rollup_public(topic)
     cases = list_cases_for_topic(session, topic_id)
 
     file_counts: Counter[str] = Counter()
@@ -157,7 +179,7 @@ def refresh_topic_rollup(
     open_questions: list[str] = []
     pinned_takeaways: list[str] = []
     negative_history: list[str] = []
-    aliases = _dedupe_preserve_order(_string_list(topic_data.get("aliases")))
+    aliases = _dedupe_preserve_order(list(topic.aliases))
 
     for case in cases:
         file_counts.update(case.files)
@@ -189,9 +211,9 @@ def refresh_topic_rollup(
 
     recent_cases = [case.id for case in cases[:5]]
     representative_cases = [case.id for case in sorted(cases, key=_representative_case_key, reverse=True)[:3]]
-    updated_at = cases[0].updated_at if cases else thread_row.get("last_touched_at")
+    updated_at = cases[0].updated_at if cases else topic.updated_at
     latest_summary = cases[0].summary_current if cases else None
-    brief = latest_summary or (outcome_candidates[0] if outcome_candidates else existing_rollup.brief or thread_row.get("title"))
+    brief = latest_summary or (outcome_candidates[0] if outcome_candidates else existing_rollup.brief or topic.title)
     vocabulary = _top_keys(vocabulary_counts, limit=20) if cases else existing_rollup.vocabulary
 
     rollup = TopicRollupPublic(
@@ -203,7 +225,7 @@ def refresh_topic_rollup(
         pinned_takeaways=_dedupe_preserve_order(pinned_takeaways)[:10],
         negative_history=_dedupe_preserve_order(negative_history)[:10],
         representative_case_ids=representative_cases,
-        aliases=_dedupe_preserve_order([*aliases, thread_row.get("workflow_key"), thread_row.get("title")])[:12],
+        aliases=_dedupe_preserve_order([*aliases, topic.workflow_key, topic.title])[:12],
         vocabulary=vocabulary,
         ambiguity_notes=existing_rollup.ambiguity_notes,
         open_questions=_dedupe_preserve_order(open_questions)[:10],
@@ -212,16 +234,16 @@ def refresh_topic_rollup(
         updated_at=updated_at,
     )
 
-    if persist and thread_has_column(session, "topic_rollup"):
-        session.connection().execute(
-            text("update public.thread set topic_rollup = cast(:topic_rollup as jsonb) where id = :topic_id"),
-            {"topic_rollup": json.dumps(rollup.model_dump(mode="json")), "topic_id": topic_id},
-        )
+    if persist:
+        topic.rollup_summary = rollup.brief
+        topic.rollup_data = rollup.model_dump(mode="json")
+        topic.updated_at = get_datetime_utc()
+        session.add(topic)
     return rollup
 
 
 def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResult:
-    topics = [build_topic_public(row) for row in list_topic_rows(session)]
+    topics = [build_topic_public(topic) for topic in list_topic_models(session)]
     candidates = [_score_topic_match(topic, request) for topic in topics]
     candidates = [candidate for candidate in candidates if candidate.score > 0]
     candidates.sort(key=lambda candidate: candidate.score, reverse=True)
@@ -232,10 +254,10 @@ def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResu
 
 def build_context_pack(session: Session, request: ContextPackBuildRequest) -> ContextPackBuildResult:
     if request.topic_id is not None:
-        topic_row = read_topic_row(session, request.topic_id)
-        if topic_row is None:
+        topic_model = read_topic_model(session, request.topic_id)
+        if topic_model is None:
             raise ValueError("Topic not found")
-        topic = build_topic_public(topic_row)
+        topic = build_topic_public(topic_model)
         policy = TopicHydrationPolicy(confidence="high", max_topics=1)
         matched_topics = [
             TopicMatchCandidate(
@@ -347,50 +369,9 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
     )
 
 
-def _thread_columns_sql(session: Session, alias: str = "t") -> str:
-    columns = [
-        f"{alias}.id",
-        f"{alias}.title",
-        f"{alias}.workflow_key",
-        f"{alias}.goal",
-        f"{alias}.acceptance_criteria",
-        f"{alias}.status",
-        f"{alias}.created_at",
-        f"{alias}.last_touched_at",
-    ]
-    if thread_has_column(session, "topic_data"):
-        columns.append(f"{alias}.topic_data as topic_data")
-    if thread_has_column(session, "topic_rollup"):
-        columns.append(f"{alias}.topic_rollup as topic_rollup")
-    return ", ".join(columns)
-
-
-def _execution_columns_sql(session: Session, alias: str = "e") -> str:
-    columns = [
-        f"{alias}.id",
-        f"{alias}.thread_id",
-        f"{alias}.started_at",
-        f"{alias}.ended_at",
-        f"{alias}.status",
-        f"{alias}.summary",
-    ]
-    if execution_has_column(session, "updated_at"):
-        columns.append(f"{alias}.updated_at as updated_at")
-    if execution_has_column(session, "case_data"):
-        columns.append(f"{alias}.case_data as case_data")
-    if execution_has_column(session, "context_pack_snapshot"):
-        columns.append(f"{alias}.context_pack_snapshot as context_pack_snapshot")
-    return ", ".join(columns)
-
-
-def _default_topic_data(thread_row: dict[str, Any]) -> dict[str, Any]:
-    description = thread_row.get("goal") or thread_row.get("acceptance_criteria")
-    return {"description": description, "aliases": [], "owner_ids": []}
-
-
-def _default_rollup(thread_row: dict[str, Any]) -> dict[str, Any]:
+def _default_rollup(topic: Topic) -> dict[str, Any]:
     return {
-        "brief": thread_row.get("title"),
+        "brief": topic.rollup_summary or topic.title,
         "canonical_files": [],
         "canonical_symbols": [],
         "canonical_errors": [],
@@ -398,13 +379,13 @@ def _default_rollup(thread_row: dict[str, Any]) -> dict[str, Any]:
         "pinned_takeaways": [],
         "negative_history": [],
         "representative_case_ids": [],
-        "aliases": [],
-        "vocabulary": _tokens(thread_row.get("title") or ""),
+        "aliases": list(topic.aliases),
+        "vocabulary": _tokens(topic.title),
         "ambiguity_notes": [],
         "open_questions": [],
         "case_count": 0,
         "recent_case_ids": [],
-        "updated_at": thread_row.get("last_touched_at"),
+        "updated_at": topic.updated_at,
     }
 
 
@@ -544,7 +525,7 @@ def _build_relevant_case_summary(
         key_symbols=case.symbols[:3],
         key_errors=case.errors[:3],
         key_commands=key_commands,
-        why_selected='; '.join(reasons[:3]),
+        why_selected="; ".join(reasons[:3]),
     )
 
 
@@ -569,7 +550,7 @@ def _score_text_similarity(
         return 0.0
 
     best_ratio = 0.0
-    for candidate in [topic.title, topic.workflow_key, topic.description or '', topic.rollup_summary or '']:
+    for candidate in [topic.title, topic.workflow_key, topic.description or "", topic.rollup_summary or ""]:
         normalized_candidate = _normalize_for_match(candidate)
         if not normalized_candidate:
             continue
@@ -606,8 +587,8 @@ def _match_values(request_values: list[str], topic_values: list[str]) -> list[st
 
 def _normalize_for_match(value: Any) -> str:
     if not isinstance(value, str):
-        return ''
-    return re.sub(r'\s+', ' ', value.strip().lower())
+        return ""
+    return re.sub(r"\s+", " ", value.strip().lower())
 
 
 def _coerce_utc_datetime(value: datetime) -> datetime:
@@ -658,24 +639,12 @@ def _top_keys(counter: Counter[str], *, limit: int = 10) -> list[str]:
 
 
 def _json_object(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
     if isinstance(value, dict):
         return value
     return {}
 
 
 def _string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return []
     if not isinstance(value, list):
         return []
     return [item for item in (_clean_optional_string(entry) for entry in value) if item]
@@ -716,3 +685,13 @@ def _confidence_for_score(score: float) -> str:
     if score >= 4.0:
         return "medium"
     return "low"
+
+
+def _topic_exists_with_workflow_key(session: Session, workflow_key: str) -> bool:
+    statement = select(Topic.id).where(Topic.workflow_key == workflow_key).limit(1)
+    return session.exec(statement).first() is not None
+
+
+def _topic_exists_with_slug(session: Session, slug: str) -> bool:
+    statement = select(Topic.id).where(Topic.slug == slug).limit(1)
+    return session.exec(statement).first() is not None
