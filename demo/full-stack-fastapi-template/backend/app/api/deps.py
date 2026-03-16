@@ -78,6 +78,12 @@ def validate_agent_credential_token(
             detail="Could not validate credentials",
         )
 
+    user = session.get(User, credential.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+
     credential.last_used_at = get_datetime_utc()
     credential.updated_at = credential.last_used_at
     session.add(credential)
