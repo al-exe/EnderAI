@@ -4,7 +4,7 @@
 
 This document captures the current onboarding solution for getting an external engineer onto EnderAI when using a hosted MCP server.
 
-It is intentionally agnostic to the `Thread / Execution / Artifact` versus `Topic / Case` model discussion. This is about account creation, local agent setup, and getting the agent to use EnderAI consistently enough for a pilot.
+It is intentionally focused on account creation, local agent setup, and getting the agent to use EnderAI consistently enough for a pilot.
 
 ## Current Recommendation
 

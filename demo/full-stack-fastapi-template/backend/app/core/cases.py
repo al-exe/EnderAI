@@ -1,24 +1,24 @@
-import json
 import uuid
 from typing import Any
 
-from sqlalchemy import text
-from sqlmodel import Session
-
 from app.models import (
+    CaseEvent,
+    CaseEventCreate,
+    CaseEventPublic,
     CaseHydrationSignals,
     CaseHydrationView,
     CaseMemoView,
     CasePublic,
+    CaseRecord,
+    ChangeRecord,
+    CommandRecord,
     ContextPackSnapshot,
+    HypothesisRecord,
+    Topic,
+    get_datetime_utc,
 )
 
 CASE_DATA_FIELDS = {
-    "title",
-    "actor_id",
-    "source",
-    "input_summary",
-    "summary_current",
     "files",
     "symbols",
     "errors",
@@ -30,36 +30,64 @@ CASE_DATA_FIELDS = {
     "next_steps",
 }
 
-TERMINAL_CASE_STATUSES = {"done", "aborted", "failed", "success", "error", "closed"}
+TERMINAL_CASE_STATUSES = {
+    "aborted",
+    "cancelled",
+    "canceled",
+    "closed",
+    "complete",
+    "completed",
+    "done",
+    "failed",
+    "resolved",
+}
 
 
-def execution_has_column(session: Session, column_name: str) -> bool:
-    stmt = text(
-        "select 1 "
-        "from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'execution' and column_name = :column_name "
-        "limit 1"
+def build_case_public(case_record: CaseRecord, topic: Topic | None) -> CasePublic:
+    case_data = build_default_case_data(case_record)
+    case_data.update(_json_object(case_record.case_data))
+
+    summary_current = _clean_optional_string(case_record.summary_current)
+    if summary_current is None:
+        summary_current = _clean_optional_string(case_data.get("summary_current"))
+
+    title = _clean_optional_string(case_record.title)
+    if title is None:
+        title = summary_current or topic.title if topic else "Case"
+
+    snapshot_payload = _json_object(case_record.context_pack_snapshot)
+    snapshot_payload.setdefault("topic_id", str(case_record.topic_id))
+    snapshot_payload.setdefault("case_id", str(case_record.id))
+    snapshot = ContextPackSnapshot(**snapshot_payload)
+
+    return CasePublic(
+        id=case_record.id,
+        topic_id=case_record.topic_id,
+        topic_title=topic.title if topic else None,
+        title=title,
+        opened_at=case_record.opened_at,
+        updated_at=case_record.updated_at,
+        closed_at=case_record.closed_at,
+        status=_clean_optional_string(case_record.status) or "open",
+        actor_id=case_record.actor_id,
+        source=_clean_optional_string(case_record.source),
+        input_summary=_clean_optional_string(case_record.input_summary),
+        summary_current=summary_current,
+        files=_string_list(case_data.get("files")),
+        symbols=_string_list(case_data.get("symbols")),
+        errors=_string_list(case_data.get("errors")),
+        symptoms=_string_list(case_data.get("symptoms")),
+        commands=_commands_list(case_data.get("commands")),
+        hypotheses=_hypotheses_list(case_data.get("hypotheses")),
+        changes=_changes_list(case_data.get("changes")),
+        outcome=_clean_optional_string(case_data.get("outcome")),
+        next_steps=_string_list(case_data.get("next_steps")),
+        context_pack_snapshot=snapshot,
     )
-    return (
-        session.connection().execute(stmt, {"column_name": column_name}).first() is not None
-    )
 
 
-def build_default_case_data(
-    execution_row: dict[str, Any],
-    thread_row: dict[str, Any],
-) -> dict[str, Any]:
-    summary = _clean_optional_string(execution_row.get("summary"))
-    title = summary or _clean_optional_string(thread_row.get("title")) or "Case"
-    actor_id = execution_row.get("actor_id") or None
-    if isinstance(actor_id, uuid.UUID):
-        actor_id = str(actor_id)
+def build_default_case_data(case_record: CaseRecord) -> dict[str, Any]:
     return {
-        "title": title,
-        "actor_id": actor_id,
-        "source": None,
-        "input_summary": None,
-        "summary_current": summary,
         "files": [],
         "symbols": [],
         "errors": [],
@@ -69,62 +97,74 @@ def build_default_case_data(
         "changes": [],
         "outcome": None,
         "next_steps": [],
+        "summary_current": case_record.summary_current,
     }
-
-
-def build_case_public(execution_row: dict[str, Any], thread_row: dict[str, Any]) -> CasePublic:
-    case_data = build_default_case_data(execution_row, thread_row)
-    case_data.update(_json_object(execution_row.get("case_data")))
-
-    summary_current = _clean_optional_string(execution_row.get("summary"))
-    if summary_current is None:
-        summary_current = _clean_optional_string(case_data.get("summary_current"))
-    case_data["summary_current"] = summary_current
-
-    title = _clean_optional_string(case_data.get("title"))
-    if title is None:
-        title = _clean_optional_string(thread_row.get("title")) or summary_current or "Case"
-        case_data["title"] = title
-
-    snapshot_payload = _json_object(execution_row.get("context_pack_snapshot"))
-    snapshot_payload.setdefault("topic_id", str(thread_row["id"]))
-    snapshot_payload.setdefault("case_id", str(execution_row["id"]))
-    snapshot = ContextPackSnapshot(**snapshot_payload)
-
-    updated_at = (
-        execution_row.get("updated_at")
-        or execution_row.get("ended_at")
-        or execution_row.get("started_at")
-    )
-
-    return CasePublic(
-        id=execution_row["id"],
-        topic_id=thread_row["id"],
-        title=title,
-        opened_at=execution_row.get("started_at"),
-        updated_at=updated_at,
-        closed_at=execution_row.get("ended_at"),
-        status=_clean_optional_string(execution_row.get("status")) or "open",
-        actor_id=case_data.get("actor_id"),
-        source=_clean_optional_string(case_data.get("source")),
-        input_summary=_clean_optional_string(case_data.get("input_summary")),
-        summary_current=summary_current,
-        files=_string_list(case_data.get("files")),
-        symbols=_string_list(case_data.get("symbols")),
-        errors=_string_list(case_data.get("errors")),
-        symptoms=_string_list(case_data.get("symptoms")),
-        commands=_list_payload(case_data.get("commands")),
-        hypotheses=_list_payload(case_data.get("hypotheses")),
-        changes=_list_payload(case_data.get("changes")),
-        outcome=_clean_optional_string(case_data.get("outcome")),
-        next_steps=_string_list(case_data.get("next_steps")),
-        context_pack_snapshot=snapshot,
-    )
 
 
 def materialize_case_data(case: CasePublic) -> dict[str, Any]:
     payload = case.model_dump(mode="json")
     return {field: payload.get(field) for field in CASE_DATA_FIELDS}
+
+
+def apply_case_update(case_record: CaseRecord, update: dict[str, Any]) -> CaseRecord:
+    now = get_datetime_utc()
+
+    if "title" in update and update["title"] is not None:
+        title = str(update["title"]).strip()
+        if title:
+            case_record.title = title
+    if "status" in update and update["status"] is not None:
+        status = str(update["status"]).strip()
+        if status:
+            case_record.status = status
+            case_record.closed_at = now if is_terminal_case_status(status) else None
+    if "actor_id" in update:
+        case_record.actor_id = update["actor_id"]
+    if "source" in update:
+        case_record.source = _clean_optional_string(update.get("source"))
+    if "input_summary" in update:
+        case_record.input_summary = _clean_optional_string(update.get("input_summary"))
+    if "summary_current" in update:
+        case_record.summary_current = _clean_optional_string(update.get("summary_current"))
+
+    case_data = _json_object(case_record.case_data)
+    for key in CASE_DATA_FIELDS:
+        if key in update:
+            case_data[key] = update[key]
+    case_record.case_data = case_data
+
+    if "context_pack_snapshot" in update and update["context_pack_snapshot"] is not None:
+        snapshot = update["context_pack_snapshot"]
+        if isinstance(snapshot, dict):
+            case_record.context_pack_snapshot = snapshot
+        else:
+            case_record.context_pack_snapshot = snapshot.model_dump(mode="json")
+
+    case_record.updated_at = now
+    return case_record
+
+
+def build_case_event(case_id: uuid.UUID, event_in: CaseEventCreate) -> CaseEvent:
+    return CaseEvent(
+        case_id=case_id,
+        ts=event_in.ts or get_datetime_utc(),
+        type=event_in.type,
+        message=event_in.message,
+        data=event_in.data,
+        supersedes_event_id=event_in.supersedes_event_id,
+    )
+
+
+def build_case_event_public(case_event: CaseEvent) -> CaseEventPublic:
+    return CaseEventPublic(
+        id=case_event.id or 0,
+        case_id=case_event.case_id,
+        ts=case_event.ts,
+        type=case_event.type,
+        message=case_event.message,
+        data=_json_object(case_event.data),
+        supersedes_event_id=case_event.supersedes_event_id,
+    )
 
 
 def render_case_memo(case: CasePublic) -> CaseMemoView:
@@ -187,36 +227,34 @@ def is_terminal_case_status(status: str | None) -> bool:
     return status.strip().lower() in TERMINAL_CASE_STATUSES
 
 
+def _commands_list(value: Any) -> list[CommandRecord]:
+    records = _list_payload(value)
+    return [CommandRecord(**record) for record in records]
+
+
+def _hypotheses_list(value: Any) -> list[HypothesisRecord]:
+    records = _list_payload(value)
+    return [HypothesisRecord(**record) for record in records]
+
+
+def _changes_list(value: Any) -> list[ChangeRecord]:
+    records = _list_payload(value)
+    return [ChangeRecord(**record) for record in records]
+
+
 def _json_object(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
     if isinstance(value, dict):
         return value
     return {}
 
 
 def _list_payload(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return []
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
 
 
 def _string_list(value: Any) -> list[str]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return []
     if not isinstance(value, list):
         return []
 
