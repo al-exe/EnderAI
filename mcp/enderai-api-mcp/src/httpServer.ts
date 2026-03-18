@@ -124,7 +124,7 @@ async function main(): Promise<void> {
       if (isInitialize) {
         session = await createSession(
           sessionIdHeader,
-          resolveSessionBackendBearerToken({ req, mcpAuth }),
+          resolveSessionBackendBearerToken({ mcpAuth }),
         );
         createdSession = true;
       } else if (sessionIdHeader && method === "GET") {
@@ -147,8 +147,8 @@ async function main(): Promise<void> {
       }
     }
 
-    // Allow rotating/updating backend token mid-session (client may refresh tokens).
-    const backendBearerToken = resolveSessionBackendBearerToken({ req, mcpAuth });
+    // Allow rotating/updating the per-user MCP-derived session token mid-session.
+    const backendBearerToken = resolveSessionBackendBearerToken({ mcpAuth });
     if (backendBearerToken) session.backendBearerToken = backendBearerToken;
 
     session.lastUsedAtMs = Date.now();

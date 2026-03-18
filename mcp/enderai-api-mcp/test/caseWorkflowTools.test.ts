@@ -56,6 +56,7 @@ describe("guided case workflow MCP tools", () => {
           "enderai_update_case",
           "enderai_finish_case",
           "enderai_request",
+          "enderai_session_info",
           "enderai_openapi",
           "enderai_health_check",
         ]),
@@ -82,13 +83,19 @@ describe("guided case workflow MCP tools", () => {
       mockFetch
         .mockResolvedValueOnce(
           jsonResponse({
-            id: topicId,
-            title: "Core model",
-            slug: "core-model",
-            workflow_key: "core_model",
-            status: "open",
-            aliases: ["core_model"],
-            owner_ids: [],
+            thread: {
+              id: topicId,
+              title: "Core model",
+              workflow_key: "core_model",
+              status: "open",
+            },
+            execution: {
+              id: caseId,
+              thread_id: topicId,
+              status: "running",
+              summary: "Hydration gap",
+            },
+            reused_thread: false,
           }),
         )
         .mockResolvedValueOnce(
@@ -96,15 +103,43 @@ describe("guided case workflow MCP tools", () => {
             policy: { confidence: "high", max_topics: 1 },
             matched_topics: [],
             selected_topic_ids: [topicId],
-            selected_case_ids: [],
-            relevant_cases: [],
+            selected_case_ids: [caseId],
+            relevant_cases: [
+              {
+                case_id: caseId,
+                title: "Hydration gap",
+                short_summary: "Hydration gap",
+                outcome: null,
+                key_files: [
+                  "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+                ],
+                key_symbols: [],
+                key_errors: [],
+                key_commands: [],
+                why_selected: "request-text overlap: hydration",
+              },
+            ],
             context_pack_snapshot: {
               topic_id: topicId,
               confidence: "high",
               matched_signals: ["hydration gap"],
-              representative_cases: [],
-              recent_cases: [],
-              relevant_cases: [],
+              representative_cases: [caseId],
+              recent_cases: [caseId],
+              relevant_cases: [
+                {
+                  case_id: caseId,
+                  title: "Hydration gap",
+                  short_summary: "Hydration gap",
+                  outcome: null,
+                  key_files: [
+                    "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+                  ],
+                  key_symbols: [],
+                  key_errors: [],
+                  key_commands: [],
+                  why_selected: "request-text overlap: hydration",
+                },
+              ],
               canonical_files: [
                 "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
               ],
@@ -124,7 +159,7 @@ describe("guided case workflow MCP tools", () => {
             id: caseId,
             topic_id: topicId,
             title: "Hydration gap",
-            status: "open",
+            status: "running",
             input_summary: "Hydration gap",
             summary_current: "Hydration gap",
             files: [
@@ -141,24 +176,31 @@ describe("guided case workflow MCP tools", () => {
               topic_id: topicId,
               confidence: "high",
             },
-          }, 201),
+          }),
         );
 
       const begin = await harness.client.callTool({
         name: "enderai_begin_case",
         arguments: {
           topic_title: "Core model",
+          workflow_key: "core_model",
           request_summary: "Hydration gap",
-          files: ["demo/full-stack-fastapi-template/backend/app/api/routes/cases.py"],
+          case_title: "Hydration gap",
+          files: [
+            "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+          ],
         },
       });
       const beginBody = JSON.parse(summarizeToolText(begin.content));
       expect(beginBody.next.case_id).toBe(caseId);
       expect(beginBody.context_pack.context_pack_snapshot.topic_id).toBe(topicId);
-      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
+      expect(beginBody.hydration.hydration_status).toBe("attached");
+      expect(beginBody.hydration.context_pack_attached).toBe(true);
+      expect(beginBody.hydration.relevant_case_count).toBe(1);
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/executions/start");
       expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/context-packs/build");
-      expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/cases/");
-      expect(JSON.parse(mockFetch.mock.calls[1][1].body as string)).toMatchObject({
+      expect(mockFetch.mock.calls[2][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
         topic_id: topicId,
         request_summary: "Hydration gap",
       });
@@ -169,7 +211,7 @@ describe("guided case workflow MCP tools", () => {
             id: caseId,
             topic_id: topicId,
             title: "Hydration gap",
-            status: "open",
+            status: "running",
             input_summary: "Hydration gap",
             summary_current: "Captured first evidence",
             files: ["backend/app/api/routes/cases.py"],
@@ -189,10 +231,10 @@ describe("guided case workflow MCP tools", () => {
         .mockResolvedValueOnce(
           jsonResponse({
             id: 1,
-            case_id: caseId,
+            execution_id: caseId,
             type: "mcp_progress",
             message: "Captured first evidence",
-          }, 201),
+          }),
         );
 
       const update = await harness.client.callTool({
@@ -209,7 +251,7 @@ describe("guided case workflow MCP tools", () => {
       expect(updateBody.progress_event.message).toBe("Captured first evidence");
       expect(mockFetch.mock.calls[3][0].toString()).toContain(`/api/v1/cases/${caseId}`);
       expect(mockFetch.mock.calls[4][0].toString()).toContain(
-        `/api/v1/cases/${caseId}/events`,
+        `/api/v1/executions/${caseId}/events`,
       );
 
       mockFetch
@@ -239,10 +281,10 @@ describe("guided case workflow MCP tools", () => {
         .mockResolvedValueOnce(
           jsonResponse({
             id: 2,
-            case_id: caseId,
+            execution_id: caseId,
             type: "mcp_finish",
             message: "Closed the case",
-          }, 201),
+          }),
         );
 
       const finish = await harness.client.callTool({
@@ -264,6 +306,85 @@ describe("guided case workflow MCP tools", () => {
       expect(summarizeToolText(afterFinish.content)).toContain(
         "Run enderai_begin_case first or provide case_id",
       );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("blocks write-like enderai_request calls before a case begins", async () => {
+    const harness = await createHarness();
+    try {
+      const beforeBegin = await harness.client.callTool({
+        name: "enderai_request",
+        arguments: {
+          method: "POST",
+          path: "/api/v1/artifacts/",
+          json: { title: "Should fail" },
+        },
+      });
+
+      expect(summarizeToolText(beforeBegin.content)).toContain(
+        "enderai_request write-like calls require an active case",
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("does not let audit.execution_id bypass the active-case guard", async () => {
+    const harness = await createHarness();
+    try {
+      const beforeBegin = await harness.client.callTool({
+        name: "enderai_request",
+        arguments: {
+          method: "POST",
+          path: "/api/v1/artifacts/",
+          json: { title: "Should still fail" },
+          audit: {
+            execution_id: "22222222-2222-2222-2222-222222222222",
+          },
+        },
+      });
+
+      expect(summarizeToolText(beforeBegin.content)).toContain(
+        "audit.execution_id does not replace an active case",
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("reports session readiness from ENDERAI_BEARER_TOKEN fallback", async () => {
+    process.env.ENDERAI_BEARER_TOKEN = "operator-bearer-token";
+
+    const harness = await createHarness();
+    try {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          id: "user-1",
+          email: "frontend-test@example.com",
+          full_name: "Frontend Test User",
+        }),
+      );
+
+      const info = await harness.client.callTool({
+        name: "enderai_session_info",
+        arguments: {},
+      });
+      const infoBody = JSON.parse(summarizeToolText(info.content));
+
+      expect(infoBody.session_ready).toBe(true);
+      expect(infoBody.user).toMatchObject({
+        id: "user-1",
+        email: "frontend-test@example.com",
+        full_name: "Frontend Test User",
+      });
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/users/me");
+      expect(mockFetch.mock.calls[0][1]?.headers).toMatchObject({
+        authorization: "Bearer operator-bearer-token",
+      });
     } finally {
       await harness.close();
     }

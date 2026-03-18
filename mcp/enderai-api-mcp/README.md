@@ -1,72 +1,64 @@
-# EnderAI API MCP
+# EnderAI API MCP Server
 
-MCP server for the EnderAI backend.
-
-It provides:
-
-- a thin authenticated HTTP bridge to the backend
-- guided Topic / Case workflow tools
-- hosted Streamable HTTP deployment support
+Hosted or local MCP server that proxies tool calls to an EnderAI backend.
 
 ## Tools
 
-The server exposes these tools:
+- `enderai_begin_case`: first step for meaningful work; starts a guided Topic/Case workflow and auto-hydrates relevant prior context by default
+- `enderai_update_case`: record material progress during active work
+- `enderai_finish_case`: close the active case with a terminal status
+- `enderai_session_info`: return session policy, auth model, active case/topic ids, and user summary when available
+- `enderai_request`: lower-level HTTP escape hatch for backend endpoints
+- `enderai_openapi`: fetch `/api/v1/openapi.json`
+- `enderai_health_check`: fetch `/api/v1/utils/health-check/`
 
-- `enderai_begin_case`
-- `enderai_update_case`
-- `enderai_finish_case`
-- `enderai_request`
-- `enderai_openapi`
-- `enderai_health_check`
+## Guided Case Workflow
 
-## Guided Topic / Case Workflow
+The intended lifecycle for meaningful work is:
 
-The guided workflow uses the canonical model directly.
+1. call `enderai_begin_case`
+2. let EnderAI auto-hydrate relevant prior context
+3. perform the work
+4. call `enderai_update_case` as findings or changes develop
+5. call `enderai_finish_case` at the end
 
-### `enderai_begin_case`
+If the caller skips a step or tries to switch cases mid-session, the MCP returns a clear sequencing error instead of guessing.
 
-- attaches to an existing Topic by `topic_id`, or creates a new Topic from `topic_title`
-- optionally builds a ContextPack
-- creates a new Case under that Topic
-- remembers the active `case_id` and `topic_id` for the MCP session
+## Lower-Level Requests
 
-### `enderai_update_case`
+`enderai_request` is available for endpoints that are not yet covered by guided tools.
 
-- patches the active Case with evidence, hypotheses, commands, changes, and summaries
-- can append a progress Case event
+Guidance:
+- prefer guided case tools for meaningful work
+- read-only calls can be used without an active case
+- write-like calls require an active case unless `unsafe_write_reason` is supplied explicitly
 
-### `enderai_finish_case`
+## Session Info
 
-- applies final updates
-- requires a terminal Case status such as `done` or `failed`
-- can append a closing Case event
-- clears the active case context
+`enderai_session_info` returns:
+- `policy_version`
+- `workflow_model`
+- `auth_model`
+- active case/topic ids
+- authenticated user summary when available
+- readiness to start meaningful work
 
-If the caller skips a step or tries to switch cases mid-session, the tool returns a sequencing error instead of guessing.
+## Backward-Compatibility Path Rewrites
 
-## Request Auditing
+`enderai_request` still rewrites a few older API paths when needed:
 
-`enderai_request` can append a best-effort Case event when a `case_id` is known.
-
-Supported audit input:
-
-- `audit.intent`: human-readable reason for the call
-- `audit.case_id`: explicit Case id override for the current request/session
-
-The recorded audit payload contains:
-
-- request metadata
-- response summary
-- redacted secrets
-- active case/topic context
+- `/api/v1/me` -> `/api/v1/users/me`
+- `/api/v1/runs/*` -> `/api/v1/executions/*`
+- `/api/v1/tasks/*` -> `/api/v1/threads/*`
+- `/api/v1/library/*` -> `/api/v1/artifacts/*`
 
 ## Environment
 
 - `ENDERAI_BASE_URL` (default: `https://enderai-backend.onrender.com`)
-- `ENDERAI_BEARER_TOKEN` (optional: `Authorization: Bearer ...`)
+- `ENDERAI_BEARER_TOKEN` (optional operator-side fallback bearer token)
 - `ENDERAI_TIMEOUT_MS` (default: `30000`)
-- `MCP_BEARER_TOKEN` (optional, recommended for remote deploys: protects the MCP server itself)
-- `MCP_PATH` (default: `/mcp`, streamable HTTP endpoint)
+- `MCP_BEARER_TOKEN` (optional operator-side protection for the MCP service itself)
+- `MCP_PATH` (default: `/mcp`)
 
 ## Run Locally
 
@@ -86,8 +78,11 @@ npm run build
 PORT=8080 MCP_BEARER_TOKEN=dev-token npm run start:http
 ```
 
-Health endpoint: `GET /health`
-MCP endpoint: `GET|POST|DELETE /mcp` (or `MCP_PATH`)
+Health endpoint:
+- `GET /health`
+
+MCP endpoint:
+- `GET|POST|DELETE /mcp`
 
 ## Test
 
@@ -96,46 +91,55 @@ cd mcp/enderai-api-mcp
 npm test
 ```
 
-Smoke test:
+## Generic Hosted MCP Client
 
-```sh
-cd mcp/enderai-api-mcp
-ENDERAI_BASE_URL=https://enderai-backend.onrender.com npm run smoke
-```
-
-HTTP smoke test:
-
-```sh
-cd mcp/enderai-api-mcp
-npm run smoke:http
-```
-
-## Configure MCP Client
-
-Example local MCP server config:
+Example config:
 
 ```json
 {
-  "mcpServers": {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "enderai_mcp_token",
+      "description": "EnderAI MCP token",
+      "password": true
+    }
+  ],
+  "servers": {
     "enderai-api": {
-      "command": "node",
-      "args": ["mcp/enderai-api-mcp/dist/index.js"],
-      "env": {
-        "ENDERAI_BASE_URL": "https://enderai-backend.onrender.com",
-        "ENDERAI_BEARER_TOKEN": "REDACTED"
+      "type": "http",
+      "url": "https://YOUR-MCP-SERVICE.onrender.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:enderai_mcp_token}"
       }
     }
   }
 }
 ```
 
-## Hosted MCP Token Flow
+## Codex CLI
 
-The current hosted MCP token flow remains supported:
+Example `~/.codex/config.toml` block:
 
-- store the token in `~/.enderai_mcp_token`
-- protect the file with `chmod 600`
-- load it into the shell environment for local clients such as Codex CLI
-- send it as `Authorization: Bearer ...` to the hosted MCP endpoint
+```toml
+[mcp_servers.enderai-api]
+url = "https://YOUR-MCP-SERVICE.onrender.com/mcp"
+bearer_token_env_var = "ENDERAI_MCP_TOKEN"
+```
 
-This auth flow is intentionally unchanged by the Topic / Case cutover.
+Example shell setup:
+
+```sh
+export ENDERAI_MCP_TOKEN="REDACTED"
+```
+
+## Minimal Workflow Reminder
+
+```text
+If EnderAI tools are available:
+- Start meaningful user-initiated work with `enderai_begin_case`.
+- Let EnderAI auto-hydrate relevant prior context before work begins.
+- Use `enderai_update_case` as material progress develops.
+- Use `enderai_finish_case` when the work is complete.
+- Prefer the guided case tools over raw `enderai_request` calls.
+```
