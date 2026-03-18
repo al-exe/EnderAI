@@ -19,10 +19,7 @@ def test_create_agent_credential_returns_token_and_metadata(
 
     assert r.status_code == 201
     payload = r.json()
-    assert payload["access_token"]
-    assert payload["backend_access_token"] == payload["access_token"]
     assert payload["mcp_access_token"]
-    assert payload["mcp_access_token"] != payload["backend_access_token"]
     assert payload["token_type"] == "bearer"
     assert payload["credential"]["label"] == "Codex laptop"
     assert payload["credential"]["revoked_at"] is None
@@ -45,7 +42,7 @@ def test_create_agent_credential_returns_token_and_metadata(
     )
 
 
-def test_backend_agent_token_authenticates_and_updates_last_used_at(
+def test_agent_mcp_token_authenticates_and_updates_last_used_at(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     create_res = client.post(
@@ -53,7 +50,7 @@ def test_backend_agent_token_authenticates_and_updates_last_used_at(
         headers=normal_user_token_headers,
         json={"label": "Hosted Codex"},
     )
-    token = create_res.json()["backend_access_token"]
+    token = create_res.json()["mcp_access_token"]
     credential_id = create_res.json()["credential"]["id"]
 
     auth_res = client.post(
@@ -109,7 +106,6 @@ def test_inactive_user_agent_tokens_are_rejected(
         json={"label": "Inactive user credential"},
     )
     payload = create_res.json()
-    backend_token = payload["backend_access_token"]
     mcp_token = payload["mcp_access_token"]
     credential_id = payload["credential"]["id"]
     user_id = payload["credential"]["user_id"]
@@ -129,7 +125,7 @@ def test_inactive_user_agent_tokens_are_rejected(
 
     auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",
-        headers={"Authorization": f"Bearer {backend_token}"},
+        headers={"Authorization": f"Bearer {mcp_token}"},
     )
     assert auth_res.status_code == 400
     assert auth_res.json() == {"detail": "Inactive user"}
@@ -146,19 +142,14 @@ def test_inactive_user_agent_tokens_are_rejected(
     db.commit()
 
 
-def test_backend_agent_token_cannot_validate_as_mcp_token(
+def test_regular_access_token_cannot_validate_as_mcp_token(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
-    create_res = client.post(
-        f"{settings.API_V1_STR}/agent-credentials/",
-        headers=normal_user_token_headers,
-        json={"label": "Wrong token kind"},
-    )
-    backend_token = create_res.json()["backend_access_token"]
+    access_token = normal_user_token_headers["Authorization"].split(" ", 1)[1]
 
     validate_res = client.post(
         f"{settings.API_V1_STR}/agent-credentials/validate-mcp-token",
-        headers={"Authorization": f"Bearer {backend_token}"},
+        headers={"Authorization": f"Bearer {access_token}"},
     )
     assert validate_res.status_code == 403
     assert validate_res.json() == {"detail": "Could not validate credentials"}
@@ -174,7 +165,6 @@ def test_rotate_agent_credential_invalidates_old_tokens(
     )
     payload = create_res.json()
     credential_id = payload["credential"]["id"]
-    old_backend_token = payload["backend_access_token"]
     old_mcp_token = payload["mcp_access_token"]
 
     rotate_res = client.post(
@@ -183,12 +173,11 @@ def test_rotate_agent_credential_invalidates_old_tokens(
     )
     assert rotate_res.status_code == 200
     new_payload = rotate_res.json()
-    assert new_payload["backend_access_token"] != old_backend_token
     assert new_payload["mcp_access_token"] != old_mcp_token
 
     old_auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",
-        headers={"Authorization": f"Bearer {old_backend_token}"},
+        headers={"Authorization": f"Bearer {old_mcp_token}"},
     )
     assert old_auth_res.status_code == 403
     assert old_auth_res.json() == {"detail": "Could not validate credentials"}
@@ -204,7 +193,7 @@ def test_rotate_agent_credential_invalidates_old_tokens(
 
     new_auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",
-        headers={"Authorization": f"Bearer {new_payload['backend_access_token']}"},
+        headers={"Authorization": f"Bearer {new_payload['mcp_access_token']}"},
     )
     assert new_auth_res.status_code == 200
 
@@ -230,7 +219,6 @@ def test_revoke_agent_credential_invalidates_tokens_and_marks_credential(
     )
     payload = create_res.json()
     credential_id = payload["credential"]["id"]
-    backend_token = payload["backend_access_token"]
     mcp_token = payload["mcp_access_token"]
 
     revoke_res = client.delete(
@@ -242,7 +230,7 @@ def test_revoke_agent_credential_invalidates_tokens_and_marks_credential(
 
     auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",
-        headers={"Authorization": f"Bearer {backend_token}"},
+        headers={"Authorization": f"Bearer {mcp_token}"},
     )
     assert auth_res.status_code == 403
     assert auth_res.json() == {"detail": "Could not validate credentials"}

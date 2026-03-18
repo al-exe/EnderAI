@@ -32,7 +32,7 @@ def _to_public(credential: AgentCredential) -> AgentCredentialPublic:
     return AgentCredentialPublic.model_validate(credential)
 
 
-def _issue_agent_tokens(credential: AgentCredential) -> tuple[str, str]:
+def _issue_agent_mcp_token(credential: AgentCredential) -> str:
     expires_delta = timedelta(days=settings.AGENT_CREDENTIAL_EXPIRE_DAYS)
     now = get_datetime_utc()
     expires_at = now + expires_delta
@@ -42,15 +42,6 @@ def _issue_agent_tokens(credential: AgentCredential) -> tuple[str, str]:
     credential.last_rotated_at = now
     credential.current_token_expires_at = expires_at
 
-    backend_access_token = security.create_access_token(
-        credential.user_id,
-        expires_delta=expires_delta,
-        extra_claims={
-            "token_kind": "agent_credential",
-            "agent_credential_id": str(credential.id),
-            "agent_credential_version": credential.token_version,
-        },
-    )
     mcp_access_token = security.create_access_token(
         credential.user_id,
         expires_delta=expires_delta,
@@ -60,19 +51,16 @@ def _issue_agent_tokens(credential: AgentCredential) -> tuple[str, str]:
             "agent_credential_version": credential.token_version,
         },
     )
-    return backend_access_token, mcp_access_token
+    return mcp_access_token
 
 
 def _to_issue_result(
     credential: AgentCredential,
     *,
-    backend_access_token: str,
     mcp_access_token: str,
 ) -> AgentCredentialIssueResult:
     return AgentCredentialIssueResult(
         credential=_to_public(credential),
-        access_token=backend_access_token,
-        backend_access_token=backend_access_token,
         mcp_access_token=mcp_access_token,
     )
 
@@ -122,13 +110,12 @@ def create_agent_credential(
         updated_at=now,
         last_rotated_at=now,
     )
-    backend_access_token, mcp_access_token = _issue_agent_tokens(credential)
+    mcp_access_token = _issue_agent_mcp_token(credential)
     session.add(credential)
     session.commit()
     session.refresh(credential)
     return _to_issue_result(
         credential,
-        backend_access_token=backend_access_token,
         mcp_access_token=mcp_access_token,
     )
 
@@ -146,13 +133,12 @@ def rotate_agent_credential(
             status_code=400, detail="Revoked agent credentials cannot be rotated"
         )
 
-    backend_access_token, mcp_access_token = _issue_agent_tokens(credential)
+    mcp_access_token = _issue_agent_mcp_token(credential)
     session.add(credential)
     session.commit()
     session.refresh(credential)
     return _to_issue_result(
         credential,
-        backend_access_token=backend_access_token,
         mcp_access_token=mcp_access_token,
     )
 

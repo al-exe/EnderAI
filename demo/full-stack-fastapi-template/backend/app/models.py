@@ -126,8 +126,6 @@ class AgentCredentialsPublic(SQLModel):
 
 class AgentCredentialIssueResult(SQLModel):
     credential: AgentCredentialPublic
-    access_token: str
-    backend_access_token: str
     mcp_access_token: str
     token_type: str = "bearer"
 
