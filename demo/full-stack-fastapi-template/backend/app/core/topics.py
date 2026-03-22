@@ -57,7 +57,7 @@ def build_topic_public(topic: Topic) -> TopicPublic:
         title=topic.title,
         slug=topic.slug,
         description=_clean_optional_string(topic.description),
-        aliases=_dedupe_preserve_order([*(_string_list(topic.aliases)), *rollup.aliases, topic.workflow_key]),
+        aliases=_canonical_topic_aliases([*(_string_list(topic.aliases)), *rollup.aliases], topic),
         status=_clean_optional_string(topic.status) or "open",
         workflow_key=topic.workflow_key,
         owner_ids=_uuid_list(topic.owner_ids),
@@ -84,7 +84,25 @@ def build_topic_public(topic: Topic) -> TopicPublic:
 def build_topic_rollup_public(topic: Topic) -> TopicRollupPublic:
     rollup_payload = _default_rollup(topic)
     rollup_payload.update(_json_object(topic.rollup_data))
+    rollup_payload["aliases"] = _canonical_topic_aliases(
+        _string_list(rollup_payload.get("aliases")),
+        topic,
+    )
     return TopicRollupPublic(**rollup_payload)
+
+
+def build_topic_public_current(session: Session, topic: Topic) -> TopicPublic:
+    if not _topic_rollup_needs_refresh(session, topic):
+        return build_topic_public(topic)
+
+    rollup = refresh_topic_rollup(session, topic.id, persist=False)
+    if rollup is None:
+        return build_topic_public(topic)
+
+    refreshed_topic = Topic(**topic.model_dump(mode="python"))
+    refreshed_topic.rollup_summary = rollup.brief
+    refreshed_topic.rollup_data = rollup.model_dump(mode="json")
+    return build_topic_public(refreshed_topic)
 
 
 def list_topic_models(
@@ -225,7 +243,7 @@ def refresh_topic_rollup(
         pinned_takeaways=_dedupe_preserve_order(pinned_takeaways)[:10],
         negative_history=_dedupe_preserve_order(negative_history)[:10],
         representative_case_ids=representative_cases,
-        aliases=_dedupe_preserve_order([*aliases, topic.workflow_key, topic.title])[:12],
+        aliases=_canonical_topic_aliases(aliases, topic)[:12],
         vocabulary=vocabulary,
         ambiguity_notes=existing_rollup.ambiguity_notes,
         open_questions=_dedupe_preserve_order(open_questions)[:10],
@@ -243,7 +261,7 @@ def refresh_topic_rollup(
 
 
 def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResult:
-    topics = [build_topic_public(topic) for topic in list_topic_models(session)]
+    topics = [build_topic_public_current(session, topic) for topic in list_topic_models(session)]
     candidates = [_score_topic_match(topic, request) for topic in topics]
     candidates = [candidate for candidate in candidates if candidate.score > 0]
     candidates.sort(key=lambda candidate: candidate.score, reverse=True)
@@ -257,7 +275,7 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
         topic_model = read_topic_model(session, request.topic_id)
         if topic_model is None:
             raise ValueError("Topic not found")
-        topic = build_topic_public(topic_model)
+        topic = build_topic_public_current(session, topic_model)
         policy = TopicHydrationPolicy(confidence="high", max_topics=1)
         matched_topics = [
             TopicMatchCandidate(
@@ -401,7 +419,6 @@ def _score_topic_match(topic: TopicPublic, request: TopicMatchRequest) -> TopicM
             " ".join(
                 [
                     topic.title,
-                    topic.workflow_key,
                     topic.description or "",
                     topic.rollup_summary or "",
                     *topic.aliases,
@@ -550,7 +567,7 @@ def _score_text_similarity(
         return 0.0
 
     best_ratio = 0.0
-    for candidate in [topic.title, topic.workflow_key, topic.description or "", topic.rollup_summary or ""]:
+    for candidate in [topic.title, topic.description or "", topic.rollup_summary or ""]:
         normalized_candidate = _normalize_for_match(candidate)
         if not normalized_candidate:
             continue
@@ -668,6 +685,21 @@ def _clean_optional_string(value: Any) -> str | None:
     return cleaned or None
 
 
+def _canonical_topic_aliases(values: list[str], topic: Topic) -> list[str]:
+    # Keep aliases grounded in topic content, not identity handles like workflow_key/title.
+    excluded = {
+        _normalize_for_match(topic.workflow_key),
+        _normalize_for_match(topic.title),
+    }
+    canonical: list[str] = []
+    for value in _dedupe_preserve_order(values):
+        normalized = _normalize_for_match(value)
+        if not normalized or normalized in excluded:
+            continue
+        canonical.append(value)
+    return canonical
+
+
 def _dedupe_preserve_order(values: list[Any]) -> list[Any]:
     seen: set[Any] = set()
     deduped: list[Any] = []
@@ -695,3 +727,16 @@ def _topic_exists_with_workflow_key(session: Session, workflow_key: str) -> bool
 def _topic_exists_with_slug(session: Session, slug: str) -> bool:
     statement = select(Topic.id).where(Topic.slug == slug).limit(1)
     return session.exec(statement).first() is not None
+
+
+def _topic_rollup_needs_refresh(session: Session, topic: Topic) -> bool:
+    rollup_payload = _json_object(topic.rollup_data)
+    if not rollup_payload:
+        return True
+
+    rollup_case_count = rollup_payload.get("case_count")
+    if rollup_case_count == 0:
+        statement = select(CaseRecord.id).where(CaseRecord.topic_id == topic.id).limit(1)
+        return session.exec(statement).first() is not None
+
+    return False
