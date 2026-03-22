@@ -172,13 +172,44 @@ def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db
     assert updated_body["commands"][0]["cmd"] == "pytest backend/tests/api/test_cases_api.py"
     assert updated_body["context_pack_snapshot"]["builder_version"] == "v1"
 
+    partial_snapshot = client.patch(
+        f"/api/v1/cases/{case_id}",
+        headers=normal_user_token_headers,
+        json={
+            "context_pack_snapshot": {
+                "builder_version": "v2",
+                "topic_id": str(uuid.uuid4()),
+                "case_id": str(uuid.uuid4()),
+            }
+        },
+    )
+    assert partial_snapshot.status_code == 200, partial_snapshot.text
+    partial_snapshot_body = partial_snapshot.json()
+    assert partial_snapshot_body["context_pack_snapshot"]["builder_version"] == "v2"
+    assert partial_snapshot_body["context_pack_snapshot"]["topic_id"] == topic_id
+    assert partial_snapshot_body["context_pack_snapshot"]["case_id"] == case_id
+    assert partial_snapshot_body["context_pack_snapshot"]["canonical_files"] == [
+        "backend/app/api/routes/cases.py"
+    ]
+
+    db.connection().execute(
+        text("update public.execution set summary = :summary where id = :case_id"),
+        {"summary": "legacy execution summary", "case_id": case_id},
+    )
+    db.commit()
+
     execution_res = client.get(f"/api/v1/executions/{case_id}", headers=normal_user_token_headers)
     assert execution_res.status_code == 200, execution_res.text
-    assert execution_res.json()["summary"] == updated_body["summary_current"]
+    assert execution_res.json()["summary"] == "legacy execution summary"
 
     cases_res = client.get("/api/v1/cases/", headers=normal_user_token_headers)
     assert cases_res.status_code == 200, cases_res.text
     assert cases_res.json()["count"] >= 1
+
+    case_res = client.get(f"/api/v1/cases/{case_id}", headers=normal_user_token_headers)
+    assert case_res.status_code == 200, case_res.text
+    case_body = case_res.json()
+    assert case_body["summary_current"] == updated_body["summary_current"]
 
     memo_res = client.get(f"/api/v1/cases/{case_id}/memo", headers=normal_user_token_headers)
     assert memo_res.status_code == 200, memo_res.text
