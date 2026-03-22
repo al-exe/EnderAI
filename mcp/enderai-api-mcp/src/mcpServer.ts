@@ -304,6 +304,17 @@ function isWriteLikeMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(normalized);
 }
 
+function normalizeJsonArgument(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
 function isClosedCaseRecord(caseData: Record<string, any>): boolean {
   const status = typeof caseData.status === "string" ? caseData.status : undefined;
   const closedAt =
@@ -1274,10 +1285,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         const rewrite = rewriteDeprecatedApiPath(reqArgs.path);
         const effectivePath = rewrite.path;
+        const normalizedJson = normalizeJsonArgument(reqArgs.json);
         const res = await enderaiFetch({
           ...reqArgs,
           path: effectivePath,
           bearerToken,
+          json: normalizedJson,
         });
 
         const isExecutionStart =
