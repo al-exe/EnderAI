@@ -303,6 +303,17 @@ function isWriteLikeMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(normalized);
 }
 
+function normalizeJsonArgument(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
 function asRecord(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, any>;
@@ -1197,10 +1208,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         const rewrite = rewriteDeprecatedApiPath(reqArgs.path);
         const effectivePath = rewrite.path;
+        const normalizedJson = normalizeJsonArgument(reqArgs.json);
         const res = await enderaiFetch({
           ...reqArgs,
           path: effectivePath,
           bearerToken,
+          json: normalizedJson,
         });
 
         const isExecutionStart =

@@ -356,6 +356,39 @@ describe("guided case workflow MCP tools", () => {
     }
   });
 
+  it("normalizes stringified JSON bodies for write requests", async () => {
+    const harness = await createHarness();
+    try {
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          id: "22222222-2222-2222-2222-222222222222",
+          status: "done",
+        }),
+      );
+
+      const result = await harness.client.callTool({
+        name: "enderai_request",
+        arguments: {
+          method: "PATCH",
+          path: "/api/v1/cases/22222222-2222-2222-2222-222222222222",
+          json: "{\"status\":\"done\"}",
+          unsafe_write_reason: "Regression test for stringified JSON transport",
+        },
+      });
+      const resultBody = JSON.parse(summarizeToolText(result.content));
+
+      expect(resultBody.status).toBe(200);
+      expect(mockFetch.mock.calls[0][0].toString()).toContain(
+        "/api/v1/cases/22222222-2222-2222-2222-222222222222",
+      );
+      expect(JSON.parse(mockFetch.mock.calls[0][1]?.body as string)).toEqual({
+        status: "done",
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it("reports session readiness from ENDERAI_BEARER_TOKEN fallback", async () => {
     process.env.ENDERAI_BEARER_TOKEN = "operator-bearer-token";
 
