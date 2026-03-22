@@ -11,6 +11,8 @@ from app.core.cases import (
     build_case_event_public,
     build_case_public,
     build_default_case_data,
+    is_terminal_case_status,
+    normalize_context_pack_snapshot,
     render_case_hydration,
     render_case_memo,
 )
@@ -97,6 +99,7 @@ def create_case(
         opened_at=now,
         updated_at=now,
         status=case_in.status.strip() if case_in.status.strip() else "open",
+        closed_at=now if is_terminal_case_status(case_in.status) else None,
         actor_id=case_in.actor_id,
         source=case_in.source.strip() if isinstance(case_in.source, str) and case_in.source.strip() else None,
         input_summary=(case_in.input_summary.strip() if isinstance(case_in.input_summary, str) and case_in.input_summary.strip() else None),
@@ -120,14 +123,13 @@ def create_case(
     session.add(case_record)
     session.flush()
 
-    snapshot_payload = (
+    case_record.context_pack_snapshot = normalize_context_pack_snapshot(
         case_in.context_pack_snapshot.model_dump(mode="json")
         if case_in.context_pack_snapshot is not None
-        else {}
-    )
-    snapshot_payload.setdefault("topic_id", str(topic.id))
-    snapshot_payload.setdefault("case_id", str(case_record.id))
-    case_record.context_pack_snapshot = snapshot_payload
+        else {},
+        topic_id=topic.id,
+        case_id=case_record.id,
+    ).model_dump(mode="json")
     topic.last_used_at = now
     topic.updated_at = now
     session.add(topic)

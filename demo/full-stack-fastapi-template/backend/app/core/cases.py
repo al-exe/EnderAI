@@ -45,20 +45,19 @@ TERMINAL_CASE_STATUSES = {
 
 def build_case_public(case_record: CaseRecord, topic: Topic | None) -> CasePublic:
     case_data = build_default_case_data(case_record)
-    case_data.update(_json_object(case_record.case_data))
+    case_data.update(_normalized_case_data(case_record.case_data))
 
     summary_current = _clean_optional_string(case_record.summary_current)
-    if summary_current is None:
-        summary_current = _clean_optional_string(case_data.get("summary_current"))
 
     title = _clean_optional_string(case_record.title)
     if title is None:
-        title = summary_current or topic.title if topic else "Case"
+        title = summary_current or (topic.title if topic else "Case")
 
-    snapshot_payload = _json_object(case_record.context_pack_snapshot)
-    snapshot_payload.setdefault("topic_id", str(case_record.topic_id))
-    snapshot_payload.setdefault("case_id", str(case_record.id))
-    snapshot = ContextPackSnapshot(**snapshot_payload)
+    snapshot = normalize_context_pack_snapshot(
+        case_record.context_pack_snapshot,
+        topic_id=case_record.topic_id,
+        case_id=case_record.id,
+    )
 
     return CasePublic(
         id=case_record.id,
@@ -87,6 +86,7 @@ def build_case_public(case_record: CaseRecord, topic: Topic | None) -> CasePubli
 
 
 def build_default_case_data(case_record: CaseRecord) -> dict[str, Any]:
+    # Keep narrative scalars on CaseRecord columns, not inside the legacy JSON payload.
     return {
         "files": [],
         "symbols": [],
@@ -97,13 +97,41 @@ def build_default_case_data(case_record: CaseRecord) -> dict[str, Any]:
         "changes": [],
         "outcome": None,
         "next_steps": [],
-        "summary_current": case_record.summary_current,
     }
 
 
 def materialize_case_data(case: CasePublic) -> dict[str, Any]:
     payload = case.model_dump(mode="json")
     return {field: payload.get(field) for field in CASE_DATA_FIELDS}
+
+
+def normalize_context_pack_snapshot(
+    snapshot_payload: Any,
+    *,
+    topic_id: uuid.UUID,
+    case_id: uuid.UUID,
+) -> ContextPackSnapshot:
+    payload = _json_object(snapshot_payload).copy()
+    payload["topic_id"] = str(topic_id)
+    payload["case_id"] = str(case_id)
+    return ContextPackSnapshot(**payload)
+
+
+def merge_context_pack_snapshot(
+    current_snapshot: Any,
+    patch_snapshot: Any,
+    *,
+    topic_id: uuid.UUID,
+    case_id: uuid.UUID,
+) -> dict[str, Any]:
+    merged = _json_object(current_snapshot).copy()
+    merged.update(_json_object(patch_snapshot))
+    snapshot = normalize_context_pack_snapshot(
+        merged,
+        topic_id=topic_id,
+        case_id=case_id,
+    )
+    return snapshot.model_dump(mode="json")
 
 
 def apply_case_update(case_record: CaseRecord, update: dict[str, Any]) -> CaseRecord:
@@ -127,18 +155,19 @@ def apply_case_update(case_record: CaseRecord, update: dict[str, Any]) -> CaseRe
     if "summary_current" in update:
         case_record.summary_current = _clean_optional_string(update.get("summary_current"))
 
-    case_data = _json_object(case_record.case_data)
+    case_data = _normalized_case_data(case_record.case_data)
     for key in CASE_DATA_FIELDS:
         if key in update:
             case_data[key] = update[key]
     case_record.case_data = case_data
 
-    if "context_pack_snapshot" in update and update["context_pack_snapshot"] is not None:
-        snapshot = update["context_pack_snapshot"]
-        if isinstance(snapshot, dict):
-            case_record.context_pack_snapshot = snapshot
-        else:
-            case_record.context_pack_snapshot = snapshot.model_dump(mode="json")
+    if "context_pack_snapshot" in update:
+        case_record.context_pack_snapshot = merge_context_pack_snapshot(
+            case_record.context_pack_snapshot,
+            update.get("context_pack_snapshot"),
+            topic_id=case_record.topic_id,
+            case_id=case_record.id,
+        )
 
     case_record.updated_at = now
     return case_record
@@ -246,6 +275,11 @@ def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+def _normalized_case_data(value: Any) -> dict[str, Any]:
+    payload = _json_object(value)
+    return {field: payload[field] for field in CASE_DATA_FIELDS if field in payload}
 
 
 def _list_payload(value: Any) -> list[dict[str, Any]]:
