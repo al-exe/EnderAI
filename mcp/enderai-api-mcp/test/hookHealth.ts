@@ -11,16 +11,15 @@ export const REQUIRED_HOOK_TOOLS = [
 export const REQUIRED_HOOK_ROUTE_PATHS = [
   "/api/v1/utils/health-check/",
   "/api/v1/topics/",
+  "/api/v1/topics/{topic_id}",
+  "/api/v1/topics/match",
   "/api/v1/topics/{topic_id}/rollup",
   "/api/v1/context-packs/build",
   "/api/v1/cases/",
   "/api/v1/cases/{case_id}",
+  "/api/v1/cases/{case_id}/events",
   "/api/v1/cases/{case_id}/memo",
   "/api/v1/cases/{case_id}/hydration",
-  "/api/v1/threads/",
-  "/api/v1/executions/",
-  "/api/v1/executions/start",
-  "/api/v1/executions/{execution_id}/events",
 ];
 
 export function summarizeToolText(content: unknown): string {

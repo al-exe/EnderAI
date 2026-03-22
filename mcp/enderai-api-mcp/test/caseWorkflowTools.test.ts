@@ -83,19 +83,16 @@ describe("guided case workflow MCP tools", () => {
       mockFetch
         .mockResolvedValueOnce(
           jsonResponse({
-            thread: {
-              id: topicId,
-              title: "Core model",
-              workflow_key: "core_model",
-              status: "open",
-            },
-            execution: {
-              id: caseId,
-              thread_id: topicId,
-              status: "running",
-              summary: "Hydration gap",
-            },
-            reused_thread: false,
+            data: [],
+            count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: topicId,
+            title: "Core model",
+            workflow_key: "core_model",
+            status: "open",
           }),
         )
         .mockResolvedValueOnce(
@@ -159,7 +156,7 @@ describe("guided case workflow MCP tools", () => {
             id: caseId,
             topic_id: topicId,
             title: "Hydration gap",
-            status: "running",
+            status: "open",
             input_summary: "Hydration gap",
             summary_current: "Hydration gap",
             files: [
@@ -197,10 +194,11 @@ describe("guided case workflow MCP tools", () => {
       expect(beginBody.hydration.hydration_status).toBe("attached");
       expect(beginBody.hydration.context_pack_attached).toBe(true);
       expect(beginBody.hydration.relevant_case_count).toBe(1);
-      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/executions/start");
-      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/context-packs/build");
-      expect(mockFetch.mock.calls[2][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/context-packs/build");
+      expect(mockFetch.mock.calls[3][0].toString()).toContain("/api/v1/cases/");
+      expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toMatchObject({
         topic_id: topicId,
         request_summary: "Hydration gap",
       });
@@ -231,7 +229,7 @@ describe("guided case workflow MCP tools", () => {
         .mockResolvedValueOnce(
           jsonResponse({
             id: 1,
-            execution_id: caseId,
+            case_id: caseId,
             type: "mcp_progress",
             message: "Captured first evidence",
           }),
@@ -249,9 +247,9 @@ describe("guided case workflow MCP tools", () => {
       const updateBody = JSON.parse(summarizeToolText(update.content));
       expect(updateBody.case.summary_current).toBe("Captured first evidence");
       expect(updateBody.progress_event.message).toBe("Captured first evidence");
-      expect(mockFetch.mock.calls[3][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(mockFetch.mock.calls[4][0].toString()).toContain(
-        `/api/v1/executions/${caseId}/events`,
+      expect(mockFetch.mock.calls[4][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[5][0].toString()).toContain(
+        `/api/v1/cases/${caseId}/events`,
       );
 
       mockFetch
@@ -281,7 +279,7 @@ describe("guided case workflow MCP tools", () => {
         .mockResolvedValueOnce(
           jsonResponse({
             id: 2,
-            execution_id: caseId,
+            case_id: caseId,
             type: "mcp_finish",
             message: "Closed the case",
           }),
@@ -332,7 +330,7 @@ describe("guided case workflow MCP tools", () => {
     }
   });
 
-  it("does not let audit.execution_id bypass the active-case guard", async () => {
+  it("does not let audit.case_id bypass the active-case guard", async () => {
     const harness = await createHarness();
     try {
       const beforeBegin = await harness.client.callTool({
@@ -342,13 +340,13 @@ describe("guided case workflow MCP tools", () => {
           path: "/api/v1/artifacts/",
           json: { title: "Should still fail" },
           audit: {
-            execution_id: "22222222-2222-2222-2222-222222222222",
+            case_id: "22222222-2222-2222-2222-222222222222",
           },
         },
       });
 
       expect(summarizeToolText(beforeBegin.content)).toContain(
-        "audit.execution_id does not replace an active case",
+        "audit.case_id does not replace an active case",
       );
       expect(mockFetch).not.toHaveBeenCalled();
     } finally {
