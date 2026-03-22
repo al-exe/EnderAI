@@ -498,8 +498,22 @@ def delete_execution(session: SessionDep, current_user: CurrentUser, execution_i
 
     get_current_active_superuser(current_user)
     try:
+        lookup = (
+            session.connection()
+            .execute(
+                text("select thread_id from public.execution where id = :execution_id limit 1"),
+                {"execution_id": execution_id},
+            )
+            .mappings()
+            .first()
+        )
+        if lookup is None:
+            raise HTTPException(status_code=404, detail="Execution not found")
+
         stmt = text("delete from public.execution where id = :execution_id returning id")
         deleted = session.connection().execute(stmt, {"execution_id": execution_id}).first()
+        if deleted is not None:
+            refresh_topic_rollup(session, lookup["thread_id"], persist=True)
         session.commit()
     except ProgrammingError as e:
         if _is_missing_table_error(e):
@@ -618,12 +632,6 @@ def create_execution_event(
                 ),
                 {"execution_id": execution_id, "summary": summary_candidate},
             )
-        if execution_has_column(session, "updated_at"):
-            session.connection().execute(
-                text("update public.execution set updated_at = now() where id = :execution_id"),
-                {"execution_id": execution_id},
-            )
-        refresh_topic_rollup(session, execution_lookup["thread_id"], persist=True)
         session.commit()
     except IntegrityError:
         raise HTTPException(status_code=409, detail="Invalid event linkage")

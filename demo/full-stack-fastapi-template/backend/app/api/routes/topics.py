@@ -6,7 +6,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.topics import (
-    build_topic_public,
+    build_topic_public_current,
     build_topic_rollup_public,
     list_topic_rows,
     match_topics,
@@ -41,7 +41,7 @@ def read_topics(
             return TopicsPublic(data=[], count=0)
         raise
 
-    topics = [build_topic_public(row) for row in rows]
+    topics = [build_topic_public_current(session, row) for row in rows]
     return TopicsPublic(data=topics, count=len(topics))
 
 
@@ -78,7 +78,7 @@ def read_topic(session: SessionDep, current_user: CurrentUser, topic_id: uuid.UU
 
     if row is None:
         raise HTTPException(status_code=404, detail="Topic not found")
-    return build_topic_public(row)
+    return build_topic_public_current(session, row)
 
 
 @router.get("/{topic_id}/rollup", response_model=TopicRollupPublic)

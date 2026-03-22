@@ -89,6 +89,29 @@ def build_topic_rollup_public(thread_row: dict[str, Any]) -> TopicRollupPublic:
     return TopicRollupPublic(**rollup_payload)
 
 
+def build_topic_public_current(session: Session, thread_row: dict[str, Any]) -> TopicPublic:
+    row = ensure_topic_rollup_current(session, thread_row)
+    return build_topic_public(row)
+
+
+def ensure_topic_rollup_current(
+    session: Session,
+    thread_row: dict[str, Any],
+) -> dict[str, Any]:
+    if "topic_rollup" not in thread_row:
+        return thread_row
+    if _json_object(thread_row.get("topic_rollup")):
+        return thread_row
+
+    rollup = refresh_topic_rollup(session, thread_row["id"], persist=False)
+    if rollup is None:
+        return thread_row
+
+    refreshed = dict(thread_row)
+    refreshed["topic_rollup"] = rollup.model_dump(mode="json")
+    return refreshed
+
+
 def list_topic_rows(session: Session, *, status: str | None = None, q: str | None = None) -> list[dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -221,7 +244,7 @@ def refresh_topic_rollup(
 
 
 def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResult:
-    topics = [build_topic_public(row) for row in list_topic_rows(session)]
+    topics = [build_topic_public_current(session, row) for row in list_topic_rows(session)]
     candidates = [_score_topic_match(topic, request) for topic in topics]
     candidates = [candidate for candidate in candidates if candidate.score > 0]
     candidates.sort(key=lambda candidate: candidate.score, reverse=True)
@@ -235,7 +258,7 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
         topic_row = read_topic_row(session, request.topic_id)
         if topic_row is None:
             raise ValueError("Topic not found")
-        topic = build_topic_public(topic_row)
+        topic = build_topic_public_current(session, topic_row)
         policy = TopicHydrationPolicy(confidence="high", max_topics=1)
         matched_topics = [
             TopicMatchCandidate(
