@@ -36,14 +36,11 @@ const REDACT_KEYS = new Set([
 
 const TERMINAL_CASE_STATUSES = new Set([
   "aborted",
-  "cancelled",
-  "canceled",
   "closed",
-  "complete",
-  "completed",
   "done",
+  "error",
   "failed",
-  "resolved",
+  "success",
 ]);
 
 const CommandRecordSchema = z
@@ -278,14 +275,6 @@ function trimToUndefined(value: string | undefined): string | undefined {
 function slugifyWorkflowKey(value: string): string {
   const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return slug || "topic";
-}
-
-function humanizeWorkflowKey(value: string): string {
-  return value
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function isTerminalCaseStatus(status: string | undefined): boolean {
@@ -839,11 +828,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         }
 
         const bearerToken = opts.backendBearerTokenProvider?.();
+        const requestSummary = trimToUndefined(args.request_summary)!;
+        const caseTitle = trimToUndefined(args.case_title);
         const topicTitle =
           trimToUndefined(args.topic_title) ??
-          (trimToUndefined(args.workflow_key)
-            ? humanizeWorkflowKey(trimToUndefined(args.workflow_key)!)
-            : undefined);
+          caseTitle ??
+          requestSummary;
         const workflowKey =
           trimToUndefined(args.workflow_key) ??
           (topicTitle ? slugifyWorkflowKey(topicTitle) : undefined);
@@ -852,9 +842,6 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             "enderai_begin_case requires topic_title or workflow_key so the case can be attached to a topic.",
           );
         }
-
-        const requestSummary = trimToUndefined(args.request_summary)!;
-        const caseTitle = trimToUndefined(args.case_title);
         const startRes = await enderaiFetch({
           method: "POST",
           path: "/api/v1/executions/start",
@@ -896,7 +883,6 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             path: "/api/v1/context-packs/build",
             bearerToken,
             json: pruneUndefined({
-              topic_id: ids.threadId,
               title: caseTitle ?? requestSummary,
               request_summary: requestSummary,
               aliases: args.aliases,
@@ -1045,7 +1031,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const status = trimToUndefined(args.status) ?? "done";
         if (!isTerminalCaseStatus(status)) {
           return toolError(
-            "enderai_finish_case requires a terminal status such as done, completed, closed, aborted, or failed.",
+            "enderai_finish_case requires a terminal status such as done, closed, aborted, failed, success, or error.",
           );
         }
 

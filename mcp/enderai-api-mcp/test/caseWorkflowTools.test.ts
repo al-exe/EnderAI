@@ -1,7 +1,7 @@
 import http from "node:http";
 import { randomUUID, webcrypto } from "node:crypto";
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { Client } from "@modelcontextprotocol/sdk/client";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -197,9 +197,9 @@ describe("guided case workflow MCP tools", () => {
       expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/context-packs/build");
       expect(mockFetch.mock.calls[2][0].toString()).toContain(`/api/v1/cases/${caseId}`);
       expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
-        topic_id: topicId,
         request_summary: "Hydration gap",
       });
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).not.toHaveProperty("topic_id");
 
       mockFetch
         .mockResolvedValueOnce(
@@ -301,6 +301,116 @@ describe("guided case workflow MCP tools", () => {
       });
       expect(summarizeToolText(afterFinish.content)).toContain(
         "Run enderai_begin_case first or provide case_id",
+      );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("does not invent a topic title from workflow_key alone", async () => {
+    const harness = await createHarness();
+    try {
+      const topicId = "33333333-3333-3333-3333-333333333333";
+      const caseId = "44444444-4444-4444-4444-444444444444";
+
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            thread: {
+              id: topicId,
+              title: "Hydration gap",
+              workflow_key: "core_model",
+              status: "open",
+            },
+            execution: {
+              id: caseId,
+              thread_id: topicId,
+              status: "running",
+              summary: "Hydration gap",
+            },
+            reused_thread: false,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "high", max_topics: 1 },
+            matched_topics: [],
+            selected_topic_ids: [topicId],
+            selected_case_ids: [caseId],
+            relevant_cases: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "high",
+              matched_signals: ["hydration gap"],
+              representative_cases: [],
+              recent_cases: [],
+              relevant_cases: [],
+              canonical_files: [],
+              canonical_symbols: [],
+              canonical_errors: [],
+              canonical_symptoms: [],
+              pinned_takeaways: [],
+              ambiguities: [],
+              questions: [],
+              negative_history: [],
+              builder_version: "v1",
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: caseId,
+            topic_id: topicId,
+            title: "Hydration gap",
+            status: "running",
+            input_summary: "Hydration gap",
+            summary_current: "Hydration gap",
+            files: [],
+            symbols: [],
+            errors: [],
+            symptoms: [],
+            commands: [],
+            hypotheses: [],
+            changes: [],
+            next_steps: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "high",
+            },
+          }),
+        );
+
+      const begin = await harness.client.callTool({
+        name: "enderai_begin_case",
+        arguments: {
+          workflow_key: "core_model",
+          request_summary: "Hydration gap",
+        },
+      });
+      const beginBody = JSON.parse(summarizeToolText(begin.content));
+      expect(beginBody.topic.title).toBe("Hydration gap");
+      expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+        thread: {
+          title: "Hydration gap",
+          workflow_key: "core_model",
+        },
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("keeps finish statuses aligned with backend terminal statuses", async () => {
+    const harness = await createHarness();
+    try {
+      const result = await harness.client.callTool({
+        name: "enderai_finish_case",
+        arguments: {
+          status: "completed",
+        },
+      });
+      expect(summarizeToolText(result.content)).toContain(
+        "terminal status such as done, closed, aborted, failed, success, or error",
       );
     } finally {
       await harness.close();
