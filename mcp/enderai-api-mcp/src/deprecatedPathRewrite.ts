@@ -29,5 +29,19 @@ export function rewriteDeprecatedApiPath(path: string): RewriteResult {
   // `/api/v1/library/*` -> `/api/v1/artifacts/*`
   apply(/^\/api\/v1\/library(\/|$)/, "/api/v1/artifacts$1", "library->artifacts");
 
+  // `/api/v1/tasks/*` -> `/api/v1/threads/*`
+  apply(/^\/api\/v1\/tasks(\/|$)/, "/api/v1/threads$1", "tasks->threads");
+
+  // `/api/v1/threads/{id}/runs/*` -> `/api/v1/threads/{id}/executions/*`
+  // This targets older "task runs" URLs after the tasks->threads rewrite.
+  apply(
+    /^\/api\/v1\/threads\/([^/]+)\/runs(\/|$)/,
+    "/api/v1/threads/$1/executions$2",
+    "thread runs->executions",
+  );
+
+  // `/api/v1/runs/*` -> `/api/v1/executions/*`
+  apply(/^\/api\/v1\/runs(\/|$)/, "/api/v1/executions$1", "runs->executions");
+
   return { path: out, rewrites };
 }

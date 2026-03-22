@@ -23,6 +23,7 @@ const DEFAULT_CONTEXT_PACK_CASE_LIMIT = 3;
 const POLICY_VERSION = "topic_case_v1";
 const WORKFLOW_MODEL = "topic_case_v1";
 const AUTH_MODEL = "single_token_hosted_mcp";
+const UuidStringSchema = z.string().uuid();
 
 const REDACT_KEYS = new Set([
   "authorization",
@@ -87,6 +88,7 @@ const BeginCaseArgsSchema = z
     acceptance_criteria: z.string().optional(),
     request_summary: z.string().min(1),
     case_title: z.string().min(1).optional(),
+    targets: z.array(z.unknown()).optional(),
     aliases: z.array(z.string()).optional(),
     files: z.array(z.string()).optional(),
     symbols: z.array(z.string()).optional(),
@@ -94,6 +96,7 @@ const BeginCaseArgsSchema = z
     symptoms: z.array(z.string()).optional(),
     auto_hydrate: z.boolean().optional(),
     max_cases_per_topic: z.number().int().positive().optional(),
+    reuse_within_seconds: z.number().int().nonnegative().optional(),
   })
   .strict()
   .refine(
@@ -177,7 +180,8 @@ const EnderaiRequestArgsSchema = z
     audit: z
       .object({
         intent: z.string().min(1).optional(),
-        case_id: z.string().uuid().optional(),
+        execution_id: z.string().uuid().optional(),
+        run_id: z.string().uuid().optional(),
       })
       .optional(),
   })
@@ -300,6 +304,24 @@ function isWriteLikeMethod(method: string): boolean {
   return !["GET", "HEAD", "OPTIONS"].includes(normalized);
 }
 
+function normalizeJsonArgument(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function isClosedCaseRecord(caseData: Record<string, any>): boolean {
+  const status = typeof caseData.status === "string" ? caseData.status : undefined;
+  const closedAt =
+    typeof caseData.closed_at === "string" ? trimToUndefined(caseData.closed_at) : undefined;
+  return Boolean(closedAt) || isTerminalCaseStatus(status);
+}
+
 function asRecord(value: unknown): Record<string, any> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, any>;
@@ -311,13 +333,16 @@ function pruneUndefined<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
-function extractCaseContextIds(
+function extractExecutionStartIds(
   resData: unknown,
-): { caseId?: string; topicId?: string } {
+): { executionId?: string; threadId?: string } {
   const data = asRecord(resData);
+  const execution = asRecord(data.execution);
+  const thread = asRecord(data.thread);
   return {
-    caseId: typeof data.id === "string" ? data.id : undefined,
-    topicId: typeof data.topic_id === "string" ? data.topic_id : undefined,
+    executionId:
+      typeof execution.id === "string" ? execution.id : undefined,
+    threadId: typeof thread.id === "string" ? thread.id : undefined,
   };
 }
 
@@ -350,45 +375,109 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
   );
 
   const auditState: {
-    caseId?: string;
-    topicId?: string;
+    executionId?: string;
+    threadId?: string;
     depth: number;
   } = { depth: 0 };
 
   function setActiveCaseContext(caseId?: string, topicId?: string): void {
-    if (caseId) auditState.caseId = caseId;
-    if (topicId) auditState.topicId = topicId;
+    if (caseId) auditState.executionId = caseId;
+    if (topicId) auditState.threadId = topicId;
   }
 
   function clearActiveCaseContext(): void {
-    delete auditState.caseId;
-    delete auditState.topicId;
+    delete auditState.executionId;
+    delete auditState.threadId;
   }
 
-  function resolveCaseId(explicitCaseId: string | undefined, toolName: string): string {
+  async function reconcileActiveCaseContext(params: {
+    bearerToken?: string;
+  } = {}): Promise<{
+    caseId: string | null;
+    topicId: string | null;
+    caseData: Record<string, any> | null;
+    cleared: boolean;
+  }> {
+    const activeCaseId = auditState.executionId;
+    if (!activeCaseId) {
+      return {
+        caseId: null,
+        topicId: auditState.threadId ?? null,
+        caseData: null,
+        cleared: false,
+      };
+    }
+
+    if (!UuidStringSchema.safeParse(activeCaseId).success) {
+      clearActiveCaseContext();
+      return { caseId: null, topicId: null, caseData: null, cleared: true };
+    }
+
+    const caseRes = await enderaiFetch({
+      method: "GET",
+      path: `/api/v1/cases/${activeCaseId}`,
+      bearerToken: params.bearerToken,
+    });
+
+    if (caseRes.status === 404) {
+      clearActiveCaseContext();
+      return { caseId: null, topicId: null, caseData: null, cleared: true };
+    }
+
+    if (!caseRes.ok) {
+      return {
+        caseId: activeCaseId,
+        topicId: auditState.threadId ?? null,
+        caseData: null,
+        cleared: false,
+      };
+    }
+
+    const caseData = asRecord(caseRes.data);
+    const topicId =
+      typeof caseData.topic_id === "string" ? caseData.topic_id : auditState.threadId ?? null;
+    if (isClosedCaseRecord(caseData)) {
+      clearActiveCaseContext();
+      return { caseId: null, topicId: null, caseData, cleared: true };
+    }
+
+    setActiveCaseContext(activeCaseId, topicId ?? undefined);
+    return {
+      caseId: activeCaseId,
+      topicId,
+      caseData,
+      cleared: false,
+    };
+  }
+
+  async function resolveCaseId(
+    explicitCaseId: string | undefined,
+    toolName: string,
+    bearerToken?: string,
+  ): Promise<string> {
+    await reconcileActiveCaseContext({ bearerToken });
     if (explicitCaseId) {
-      if (auditState.caseId && auditState.caseId !== explicitCaseId) {
+      if (auditState.executionId && auditState.executionId !== explicitCaseId) {
         throw new Error(
-          `${toolName} is currently attached to case ${auditState.caseId}. Run enderai_finish_case before switching to case ${explicitCaseId}.`,
+          `${toolName} is currently attached to case ${auditState.executionId}. Run enderai_finish_case before switching to case ${explicitCaseId}.`,
         );
       }
-      auditState.caseId = explicitCaseId;
       return explicitCaseId;
     }
-    if (auditState.caseId) return auditState.caseId;
+    if (auditState.executionId) return auditState.executionId;
     throw new Error(
       `${toolName} requires an active case. Run enderai_begin_case first or provide case_id.`,
     );
   }
 
-  async function tryCreateCaseEvent(params: {
+  async function tryCreateRunEvent(params: {
     bearerToken?: string;
-    caseId?: string;
+    executionId?: string;
     type: string;
     message: string;
     data: unknown;
   }): Promise<void> {
-    if (!params.caseId) return;
+    if (!params.executionId) return;
     if (!params.bearerToken) return;
     if (auditState.depth > 0) return;
 
@@ -396,7 +485,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     try {
       await enderaiFetch({
         method: "POST",
-        path: `/api/v1/cases/${params.caseId}/events`,
+        path: `/api/v1/executions/${params.executionId}/events`,
         bearerToken: params.bearerToken,
         json: {
           type: params.type,
@@ -411,7 +500,37 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     }
   }
 
-  async function createCaseEvent(params: {
+  async function tryAutoLinkLibraryItem(params: {
+    bearerToken?: string;
+    executionId?: string;
+    artifactId?: string;
+    createdAt?: string | null;
+  }): Promise<unknown | null> {
+    if (!params.executionId || !params.artifactId || !params.bearerToken) return null;
+    if (auditState.depth > 0) return null;
+
+    auditState.depth += 1;
+    try {
+      const res = await enderaiFetch({
+        method: "POST",
+        path: `/api/v1/executions/${params.executionId}/artifact-links`,
+        bearerToken: params.bearerToken,
+        json: {
+          artifact_id: params.artifactId,
+          relation: "created",
+          created_at: params.createdAt ?? null,
+        },
+      });
+      return res;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { _error: msg };
+    } finally {
+      auditState.depth -= 1;
+    }
+  }
+
+  async function createExecutionEvent(params: {
     bearerToken?: string;
     caseId: string;
     type: string;
@@ -420,7 +539,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
   }): Promise<ResponseSummary> {
     return await enderaiFetch({
       method: "POST",
-      path: `/api/v1/cases/${params.caseId}/events`,
+      path: `/api/v1/executions/${params.caseId}/events`,
       bearerToken: params.bearerToken,
       json: {
         type: params.type,
@@ -432,15 +551,15 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
   async function auditWorkflowTool(params: {
     bearerToken?: string;
-    caseId?: string;
+    executionId?: string;
     message: string;
     tool: string;
     request: unknown;
     response: unknown;
   }): Promise<void> {
-    await tryCreateCaseEvent({
+    await tryCreateRunEvent({
       bearerToken: params.bearerToken,
-      caseId: params.caseId,
+      executionId: params.executionId,
       type: "mcp",
       message: params.message,
       data: capJson(
@@ -448,9 +567,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           tool: params.tool,
           request: params.request,
           response: params.response,
-          case_context: {
-            case_id: params.caseId ?? auditState.caseId ?? null,
-            topic_id: auditState.topicId ?? null,
+          execution_context: {
+            execution_id: params.executionId ?? auditState.executionId ?? null,
+            thread_id: auditState.threadId ?? null,
           },
         }),
       ),
@@ -469,9 +588,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
       bearerToken: sessionToken,
     });
 
-    await tryCreateCaseEvent({
+    await tryCreateRunEvent({
       bearerToken: sessionToken,
-      caseId: auditState.caseId,
+      executionId: auditState.executionId,
       type: "mcp",
       message: params.message,
       data: capJson(
@@ -479,9 +598,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           tool: params.name,
           request: { method: "GET", path: params.path },
           response: res,
-          case_context: {
-            case_id: auditState.caseId ?? null,
-            topic_id: auditState.topicId ?? null,
+          execution_context: {
+            execution_id: auditState.executionId ?? null,
+            thread_id: auditState.threadId ?? null,
           },
         }),
       ),
@@ -532,6 +651,11 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 type: "string",
                 description: "Optional Case title if it should differ from the Topic title.",
               },
+              targets: {
+                type: "array",
+                items: {},
+                description: "Optional Execution targets to attach to the new case.",
+              },
               aliases: {
                 ...stringArrayJsonSchema,
                 description: "Optional extra aliases to help ContextPack selection.",
@@ -562,6 +686,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 description:
                   "Optional limit for how many prior cases each hydrated topic contributes to the ContextPack.",
                 minimum: 1,
+              },
+              reuse_within_seconds: {
+                type: "integer",
+                description:
+                  "Recent-topic reuse window passed to the backend execution-start endpoint.",
+                minimum: 0,
               },
             },
             required: ["request_summary"],
@@ -631,7 +761,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               progress_note: {
                 type: "string",
                 description:
-                  "Optional progress note to append as a Case event after the case patch succeeds.",
+                  "Optional progress note to append as an Execution event after the case patch succeeds.",
               },
               progress_data: {
                 ...looseObjectJsonSchema,
@@ -704,7 +834,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               closing_note: {
                 type: "string",
                 description:
-                  "Optional closing note to append as a Case event after the case closes.",
+                  "Optional closing note to append as an Execution event after the case closes.",
               },
               closing_data: {
                 ...looseObjectJsonSchema,
@@ -725,7 +855,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               path: {
                 type: "string",
                 description:
-                  'Request path starting with "/". Example: "/api/v1/cases/".',
+                  'Request path starting with "/". Example: "/api/v1/threads/".',
               },
               query: {
                 type: "object",
@@ -757,17 +887,22 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               audit: {
                 type: "object",
                 description:
-                  "Optional per-call audit metadata. When a Case id is known, this server can append an Event with request/response (secrets redacted).",
+                  "Optional per-call audit metadata. When an Execution id is known, this server can append an Event with request/response (secrets redacted).",
                 additionalProperties: false,
                 properties: {
                   intent: {
                     type: "string",
                     description: "Human-readable reason for the call.",
                   },
-                  case_id: {
+                  run_id: {
                     type: "string",
                     description:
-                      "Optional case id for audit events. Write-like calls still require an active case started through enderai_begin_case.",
+                      "Deprecated: use execution_id. Optional audit execution id when this MCP session is already attached to that case.",
+                  },
+                  execution_id: {
+                    type: "string",
+                    description:
+                      "Optional execution id for audit events. Write-like calls still require an active case started through enderai_begin_case.",
                   },
                 },
               },
@@ -801,13 +936,14 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     try {
       if (name === "enderai_begin_case") {
         const args = BeginCaseArgsSchema.parse(req.params.arguments ?? {});
-        if (auditState.caseId) {
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        await reconcileActiveCaseContext({ bearerToken });
+        if (auditState.executionId) {
           return toolError(
-            `A case is already active in this MCP session (${auditState.caseId}). Run enderai_finish_case before beginning a new one.`,
+            `A case is already active in this MCP session (${auditState.executionId}). Run enderai_finish_case before beginning a new one.`,
           );
         }
 
-        const bearerToken = opts.backendBearerTokenProvider?.();
         const topicTitle =
           trimToUndefined(args.topic_title) ??
           (trimToUndefined(args.workflow_key)
@@ -824,53 +960,39 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         const requestSummary = trimToUndefined(args.request_summary)!;
         const caseTitle = trimToUndefined(args.case_title);
-        const topicLookupRes = await enderaiFetch({
-          method: "GET",
-          path: "/api/v1/topics/",
+        const startRes = await enderaiFetch({
+          method: "POST",
+          path: "/api/v1/executions/start",
           bearerToken,
-          query: {
-            workflow_key: workflowKey,
-            limit: 1,
-          },
-        });
-        if (!topicLookupRes.ok) {
-          throw new Error(
-            `enderai_begin_case failed to load topics: ${extractErrorDetail(topicLookupRes)} (status ${topicLookupRes.status}).`,
-          );
-        }
-
-        const topicLookupData = asRecord(topicLookupRes.data);
-        const topicMatches = Array.isArray(topicLookupData.data) ? topicLookupData.data : [];
-        let topic = topicMatches.length > 0 ? asRecord(topicMatches[0]) : null;
-        let reusedTopic = topic !== null;
-
-        if (!topic || typeof topic.id !== "string") {
-          const topicCreateRes = await enderaiFetch({
-            method: "POST",
-            path: "/api/v1/topics/",
-            bearerToken,
-            json: pruneUndefined({
+          json: {
+            thread: pruneUndefined({
               title: topicTitle,
               workflow_key: workflowKey,
-              description: trimToUndefined(args.goal),
-              aliases: args.aliases,
+              intent_key: trimToUndefined(args.intent_key),
+              goal: trimToUndefined(args.goal),
+              acceptance_criteria: trimToUndefined(args.acceptance_criteria),
             }),
-          });
-          if (!topicCreateRes.ok) {
-            throw new Error(
-              `enderai_begin_case failed to create a topic: ${extractErrorDetail(topicCreateRes)} (status ${topicCreateRes.status}).`,
-            );
-          }
-          topic = asRecord(topicCreateRes.data);
-          reusedTopic = false;
-        }
-
-        const topicId = typeof topic.id === "string" ? topic.id : undefined;
-        if (!topicId) {
+            execution: {
+              summary: caseTitle ?? requestSummary,
+              targets: args.targets ?? [],
+            },
+            reuse_within_seconds:
+              args.reuse_within_seconds ?? DEFAULT_REUSE_WINDOW_SECONDS,
+          },
+        });
+        if (!startRes.ok) {
           throw new Error(
-            "enderai_begin_case did not receive a topic id from the canonical topics API.",
+            `enderai_begin_case failed to start a case: ${extractErrorDetail(startRes)} (status ${startRes.status}).`,
           );
         }
+
+        const ids = extractExecutionStartIds(startRes.data);
+        if (!ids.executionId || !ids.threadId) {
+          throw new Error(
+            "enderai_begin_case did not receive execution and topic ids from /api/v1/executions/start.",
+          );
+        }
+        setActiveCaseContext(ids.executionId, ids.threadId);
 
         let contextPack: unknown | null = null;
         if (args.auto_hydrate !== false) {
@@ -879,7 +1001,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             path: "/api/v1/context-packs/build",
             bearerToken,
             json: pruneUndefined({
-              topic_id: topicId,
+              topic_id: ids.threadId,
               title: caseTitle ?? requestSummary,
               request_summary: requestSummary,
               aliases: args.aliases,
@@ -899,11 +1021,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           contextPack = contextPackRes.data;
         }
 
-        const caseCreate = pruneUndefined({
-          topic_id: topicId,
-          title: caseTitle ?? requestSummary,
-          status: "open",
-          source: "mcp",
+        const casePatch = pruneUndefined({
+          title: caseTitle,
           input_summary: requestSummary,
           summary_current: requestSummary,
           files: args.files,
@@ -913,25 +1032,18 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           context_pack_snapshot: asRecord(contextPack).context_pack_snapshot,
         });
         const caseRes = await enderaiFetch({
-          method: "POST",
-          path: "/api/v1/cases/",
+          method: "PATCH",
+          path: `/api/v1/cases/${ids.executionId}`,
           bearerToken,
-          json: caseCreate,
+          json: casePatch,
         });
         if (!caseRes.ok) {
           throw new Error(
-            `enderai_begin_case failed to create the canonical case: ${extractErrorDetail(caseRes)} (status ${caseRes.status}).`,
+            `enderai_begin_case failed to initialize the case document: ${extractErrorDetail(caseRes)} (status ${caseRes.status}).`,
           );
         }
 
-        const caseIds = extractCaseContextIds(caseRes.data);
-        if (!caseIds.caseId) {
-          throw new Error(
-            "enderai_begin_case did not receive a case id from the canonical cases API.",
-          );
-        }
-        setActiveCaseContext(caseIds.caseId, caseIds.topicId ?? topicId);
-
+        const startData = asRecord(startRes.data);
         const contextPackRecord = asRecord(contextPack);
         const contextPackSnapshot = asRecord(contextPackRecord.context_pack_snapshot);
         const relevantCases = Array.isArray(contextPackRecord.relevant_cases)
@@ -943,7 +1055,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           policy_version: POLICY_VERSION,
           workflow_model: WORKFLOW_MODEL,
           auth_model: AUTH_MODEL,
-          topic: topic,
+          topic: startData.thread ?? { id: ids.threadId, title: topicTitle, workflow_key: workflowKey },
           case: caseRes.data,
           context_pack: contextPack,
           hydration: {
@@ -953,22 +1065,22 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             matched_topic_id:
               typeof contextPackSnapshot.topic_id === "string"
                 ? contextPackSnapshot.topic_id
-                : topicId,
+                : ids.threadId,
             relevant_case_count: relevantCases.length,
             context_found:
               Boolean(contextPackRecord.context_pack_snapshot) || relevantCases.length > 0,
           },
-          reused_topic: reusedTopic,
+          reused_topic: Boolean(startData.reused_thread),
           next: {
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
-            case_id: caseIds.caseId,
-            topic_id: caseIds.topicId ?? topicId,
+            case_id: ids.executionId,
+            topic_id: ids.threadId,
           },
         };
         await auditWorkflowTool({
           bearerToken,
-          caseId: caseIds.caseId,
+          executionId: ids.executionId,
           message: "Begin case",
           tool: "enderai_begin_case",
           request: args,
@@ -979,8 +1091,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
       if (name === "enderai_update_case") {
         const args = UpdateCaseArgsSchema.parse(req.params.arguments ?? {});
-        const caseId = resolveCaseId(args.case_id, "enderai_update_case");
         const bearerToken = opts.backendBearerTokenProvider?.();
+        const caseId = await resolveCaseId(args.case_id, "enderai_update_case", bearerToken);
 
         const casePatch = pruneUndefined({
           title: trimToUndefined(args.title),
@@ -1012,12 +1124,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const caseData = asRecord(caseRes.data);
         setActiveCaseContext(
           caseId,
-          typeof caseData.topic_id === "string" ? caseData.topic_id : auditState.topicId,
+          typeof caseData.topic_id === "string" ? caseData.topic_id : auditState.threadId,
         );
 
         let progressEvent: unknown | null = null;
         if (args.progress_note) {
-          const progressRes = await createCaseEvent({
+          const progressRes = await createExecutionEvent({
             bearerToken,
             caseId,
             type: "mcp_progress",
@@ -1041,12 +1153,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           next: {
             finish_tool: "enderai_finish_case",
             case_id: caseId,
-            topic_id: caseData.topic_id ?? auditState.topicId ?? null,
+            topic_id: caseData.topic_id ?? auditState.threadId ?? null,
           },
         };
         await auditWorkflowTool({
           bearerToken,
-          caseId,
+          executionId: caseId,
           message: "Update case",
           tool: "enderai_update_case",
           request: args,
@@ -1064,8 +1176,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           );
         }
 
-        const caseId = resolveCaseId(args.case_id, "enderai_finish_case");
         const bearerToken = opts.backendBearerTokenProvider?.();
+        const caseId = await resolveCaseId(args.case_id, "enderai_finish_case", bearerToken);
         const casePatch = pruneUndefined({
           status,
           summary_current: trimToUndefined(args.summary_current),
@@ -1095,45 +1207,49 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const caseData = asRecord(caseRes.data);
         setActiveCaseContext(
           caseId,
-          typeof caseData.topic_id === "string" ? caseData.topic_id : auditState.topicId,
+          typeof caseData.topic_id === "string" ? caseData.topic_id : auditState.threadId,
         );
+        const shouldClearContext = isClosedCaseRecord(caseData);
 
-        let closingEvent: unknown | null = null;
-        if (args.closing_note) {
-          const closingRes = await createCaseEvent({
-            bearerToken,
-            caseId,
-            type: "mcp_finish",
-            message: args.closing_note,
-            data: args.closing_data ?? {},
-          });
-          if (!closingRes.ok) {
-            throw new Error(
-              `enderai_finish_case failed to append the closing event: ${extractErrorDetail(closingRes)} (status ${closingRes.status}).`,
-            );
+        try {
+          let closingEvent: unknown | null = null;
+          if (args.closing_note) {
+            const closingRes = await createExecutionEvent({
+              bearerToken,
+              caseId,
+              type: "mcp_finish",
+              message: args.closing_note,
+              data: args.closing_data ?? {},
+            });
+            if (!closingRes.ok) {
+              throw new Error(
+                `enderai_finish_case failed to append the closing event: ${extractErrorDetail(closingRes)} (status ${closingRes.status}).`,
+              );
+            }
+            closingEvent = closingRes.data;
           }
-          closingEvent = closingRes.data;
-        }
 
-        const result = {
-          case: caseRes.data,
-          closing_event: closingEvent,
-          session_context_cleared: true,
-          next: {
-            begin_tool: "enderai_begin_case",
-            topic_id: caseData.topic_id ?? auditState.topicId ?? null,
-          },
-        };
-        await auditWorkflowTool({
-          bearerToken,
-          caseId,
-          message: "Finish case",
-          tool: "enderai_finish_case",
-          request: args,
-          response: result,
-        });
-        clearActiveCaseContext();
-        return toolJson(result);
+          const result = {
+            case: caseRes.data,
+            closing_event: closingEvent,
+            session_context_cleared: true,
+            next: {
+              begin_tool: "enderai_begin_case",
+              topic_id: caseData.topic_id ?? auditState.threadId ?? null,
+            },
+          };
+          await auditWorkflowTool({
+            bearerToken,
+            executionId: caseId,
+            message: "Finish case",
+            tool: "enderai_finish_case",
+            request: args,
+            response: result,
+          });
+          return toolJson(result);
+        } finally {
+          if (shouldClearContext) clearActiveCaseContext();
+        }
       }
 
       if (name === "enderai_request") {
@@ -1142,48 +1258,70 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const method = args.method.toUpperCase();
         const sessionToken = opts.backendBearerTokenProvider?.();
         const bearerToken = reqArgs.bearerToken ?? sessionToken;
-        const requestedAuditCaseId = audit?.case_id;
-        const auditCaseId = auditState.caseId;
+        const requestedAuditExecutionId = audit?.execution_id ?? audit?.run_id;
+        const auditExecutionId = auditState.executionId;
         const auditIntent = audit?.intent;
         const unsafeWriteReason = trimToUndefined(args.unsafe_write_reason);
 
         if (
-          requestedAuditCaseId &&
-          auditCaseId &&
-          requestedAuditCaseId !== auditCaseId
+          requestedAuditExecutionId &&
+          auditExecutionId &&
+          requestedAuditExecutionId !== auditExecutionId
         ) {
           return toolError(
-            `enderai_request is currently attached to case ${auditCaseId}. Run enderai_finish_case before switching to case ${requestedAuditCaseId}.`,
+            `enderai_request is currently attached to case ${auditExecutionId}. Run enderai_finish_case before switching to case ${requestedAuditExecutionId}.`,
           );
         }
 
         if (
           isWriteLikeMethod(method) &&
-          !auditCaseId &&
+          !auditExecutionId &&
           !unsafeWriteReason
         ) {
           return toolError(
-            "enderai_request write-like calls require an active case. Run enderai_begin_case first so EnderAI can auto-hydrate relevant context; audit.case_id does not replace an active case. You can also provide unsafe_write_reason for an explicit escape hatch.",
+            "enderai_request write-like calls require an active case. Run enderai_begin_case first so EnderAI can auto-hydrate relevant context; audit.execution_id does not replace an active case. You can also provide unsafe_write_reason for an explicit escape hatch.",
           );
         }
 
         const rewrite = rewriteDeprecatedApiPath(reqArgs.path);
         const effectivePath = rewrite.path;
+        const normalizedJson = normalizeJsonArgument(reqArgs.json);
         const res = await enderaiFetch({
           ...reqArgs,
           path: effectivePath,
           bearerToken,
+          json: normalizedJson,
         });
 
-        if (res.ok) {
-          const ids = extractCaseContextIds(res.data);
-          if (ids.caseId || ids.topicId) {
-            setActiveCaseContext(ids.caseId, ids.topicId);
-          }
+        const isExecutionStart =
+          method === "POST" &&
+          effectivePath.replace(/\/+$/, "") === "/api/v1/executions/start";
+        if (isExecutionStart && res.ok) {
+          const ids = extractExecutionStartIds(res.data);
+          setActiveCaseContext(ids.executionId, ids.threadId);
         }
 
         const auto: Record<string, unknown> = {};
         if (rewrite.rewrites.length > 0) auto.path_rewrite = rewrite.rewrites;
+
+        const normalizedPath = effectivePath.replace(/\/+$/, "");
+        const isArtifactCreate =
+          method === "POST" &&
+          normalizedPath === "/api/v1/artifacts";
+        if (isArtifactCreate && res.ok) {
+          const data = asRecord(res.data);
+          const artifactId =
+            typeof data.id === "string" ? data.id : undefined;
+          const createdAt =
+            typeof data.created_at === "string" ? data.created_at : null;
+          const linkRes = await tryAutoLinkLibraryItem({
+            bearerToken,
+            executionId: auditExecutionId ?? auditState.executionId,
+            artifactId,
+            createdAt,
+          });
+          if (linkRes) auto.artifact_link = capJson(redactSecrets(linkRes));
+        }
 
         const auditData = capJson(
           redactSecrets({
@@ -1202,9 +1340,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             },
             response: res,
             auto,
-            case_context: {
-              case_id: auditCaseId ?? auditState.caseId ?? null,
-              topic_id: auditState.topicId ?? null,
+            execution_context: {
+              execution_id: auditExecutionId ?? auditState.executionId ?? null,
+              thread_id: auditState.threadId ?? null,
             },
           }),
         );
@@ -1213,9 +1351,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           `${args.method.toUpperCase()} ${effectivePath}${
             effectivePath === args.path ? "" : " (rewritten)"
           }`;
-        await tryCreateCaseEvent({
+        await tryCreateRunEvent({
           bearerToken,
-          caseId: auditCaseId ?? auditState.caseId,
+          executionId: auditExecutionId ?? auditState.executionId,
           type: "mcp",
           message,
           data: auditData,
@@ -1227,6 +1365,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
       if (name === "enderai_session_info") {
         const bearerToken =
           opts.backendBearerTokenProvider?.() ?? loadConfig().bearerToken;
+        await reconcileActiveCaseContext({ bearerToken });
         let user: Record<string, unknown> | null = null;
 
         if (bearerToken) {
@@ -1256,8 +1395,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           workflow_model: WORKFLOW_MODEL,
           auth_model: AUTH_MODEL,
           user,
-          active_case_id: auditState.caseId ?? null,
-          active_topic_id: auditState.topicId ?? null,
+          active_case_id: auditState.executionId ?? null,
+          active_topic_id: auditState.threadId ?? null,
           session_ready: Boolean(bearerToken),
           next: {
             begin_tool: "enderai_begin_case",
