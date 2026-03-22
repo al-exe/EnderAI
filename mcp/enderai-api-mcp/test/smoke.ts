@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+import {
+  assertRequiredHookRoutes,
+  assertRequiredToolNames,
+  parseToolTextJson,
+  summarizeToolText,
+} from "./hookHealth.js";
+
 async function main(): Promise<void> {
   const baseUrl = (process.env.ENDERAI_BASE_URL ?? "https://enderai-backend.onrender.com").trim();
   const bearerToken = process.env.ENDERAI_BEARER_TOKEN?.trim();
@@ -31,27 +38,29 @@ async function main(): Promise<void> {
 
   const tools = await client.listTools();
   const toolNames = tools.tools.map((t) => t.name).sort();
+  assertRequiredToolNames(toolNames);
   // eslint-disable-next-line no-console
   console.log("tools:", toolNames.join(", "));
 
   const health = await client.callTool({ name: "enderai_health_check", arguments: {} });
+  const healthPayload = parseToolTextJson<any>(health.content);
+  if (!healthPayload?.ok) {
+    throw new Error(`enderai_health_check failed: ${summarizeToolText(health.content)}`);
+  }
   // eslint-disable-next-line no-console
   console.log("enderai_health_check:", summarizeToolText(health.content));
 
+  const sessionInfo = await client.callTool({ name: "enderai_session_info", arguments: {} });
+  // eslint-disable-next-line no-console
+  console.log("enderai_session_info:", summarizeToolText(sessionInfo.content));
+
   const openapi = await client.callTool({ name: "enderai_openapi", arguments: {} });
+  const openapiPayload = parseToolTextJson<any>(openapi.content);
+  assertRequiredHookRoutes(openapiPayload);
   // eslint-disable-next-line no-console
   console.log("enderai_openapi:", summarizeToolText(openapi.content));
 
   await client.close();
-}
-
-function summarizeToolText(content: unknown): string {
-  // Our server returns a single `text` item containing JSON string.
-  if (!Array.isArray(content) || content.length === 0) return String(content);
-  const first: any = content[0];
-  const text = typeof first?.text === "string" ? first.text : JSON.stringify(first);
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > 220 ? `${oneLine.slice(0, 220)}...` : oneLine;
 }
 
 main().catch((err) => {

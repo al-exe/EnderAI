@@ -6,6 +6,12 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
 import { createMcpServer } from "../src/mcpServer.js";
+import {
+  assertRequiredHookRoutes,
+  assertRequiredToolNames,
+  parseToolTextJson,
+  summarizeToolText,
+} from "./hookHealth.js";
 
 // Some Node runtimes (and some TS loaders) do not expose `globalThis.crypto` by default.
 if (!(globalThis as any).crypto) {
@@ -76,12 +82,23 @@ async function main(): Promise<void> {
 
   const tools = await client.listTools();
   const toolNames = tools.tools.map((t) => t.name).sort();
+  assertRequiredToolNames(toolNames);
   // eslint-disable-next-line no-console
   console.log("tools:", toolNames.join(", "));
 
   const health = await client.callTool({ name: "enderai_health_check", arguments: {} });
+  const healthPayload = parseToolTextJson<any>(health.content);
+  if (!healthPayload?.ok) {
+    throw new Error(`enderai_health_check failed: ${summarizeToolText(health.content)}`);
+  }
   // eslint-disable-next-line no-console
   console.log("enderai_health_check:", summarizeToolText(health.content));
+
+  const openapi = await client.callTool({ name: "enderai_openapi", arguments: {} });
+  const openapiPayload = parseToolTextJson<any>(openapi.content);
+  assertRequiredHookRoutes(openapiPayload);
+  // eslint-disable-next-line no-console
+  console.log("enderai_openapi:", summarizeToolText(openapi.content));
 
   await client.close();
 
@@ -184,14 +201,6 @@ async function sendWebResponse(res: http.ServerResponse, webRes: Response): Prom
     reader.releaseLock();
   }
   res.end();
-}
-
-function summarizeToolText(content: unknown): string {
-  if (!Array.isArray(content) || content.length === 0) return String(content);
-  const first: any = content[0];
-  const text = typeof first?.text === "string" ? first.text : JSON.stringify(first);
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > 220 ? `${oneLine.slice(0, 220)}...` : oneLine;
 }
 
 main().catch((err) => {
