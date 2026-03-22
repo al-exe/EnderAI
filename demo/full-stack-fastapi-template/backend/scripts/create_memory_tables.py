@@ -12,7 +12,9 @@ legacy table/column names used in early iterations of the system.
 """
 
 from sqlalchemy import text
+from sqlmodel import Session
 
+from app.core.topics import refresh_topic_rollup
 from app.core.db import engine
 
 
@@ -350,6 +352,11 @@ def main() -> None:
     with engine.begin() as conn:
         for stmt in DDL:
             conn.execute(text(stmt))
+    with Session(engine) as session:
+        topic_ids = session.connection().execute(text("select id from public.thread")).scalars().all()
+        for topic_id in topic_ids:
+            refresh_topic_rollup(session, topic_id, persist=True)
+        session.commit()
     print("OK: memory tables ensured")
 
 

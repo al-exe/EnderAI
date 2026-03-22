@@ -45,7 +45,9 @@ def _ensure_topic_case_tables(db: Session) -> None:
     db.commit()
 
 
-def test_topic_rollup_match_and_context_pack(client, normal_user_token_headers, db: Session) -> None:
+def test_topic_rollup_match_and_context_pack(
+    client, superuser_token_headers, normal_user_token_headers, db: Session
+) -> None:
     _ensure_topic_case_tables(db)
 
     started_a = client.post(
@@ -133,6 +135,12 @@ def test_topic_rollup_match_and_context_pack(client, normal_user_token_headers, 
     assert rollup_a_body["canonical_files"] == ["backend/app/api/routes/cases.py"]
     assert rollup_a_body["open_questions"] == ["matching still needs broader topic vocabulary"]
 
+    db.connection().execute(
+        text("update public.thread set topic_rollup = '{}'::jsonb where id = :topic_id"),
+        {"topic_id": topic_a_id},
+    )
+    db.commit()
+
     refresh_b = client.post(
         f"/api/v1/topics/{topic_b_id}/rollup/refresh",
         headers=normal_user_token_headers,
@@ -181,3 +189,33 @@ def test_topic_rollup_match_and_context_pack(client, normal_user_token_headers, 
     assert pack_body["context_pack_snapshot"]["questions"] == ["matching still needs broader topic vocabulary"]
     assert pack_body["context_pack_snapshot"]["relevant_cases"][0]["case_id"] == case_a_id
     assert "missing command history" in pack_body["context_pack_snapshot"]["matched_signals"]
+
+    event_res = client.post(
+        f"/api/v1/executions/{case_a_id}/events",
+        headers=normal_user_token_headers,
+        json={"type": "note", "message": "very noisy event-only activity"},
+    )
+    assert event_res.status_code == 201, event_res.text
+
+    topic_after_event = client.get(
+        f"/api/v1/topics/{topic_a_id}",
+        headers=normal_user_token_headers,
+    )
+    assert topic_after_event.status_code == 200, topic_after_event.text
+    assert topic_after_event.json()["rollup_summary"] == topic_a_body["rollup_summary"]
+
+    deleted = client.delete(
+        f"/api/v1/executions/{case_b_id}",
+        headers=superuser_token_headers,
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    topic_b_after_delete = client.get(
+        f"/api/v1/topics/{topic_b_id}",
+        headers=normal_user_token_headers,
+    )
+    assert topic_b_after_delete.status_code == 200, topic_b_after_delete.text
+    topic_b_after_delete_body = topic_b_after_delete.json()
+    assert topic_b_after_delete_body["case_count"] == 0
+    assert topic_b_after_delete_body["representative_case_ids"] == []
+    assert topic_b_after_delete_body["recent_case_ids"] == []
