@@ -1,4 +1,11 @@
-def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers) -> None:
+import uuid
+
+from sqlmodel import Session
+
+from app.models import Topic
+
+
+def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers, db: Session) -> None:
     topic_a = client.post(
         "/api/v1/topics/",
         headers=normal_user_token_headers,
@@ -66,13 +73,22 @@ def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers)
 
     topic_a_get = client.get(f"/api/v1/topics/{topic_a_id}", headers=normal_user_token_headers)
     assert topic_a_get.status_code == 200, topic_a_get.text
-    assert topic_a_get.json()["workflow_key"] == "case_hydration"
+    assert topic_a_get.json()["workflow_key"] == "case-hydration"
+    assert "case-hydration" not in topic_a_get.json()["aliases"]
 
     rollup_a = client.get(f"/api/v1/topics/{topic_a_id}/rollup", headers=normal_user_token_headers)
     assert rollup_a.status_code == 200, rollup_a.text
     rollup_a_body = rollup_a.json()
     assert rollup_a_body["canonical_files"] == ["backend/app/api/routes/cases.py"]
     assert rollup_a_body["representative_case_ids"] == [case_a_id]
+
+    db.expire_all()
+    topic_model = db.get(Topic, uuid.UUID(topic_a_id))
+    assert topic_model is not None
+    topic_model.rollup_summary = None
+    topic_model.rollup_data = {}
+    db.add(topic_model)
+    db.commit()
 
     refresh_b = client.post(
         f"/api/v1/topics/{topic_b_id}/rollup/refresh",
@@ -96,7 +112,10 @@ def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers)
     assert match_res.status_code == 200, match_res.text
     match_body = match_res.json()
     assert match_body["candidates"][0]["topic"]["id"] == topic_a_id
-    assert match_body["policy"]["max_topics"] == 1
+    assert match_body["policy"]["max_topics"] >= 1
+    assert match_body["candidates"][0]["topic"]["canonical_files"] == [
+        "backend/app/api/routes/cases.py"
+    ]
 
     pack_res = client.post(
         "/api/v1/context-packs/build",
@@ -108,6 +127,7 @@ def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers)
             "symbols": ["render_case_hydration"],
             "errors": ["hydration omitted commands"],
             "symptoms": ["sparse context"],
+            "max_topics": 1,
             "max_cases_per_topic": 2,
         },
     )

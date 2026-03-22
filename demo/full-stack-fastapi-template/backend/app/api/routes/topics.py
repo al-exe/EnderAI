@@ -7,7 +7,7 @@ from sqlmodel import select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.topics import (
     allocate_topic_identity,
-    build_topic_public,
+    build_topic_public_current,
     build_topic_rollup_public,
     count_topics,
     list_topic_models,
@@ -39,7 +39,7 @@ def read_topics(
         limit=limit,
     )
     return TopicsPublic(
-        data=[build_topic_public(topic) for topic in topics],
+        data=[build_topic_public_current(session, topic) for topic in topics],
         count=count_topics(session, status=status, q=q, workflow_key=workflow_key),
     )
 
@@ -74,7 +74,7 @@ def create_topic(
     refresh_topic_rollup(session, topic.id, persist=True)
     session.commit()
     session.refresh(topic)
-    return build_topic_public(topic)
+    return build_topic_public_current(session, topic)
 
 
 @router.post("/match", response_model=TopicMatchResult)
@@ -91,7 +91,7 @@ def read_topic(session: SessionDep, current_user: CurrentUser, topic_id: uuid.UU
     topic = read_topic_model(session, topic_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
-    return build_topic_public(topic)
+    return build_topic_public_current(session, topic)
 
 
 @router.patch("/{topic_id}", response_model=TopicPublic)
@@ -143,7 +143,7 @@ def update_topic(
     refresh_topic_rollup(session, topic.id, persist=True)
     session.commit()
     session.refresh(topic)
-    return build_topic_public(topic)
+    return build_topic_public_current(session, topic)
 
 
 @router.get("/{topic_id}/rollup", response_model=TopicRollupPublic)

@@ -1,4 +1,8 @@
+import uuid
+
 from sqlmodel import Session
+
+from app.models import CaseRecord
 
 
 def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db: Session) -> None:
@@ -90,6 +94,31 @@ def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db
         "backend/app/core/cases.py",
     ]
     assert updated_body["commands"][0]["cmd"] == "pytest backend/tests/api/test_cases_api.py"
+
+    partial_snapshot = client.patch(
+        f"/api/v1/cases/{case_id}",
+        headers=normal_user_token_headers,
+        json={
+            "context_pack_snapshot": {
+                "builder_version": "v2",
+                "topic_id": str(uuid.uuid4()),
+                "case_id": str(uuid.uuid4()),
+            }
+        },
+    )
+    assert partial_snapshot.status_code == 200, partial_snapshot.text
+    partial_snapshot_body = partial_snapshot.json()
+    assert partial_snapshot_body["context_pack_snapshot"]["builder_version"] == "v2"
+    assert partial_snapshot_body["context_pack_snapshot"]["topic_id"] == topic_id
+    assert partial_snapshot_body["context_pack_snapshot"]["case_id"] == case_id
+    assert partial_snapshot_body["context_pack_snapshot"]["canonical_files"] == [
+        "backend/app/api/routes/cases.py"
+    ]
+
+    db.expire_all()
+    case_record = db.get(CaseRecord, uuid.UUID(case_id))
+    assert case_record is not None
+    assert "summary_current" not in case_record.case_data
 
     cases_res = client.get("/api/v1/cases/", headers=normal_user_token_headers)
     assert cases_res.status_code == 200, cases_res.text
