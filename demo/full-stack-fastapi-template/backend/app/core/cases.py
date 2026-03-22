@@ -76,9 +76,9 @@ def build_case_public(execution_row: dict[str, Any], thread_row: dict[str, Any])
     case_data = build_default_case_data(execution_row, thread_row)
     case_data.update(_json_object(execution_row.get("case_data")))
 
-    summary_current = _clean_optional_string(execution_row.get("summary"))
+    summary_current = _clean_optional_string(case_data.get("summary_current"))
     if summary_current is None:
-        summary_current = _clean_optional_string(case_data.get("summary_current"))
+        summary_current = _clean_optional_string(execution_row.get("summary"))
     case_data["summary_current"] = summary_current
 
     title = _clean_optional_string(case_data.get("title"))
@@ -86,10 +86,11 @@ def build_case_public(execution_row: dict[str, Any], thread_row: dict[str, Any])
         title = _clean_optional_string(thread_row.get("title")) or summary_current or "Case"
         case_data["title"] = title
 
-    snapshot_payload = _json_object(execution_row.get("context_pack_snapshot"))
-    snapshot_payload.setdefault("topic_id", str(thread_row["id"]))
-    snapshot_payload.setdefault("case_id", str(execution_row["id"]))
-    snapshot = ContextPackSnapshot(**snapshot_payload)
+    snapshot = normalize_context_pack_snapshot(
+        execution_row.get("context_pack_snapshot"),
+        topic_id=thread_row["id"],
+        case_id=execution_row["id"],
+    )
 
     updated_at = (
         execution_row.get("updated_at")
@@ -125,6 +126,35 @@ def build_case_public(execution_row: dict[str, Any], thread_row: dict[str, Any])
 def materialize_case_data(case: CasePublic) -> dict[str, Any]:
     payload = case.model_dump(mode="json")
     return {field: payload.get(field) for field in CASE_DATA_FIELDS}
+
+
+def normalize_context_pack_snapshot(
+    snapshot_payload: Any,
+    *,
+    topic_id: uuid.UUID,
+    case_id: uuid.UUID,
+) -> ContextPackSnapshot:
+    payload = _json_object(snapshot_payload).copy()
+    payload["topic_id"] = str(topic_id)
+    payload["case_id"] = str(case_id)
+    return ContextPackSnapshot(**payload)
+
+
+def merge_context_pack_snapshot(
+    current_snapshot: Any,
+    patch_snapshot: Any,
+    *,
+    topic_id: uuid.UUID,
+    case_id: uuid.UUID,
+) -> dict[str, Any]:
+    merged = _json_object(current_snapshot).copy()
+    merged.update(_json_object(patch_snapshot))
+    snapshot = normalize_context_pack_snapshot(
+        merged,
+        topic_id=topic_id,
+        case_id=case_id,
+    )
+    return snapshot.model_dump(mode="json")
 
 
 def render_case_memo(case: CasePublic) -> CaseMemoView:
