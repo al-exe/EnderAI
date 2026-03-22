@@ -48,8 +48,6 @@ Guidance:
 `enderai_request` still rewrites a few older API paths when needed:
 
 - `/api/v1/me` -> `/api/v1/users/me`
-- `/api/v1/runs/*` -> `/api/v1/executions/*`
-- `/api/v1/tasks/*` -> `/api/v1/threads/*`
 - `/api/v1/library/*` -> `/api/v1/artifacts/*`
 
 ## Environment
