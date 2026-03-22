@@ -12,6 +12,8 @@ from app.core.cases import (
     execution_has_column,
     is_terminal_case_status,
     materialize_case_data,
+    merge_context_pack_snapshot,
+    normalize_context_pack_snapshot,
     render_case_hydration,
     render_case_memo,
 )
@@ -194,7 +196,18 @@ def update_case(
             raise HTTPException(status_code=422, detail="title must not be empty")
 
     if "context_pack_snapshot" in update:
-        snapshot_payload = update.pop("context_pack_snapshot") or {}
+        snapshot_payload = merge_context_pack_snapshot(
+            snapshot_payload,
+            update.pop("context_pack_snapshot"),
+            topic_id=thread_row["id"],
+            case_id=case_id,
+        )
+    else:
+        snapshot_payload = normalize_context_pack_snapshot(
+            snapshot_payload,
+            topic_id=thread_row["id"],
+            case_id=case_id,
+        ).model_dump(mode="json")
 
     execution_summary = current_case.summary_current or current_case.title
     if "summary_current" in update:
