@@ -83,19 +83,16 @@ describe("guided case workflow MCP tools", () => {
       mockFetch
         .mockResolvedValueOnce(
           jsonResponse({
-            thread: {
-              id: topicId,
-              title: "Core model",
-              workflow_key: "core_model",
-              status: "open",
-            },
-            execution: {
-              id: caseId,
-              thread_id: topicId,
-              status: "running",
-              summary: "Hydration gap",
-            },
-            reused_thread: false,
+            data: [],
+            count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: topicId,
+            title: "Core model",
+            workflow_key: "core_model",
+            status: "open",
           }),
         )
         .mockResolvedValueOnce(
@@ -197,10 +194,11 @@ describe("guided case workflow MCP tools", () => {
       expect(beginBody.hydration.hydration_status).toBe("attached");
       expect(beginBody.hydration.context_pack_attached).toBe(true);
       expect(beginBody.hydration.relevant_case_count).toBe(1);
-      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/executions/start");
-      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/context-packs/build");
-      expect(mockFetch.mock.calls[2][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/context-packs/build");
+      expect(mockFetch.mock.calls[3][0].toString()).toContain("/api/v1/cases/");
+      expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toMatchObject({
         topic_id: topicId,
         request_summary: "Hydration gap",
       });
@@ -273,10 +271,10 @@ describe("guided case workflow MCP tools", () => {
       const updateBody = JSON.parse(summarizeToolText(update.content));
       expect(updateBody.case.summary_current).toBe("Captured first evidence");
       expect(updateBody.progress_event.message).toBe("Captured first evidence");
-      expect(mockFetch.mock.calls[3][0].toString()).toContain(`/api/v1/cases/${caseId}`);
       expect(mockFetch.mock.calls[4][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(mockFetch.mock.calls[5][0].toString()).toContain(
-        `/api/v1/executions/${caseId}/events`,
+      expect(mockFetch.mock.calls[5][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[6][0].toString()).toContain(
+        `/api/v1/cases/${caseId}/events`,
       );
 
       mockFetch
@@ -367,19 +365,16 @@ describe("guided case workflow MCP tools", () => {
       mockFetch
         .mockResolvedValueOnce(
           jsonResponse({
-            thread: {
-              id: topicId,
-              title: "Core model",
-              workflow_key: "core_model",
-              status: "open",
-            },
-            execution: {
-              id: caseId,
-              thread_id: topicId,
-              status: "running",
-              summary: "Hydration gap",
-            },
-            reused_thread: false,
+            data: [],
+            count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: topicId,
+            title: "Core model",
+            workflow_key: "core_model",
+            status: "open",
           }),
         )
         .mockResolvedValueOnce(
@@ -513,19 +508,16 @@ describe("guided case workflow MCP tools", () => {
         )
         .mockResolvedValueOnce(
           jsonResponse({
-            thread: {
-              id: nextTopicId,
-              title: "Recovered topic",
-              workflow_key: "recovered_topic",
-              status: "open",
-            },
-            execution: {
-              id: nextCaseId,
-              thread_id: nextTopicId,
-              status: "running",
-              summary: "Recovered begin case",
-            },
-            reused_thread: false,
+            data: [],
+            count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: nextTopicId,
+            title: "Recovered topic",
+            workflow_key: "recovered_topic",
+            status: "open",
           }),
         )
         .mockResolvedValueOnce(

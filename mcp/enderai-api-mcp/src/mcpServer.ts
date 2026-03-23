@@ -18,7 +18,6 @@ export type McpServerOptions = {
 
 const AUDIT_MAX_BYTES = 48_000;
 const AUDIT_PREVIEW_CHARS = 8_000;
-const DEFAULT_REUSE_WINDOW_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_CONTEXT_PACK_CASE_LIMIT = 3;
 const POLICY_VERSION = "topic_case_v1";
 const WORKFLOW_MODEL = "topic_case_v1";
@@ -485,7 +484,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     try {
       await enderaiFetch({
         method: "POST",
-        path: `/api/v1/executions/${params.executionId}/events`,
+        path: `/api/v1/cases/${params.executionId}/events`,
         bearerToken: params.bearerToken,
         json: {
           type: params.type,
@@ -539,7 +538,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
   }): Promise<ResponseSummary> {
     return await enderaiFetch({
       method: "POST",
-      path: `/api/v1/executions/${params.caseId}/events`,
+      path: `/api/v1/cases/${params.caseId}/events`,
       bearerToken: params.bearerToken,
       json: {
         type: params.type,
@@ -960,39 +959,52 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
 
         const requestSummary = trimToUndefined(args.request_summary)!;
         const caseTitle = trimToUndefined(args.case_title);
-        const startRes = await enderaiFetch({
-          method: "POST",
-          path: "/api/v1/executions/start",
+        const topicLookupRes = await enderaiFetch({
+          method: "GET",
+          path: "/api/v1/topics/",
           bearerToken,
-          json: {
-            thread: pruneUndefined({
-              title: topicTitle,
-              workflow_key: workflowKey,
-              intent_key: trimToUndefined(args.intent_key),
-              goal: trimToUndefined(args.goal),
-              acceptance_criteria: trimToUndefined(args.acceptance_criteria),
-            }),
-            execution: {
-              summary: caseTitle ?? requestSummary,
-              targets: args.targets ?? [],
-            },
-            reuse_within_seconds:
-              args.reuse_within_seconds ?? DEFAULT_REUSE_WINDOW_SECONDS,
+          query: {
+            workflow_key: workflowKey,
+            limit: 1,
           },
         });
-        if (!startRes.ok) {
+        if (!topicLookupRes.ok) {
           throw new Error(
-            `enderai_begin_case failed to start a case: ${extractErrorDetail(startRes)} (status ${startRes.status}).`,
+            `enderai_begin_case failed to look up the topic: ${extractErrorDetail(topicLookupRes)} (status ${topicLookupRes.status}).`,
           );
         }
 
-        const ids = extractExecutionStartIds(startRes.data);
-        if (!ids.executionId || !ids.threadId) {
+        const existingTopic = Array.isArray(asRecord(topicLookupRes.data).data)
+          ? (asRecord(topicLookupRes.data).data as unknown[])
+              .map((topic) => asRecord(topic))
+              .find((topic) => typeof topic.id === "string")
+          : undefined;
+        let topicData = existingTopic;
+        if (!topicData) {
+          const topicRes = await enderaiFetch({
+            method: "POST",
+            path: "/api/v1/topics/",
+            bearerToken,
+            json: pruneUndefined({
+              title: topicTitle,
+              workflow_key: workflowKey,
+              aliases: args.aliases ?? [],
+            }),
+          });
+          if (!topicRes.ok) {
+            throw new Error(
+              `enderai_begin_case failed to create the topic: ${extractErrorDetail(topicRes)} (status ${topicRes.status}).`,
+            );
+          }
+          topicData = asRecord(topicRes.data);
+        }
+
+        const topicId = typeof topicData.id === "string" ? topicData.id : undefined;
+        if (!topicId) {
           throw new Error(
-            "enderai_begin_case did not receive execution and topic ids from /api/v1/executions/start.",
+            "enderai_begin_case did not receive a topic id from /api/v1/topics/.",
           );
         }
-        setActiveCaseContext(ids.executionId, ids.threadId);
 
         let contextPack: unknown | null = null;
         if (args.auto_hydrate !== false) {
@@ -1001,7 +1013,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             path: "/api/v1/context-packs/build",
             bearerToken,
             json: pruneUndefined({
-              topic_id: ids.threadId,
+              topic_id: topicId,
               title: caseTitle ?? requestSummary,
               request_summary: requestSummary,
               aliases: args.aliases,
@@ -1021,41 +1033,50 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           contextPack = contextPackRes.data;
         }
 
-        const casePatch = pruneUndefined({
+        const contextPackRecord = asRecord(contextPack);
+        const caseCreate = pruneUndefined({
+          topic_id: topicId,
           title: caseTitle,
+          status: "running",
           input_summary: requestSummary,
           summary_current: requestSummary,
-          files: args.files,
-          symbols: args.symbols,
-          errors: args.errors,
-          symptoms: args.symptoms,
-          context_pack_snapshot: asRecord(contextPack).context_pack_snapshot,
+          files: args.files ?? [],
+          symbols: args.symbols ?? [],
+          errors: args.errors ?? [],
+          symptoms: args.symptoms ?? [],
+          context_pack_snapshot: contextPackRecord.context_pack_snapshot,
         });
         const caseRes = await enderaiFetch({
-          method: "PATCH",
-          path: `/api/v1/cases/${ids.executionId}`,
+          method: "POST",
+          path: "/api/v1/cases/",
           bearerToken,
-          json: casePatch,
+          json: caseCreate,
         });
         if (!caseRes.ok) {
           throw new Error(
-            `enderai_begin_case failed to initialize the case document: ${extractErrorDetail(caseRes)} (status ${caseRes.status}).`,
+            `enderai_begin_case failed to create the case: ${extractErrorDetail(caseRes)} (status ${caseRes.status}).`,
           );
         }
 
-        const startData = asRecord(startRes.data);
-        const contextPackRecord = asRecord(contextPack);
         const contextPackSnapshot = asRecord(contextPackRecord.context_pack_snapshot);
         const relevantCases = Array.isArray(contextPackRecord.relevant_cases)
           ? contextPackRecord.relevant_cases
           : Array.isArray(contextPackSnapshot.relevant_cases)
             ? contextPackSnapshot.relevant_cases
             : [];
+        const caseData = asRecord(caseRes.data);
+        const caseId = typeof caseData.id === "string" ? caseData.id : undefined;
+        if (!caseId) {
+          throw new Error(
+            "enderai_begin_case did not receive a case id from /api/v1/cases/.",
+          );
+        }
+        setActiveCaseContext(caseId, topicId);
         const result = {
           policy_version: POLICY_VERSION,
           workflow_model: WORKFLOW_MODEL,
           auth_model: AUTH_MODEL,
-          topic: startData.thread ?? { id: ids.threadId, title: topicTitle, workflow_key: workflowKey },
+          topic: topicData,
           case: caseRes.data,
           context_pack: contextPack,
           hydration: {
@@ -1065,22 +1086,22 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             matched_topic_id:
               typeof contextPackSnapshot.topic_id === "string"
                 ? contextPackSnapshot.topic_id
-                : ids.threadId,
+                : topicId,
             relevant_case_count: relevantCases.length,
             context_found:
               Boolean(contextPackRecord.context_pack_snapshot) || relevantCases.length > 0,
           },
-          reused_topic: Boolean(startData.reused_thread),
+          reused_topic: Boolean(existingTopic),
           next: {
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
-            case_id: ids.executionId,
-            topic_id: ids.threadId,
+            case_id: caseId,
+            topic_id: topicId,
           },
         };
         await auditWorkflowTool({
           bearerToken,
-          executionId: ids.executionId,
+          executionId: caseId,
           message: "Begin case",
           tool: "enderai_begin_case",
           request: args,
