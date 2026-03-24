@@ -2,7 +2,7 @@ import uuid
 
 from sqlmodel import Session
 
-from app.models import Topic
+from app.models import CaseRecord, Topic, get_datetime_utc
 from tests.utils.user import authentication_token_from_email
 
 
@@ -321,3 +321,70 @@ def test_topic_access_and_matching_are_scoped_to_the_current_user(
         json={"owner_ids": [str(uuid.uuid4())]},
     )
     assert owner_update.status_code == 403, owner_update.text
+
+
+def test_legacy_orphan_topics_and_cases_are_claimed_for_current_user(
+    client,
+    normal_user_token_headers,
+    db: Session,
+) -> None:
+    owner_id = uuid.UUID(_current_user_id(client, normal_user_token_headers))
+    other_headers = authentication_token_from_email(
+        client=client,
+        email=f"legacy-other-{uuid.uuid4()}@example.com",
+        db=db,
+    )
+
+    now = get_datetime_utc()
+    topic_id = uuid.uuid4()
+    case_id = uuid.uuid4()
+    topic = Topic(
+        id=topic_id,
+        title="Legacy unowned topic",
+        slug=f"legacy-unowned-topic-{uuid.uuid4().hex[:8]}",
+        workflow_key=f"legacy_unowned_topic_{uuid.uuid4().hex[:8]}",
+        status="open",
+        owner_ids=[],
+        created_at=now,
+        updated_at=now,
+        last_used_at=now,
+    )
+    case_record = CaseRecord(
+        id=case_id,
+        topic_id=topic_id,
+        title="Legacy unowned case",
+        opened_at=now,
+        updated_at=now,
+        status="done",
+        actor_id=None,
+        summary_current="A legacy case without actor ownership.",
+        case_data={"files": ["backend/app/core/topics.py"]},
+    )
+    db.add(topic)
+    db.commit()
+    db.add(case_record)
+    db.commit()
+
+    topics_res = client.get("/api/v1/topics/", headers=normal_user_token_headers)
+    assert topics_res.status_code == 200, topics_res.text
+    assert any(row["id"] == str(topic_id) for row in topics_res.json()["data"])
+
+    cases_res = client.get("/api/v1/cases/", headers=normal_user_token_headers)
+    assert cases_res.status_code == 200, cases_res.text
+    assert any(row["id"] == str(case_id) for row in cases_res.json()["data"])
+
+    db.expire_all()
+    claimed_topic = db.get(Topic, topic_id)
+    claimed_case = db.get(CaseRecord, case_id)
+    assert claimed_topic is not None
+    assert claimed_case is not None
+    assert claimed_topic.owner_ids == [str(owner_id)]
+    assert claimed_case.actor_id == owner_id
+
+    other_topics_res = client.get("/api/v1/topics/", headers=other_headers)
+    assert other_topics_res.status_code == 200, other_topics_res.text
+    assert all(row["id"] != str(topic_id) for row in other_topics_res.json()["data"])
+
+    other_cases_res = client.get("/api/v1/cases/", headers=other_headers)
+    assert other_cases_res.status_code == 200, other_cases_res.text
+    assert all(row["id"] != str(case_id) for row in other_cases_res.json()["data"])

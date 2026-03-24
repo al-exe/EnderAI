@@ -16,7 +16,12 @@ from app.core.cases import (
     render_case_hydration,
     render_case_memo,
 )
-from app.core.topics import _case_visible_to_owner, read_topic_model, refresh_topic_rollup
+from app.core.topics import (
+    _case_visible_to_owner,
+    claim_legacy_orphan_topics_for_owner,
+    read_topic_model,
+    refresh_topic_rollup,
+)
 from app.models import (
     CaseCreate,
     CaseEvent,
@@ -50,6 +55,14 @@ def _get_visible_case_and_topic(
     if case_record is None:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    claimed = claim_legacy_orphan_topics_for_owner(
+        session,
+        owner_id,
+        topic_id=case_record.topic_id,
+    )
+    if claimed:
+        session.commit()
+
     topic = read_topic_model(session, case_record.topic_id, owner_id=owner_id)
     if topic is None or not _case_visible_to_owner(case_record, topic, owner_id):
         raise HTTPException(status_code=404, detail="Case not found")
@@ -67,6 +80,14 @@ def read_cases(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(
+        session,
+        owner_id,
+        topic_id=topic_id,
+    )
+    if claimed:
+        session.commit()
+
     statement = select(CaseRecord)
     if topic_id is not None:
         statement = statement.where(CaseRecord.topic_id == topic_id)

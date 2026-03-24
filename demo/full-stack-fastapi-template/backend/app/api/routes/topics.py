@@ -8,6 +8,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core.topics import (
     allocate_topic_identity,
     build_topic_public_current,
+    claim_legacy_orphan_topics_for_owner,
     count_topics,
     list_topic_models,
     match_topics,
@@ -34,6 +35,9 @@ def read_topics(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
+    if claimed:
+        session.commit()
     topics = list_topic_models(
         session,
         owner_id=owner_id,
@@ -98,12 +102,19 @@ def match_topics_route(
     current_user: CurrentUser,
     request: TopicMatchRequest,
 ) -> Any:
-    return match_topics(session, request, owner_id=_owner_scope_id(current_user))
+    owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
+    if claimed:
+        session.commit()
+    return match_topics(session, request, owner_id=owner_id)
 
 
 @router.get("/{topic_id}", response_model=TopicPublic)
 def read_topic(session: SessionDep, current_user: CurrentUser, topic_id: uuid.UUID) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    if claimed:
+        session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -118,6 +129,9 @@ def update_topic(
     topic_in: TopicUpdate,
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    if claimed:
+        session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -173,6 +187,9 @@ def read_topic_rollup(
     topic_id: uuid.UUID,
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    if claimed:
+        session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
@@ -190,6 +207,9 @@ def refresh_topic_rollup_route(
     topic_id: uuid.UUID,
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    if claimed:
+        session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
