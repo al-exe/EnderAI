@@ -3,6 +3,13 @@ import uuid
 from sqlmodel import Session
 
 from app.models import CaseRecord
+from tests.utils.user import authentication_token_from_email
+
+
+def _current_user_id(client, headers: dict[str, str]) -> str:
+    response = client.get("/api/v1/users/me", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
 
 
 def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db: Session) -> None:
@@ -160,3 +167,85 @@ def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db
     events_body = events_res.json()
     assert events_body["count"] >= 1
     assert any(event["id"] == event_id for event in events_body["data"])
+
+
+def test_cases_are_scoped_to_the_current_user(client, normal_user_token_headers, db: Session) -> None:
+    owner_id = _current_user_id(client, normal_user_token_headers)
+    other_headers = authentication_token_from_email(
+        client=client,
+        email=f"other-{uuid.uuid4()}@example.com",
+        db=db,
+    )
+
+    topic_res = client.post(
+        "/api/v1/topics/",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Private case ownership",
+            "workflow_key": f"private_case_ownership_{uuid.uuid4().hex[:8]}",
+            "owner_ids": [str(uuid.uuid4())],
+        },
+    )
+    assert topic_res.status_code == 201, topic_res.text
+    topic_id = topic_res.json()["id"]
+    assert topic_res.json()["owner_ids"] == [owner_id]
+
+    mismatched_actor_res = client.post(
+        "/api/v1/cases/",
+        headers=normal_user_token_headers,
+        json={
+            "topic_id": topic_id,
+            "title": "Should reject actor impersonation",
+            "actor_id": str(uuid.uuid4()),
+        },
+    )
+    assert mismatched_actor_res.status_code == 403, mismatched_actor_res.text
+
+    case_res = client.post(
+        "/api/v1/cases/",
+        headers=normal_user_token_headers,
+        json={
+            "topic_id": topic_id,
+            "title": "Owner-only case",
+            "summary_current": "Only the owning user should be able to view this case.",
+            "files": ["backend/app/api/routes/cases.py"],
+        },
+    )
+    assert case_res.status_code == 201, case_res.text
+    case_body = case_res.json()
+    case_id = case_body["id"]
+    assert case_body["actor_id"] == owner_id
+
+    other_cases_res = client.get("/api/v1/cases/", headers=other_headers)
+    assert other_cases_res.status_code == 200, other_cases_res.text
+    assert all(row["id"] != case_id for row in other_cases_res.json()["data"])
+
+    for method, path, payload in [
+        ("get", f"/api/v1/cases/{case_id}", None),
+        ("get", f"/api/v1/cases/{case_id}/memo", None),
+        ("get", f"/api/v1/cases/{case_id}/hydration", None),
+        ("get", f"/api/v1/cases/{case_id}/events", None),
+        ("patch", f"/api/v1/cases/{case_id}", {"summary_current": "intrusion"}),
+        (
+            "post",
+            f"/api/v1/cases/{case_id}/events",
+            {"type": "mcp", "message": "should not be allowed"},
+        ),
+        (
+            "post",
+            "/api/v1/cases/",
+            {"topic_id": topic_id, "title": "Should not create under another user's topic"},
+        ),
+    ]:
+        request_kwargs = {"headers": other_headers}
+        if payload is not None:
+            request_kwargs["json"] = payload
+        response = getattr(client, method)(path, **request_kwargs)
+        assert response.status_code == 404, response.text
+
+    owner_actor_patch = client.patch(
+        f"/api/v1/cases/{case_id}",
+        headers=normal_user_token_headers,
+        json={"actor_id": str(uuid.uuid4())},
+    )
+    assert owner_actor_patch.status_code == 403, owner_actor_patch.text

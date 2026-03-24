@@ -3,6 +3,13 @@ import uuid
 from sqlmodel import Session
 
 from app.models import Topic
+from tests.utils.user import authentication_token_from_email
+
+
+def _current_user_id(client, headers: dict[str, str]) -> str:
+    response = client.get("/api/v1/users/me", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["id"]
 
 
 def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers, db: Session) -> None:
@@ -208,3 +215,109 @@ def test_topic_match_groups_related_frontend_table_work(client, normal_user_toke
     pack_body = pack.json()
     assert pack_body["selected_topic_ids"] == [topic_id]
     assert pack_body["selected_case_ids"] == [case_id]
+
+
+def test_topic_access_and_matching_are_scoped_to_the_current_user(
+    client,
+    normal_user_token_headers,
+    db: Session,
+) -> None:
+    owner_id = _current_user_id(client, normal_user_token_headers)
+    other_headers = authentication_token_from_email(
+        client=client,
+        email=f"topic-other-{uuid.uuid4()}@example.com",
+        db=db,
+    )
+
+    topic = client.post(
+        "/api/v1/topics/",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Private frontend bug stream",
+            "workflow_key": f"private_frontend_bug_stream_{uuid.uuid4().hex[:8]}",
+            "owner_ids": [str(uuid.uuid4())],
+        },
+    )
+    assert topic.status_code == 201, topic.text
+    topic_body = topic.json()
+    topic_id = topic_body["id"]
+    assert topic_body["owner_ids"] == [owner_id]
+
+    case = client.post(
+        "/api/v1/cases/",
+        headers=normal_user_token_headers,
+        json={
+            "topic_id": topic_id,
+            "title": "Private table overflow regression",
+            "status": "done",
+            "summary_current": "Only the owner should be able to match or hydrate against this case.",
+            "files": ["src/components/Common/SplitDataTable.tsx"],
+            "symbols": ["SplitDataTable"],
+            "symptoms": ["table overflow"],
+        },
+    )
+    assert case.status_code == 201, case.text
+    case_id = case.json()["id"]
+
+    list_res = client.get("/api/v1/topics/", headers=other_headers)
+    assert list_res.status_code == 200, list_res.text
+    assert all(row["id"] != topic_id for row in list_res.json()["data"])
+
+    for method, path, payload in [
+        ("get", f"/api/v1/topics/{topic_id}", None),
+        ("get", f"/api/v1/topics/{topic_id}/rollup", None),
+        ("post", f"/api/v1/topics/{topic_id}/rollup/refresh", None),
+    ]:
+        request_kwargs = {"headers": other_headers}
+        if payload is not None:
+            request_kwargs["json"] = payload
+        response = getattr(client, method)(path, **request_kwargs)
+        assert response.status_code == 404, response.text
+
+    match_res = client.post(
+        "/api/v1/topics/match",
+        headers=other_headers,
+        json={
+            "title": "Private table overflow regression",
+            "request_summary": "This should not match another user's topic.",
+            "files": ["src/components/Common/SplitDataTable.tsx"],
+            "symbols": ["SplitDataTable"],
+            "symptoms": ["table overflow"],
+        },
+    )
+    assert match_res.status_code == 200, match_res.text
+    assert match_res.json()["candidates"] == []
+
+    pack_res = client.post(
+        "/api/v1/context-packs/build",
+        headers=other_headers,
+        json={
+            "title": "Private table overflow regression",
+            "request_summary": "This should not hydrate from another user's topic.",
+            "files": ["src/components/Common/SplitDataTable.tsx"],
+            "symbols": ["SplitDataTable"],
+            "symptoms": ["table overflow"],
+            "max_topics": 1,
+            "max_cases_per_topic": 2,
+        },
+    )
+    assert pack_res.status_code == 200, pack_res.text
+    pack_body = pack_res.json()
+    assert pack_body["selected_topic_ids"] == []
+    assert pack_body["selected_case_ids"] == []
+    assert pack_body["relevant_cases"] == []
+    assert case_id not in pack_body["selected_case_ids"]
+
+    explicit_pack_res = client.post(
+        "/api/v1/context-packs/build",
+        headers=other_headers,
+        json={"topic_id": topic_id},
+    )
+    assert explicit_pack_res.status_code == 404, explicit_pack_res.text
+
+    owner_update = client.patch(
+        f"/api/v1/topics/{topic_id}",
+        headers=normal_user_token_headers,
+        json={"owner_ids": [str(uuid.uuid4())]},
+    )
+    assert owner_update.status_code == 403, owner_update.text

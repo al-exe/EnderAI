@@ -8,7 +8,6 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core.topics import (
     allocate_topic_identity,
     build_topic_public_current,
-    build_topic_rollup_public,
     count_topics,
     list_topic_models,
     match_topics,
@@ -18,6 +17,10 @@ from app.core.topics import (
 from app.models import Topic, TopicCreate, TopicMatchRequest, TopicMatchResult, TopicPublic, TopicRollupPublic, TopicsPublic, TopicUpdate, get_datetime_utc
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+
+
+def _owner_scope_id(current_user: CurrentUser) -> uuid.UUID:
+    return current_user.id
 
 
 @router.get("/", response_model=TopicsPublic)
@@ -30,8 +33,10 @@ def read_topics(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
+    owner_id = _owner_scope_id(current_user)
     topics = list_topic_models(
         session,
+        owner_id=owner_id,
         status=status,
         q=q,
         workflow_key=workflow_key,
@@ -39,8 +44,17 @@ def read_topics(
         limit=limit,
     )
     return TopicsPublic(
-        data=[build_topic_public_current(session, topic) for topic in topics],
-        count=count_topics(session, status=status, q=q, workflow_key=workflow_key),
+        data=[
+            build_topic_public_current(session, topic, owner_id=owner_id)
+            for topic in topics
+        ],
+        count=count_topics(
+            session,
+            owner_id=owner_id,
+            status=status,
+            q=q,
+            workflow_key=workflow_key,
+        ),
     )
 
 
@@ -54,6 +68,7 @@ def create_topic(
     if not title:
         raise HTTPException(status_code=422, detail="title must not be empty")
 
+    owner_id = _owner_scope_id(current_user)
     slug, workflow_key = allocate_topic_identity(session, title, topic_in.workflow_key)
     now = get_datetime_utc()
     topic = Topic(
@@ -63,7 +78,7 @@ def create_topic(
         description=topic_in.description.strip() if isinstance(topic_in.description, str) and topic_in.description.strip() else None,
         aliases=[alias.strip() for alias in topic_in.aliases if isinstance(alias, str) and alias.strip()],
         status=topic_in.status.strip() if topic_in.status.strip() else "open",
-        owner_ids=[str(owner_id) for owner_id in topic_in.owner_ids],
+        owner_ids=[str(owner_id)],
         created_at=now,
         updated_at=now,
         last_used_at=now,
@@ -71,10 +86,10 @@ def create_topic(
     session.add(topic)
     session.commit()
     session.refresh(topic)
-    refresh_topic_rollup(session, topic.id, persist=True)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
     session.commit()
     session.refresh(topic)
-    return build_topic_public_current(session, topic)
+    return build_topic_public_current(session, topic, owner_id=owner_id)
 
 
 @router.post("/match", response_model=TopicMatchResult)
@@ -83,15 +98,16 @@ def match_topics_route(
     current_user: CurrentUser,
     request: TopicMatchRequest,
 ) -> Any:
-    return match_topics(session, request)
+    return match_topics(session, request, owner_id=_owner_scope_id(current_user))
 
 
 @router.get("/{topic_id}", response_model=TopicPublic)
 def read_topic(session: SessionDep, current_user: CurrentUser, topic_id: uuid.UUID) -> Any:
-    topic = read_topic_model(session, topic_id)
+    owner_id = _owner_scope_id(current_user)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
-    return build_topic_public_current(session, topic)
+    return build_topic_public_current(session, topic, owner_id=owner_id)
 
 
 @router.patch("/{topic_id}", response_model=TopicPublic)
@@ -101,13 +117,19 @@ def update_topic(
     topic_id: uuid.UUID,
     topic_in: TopicUpdate,
 ) -> Any:
-    topic = read_topic_model(session, topic_id)
+    owner_id = _owner_scope_id(current_user)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
     update = topic_in.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(status_code=422, detail="No fields to update")
+    if "owner_ids" in update:
+        raise HTTPException(
+            status_code=403,
+            detail="owner_ids cannot be changed through this endpoint",
+        )
 
     if "title" in update and update["title"] is not None:
         title = str(update["title"]).strip()
@@ -133,17 +155,15 @@ def update_topic(
         if not status:
             raise HTTPException(status_code=422, detail="status must not be empty")
         topic.status = status
-    if "owner_ids" in update and update["owner_ids"] is not None:
-        topic.owner_ids = [str(owner_id) for owner_id in update["owner_ids"]]
 
     topic.updated_at = get_datetime_utc()
     session.add(topic)
     session.commit()
     session.refresh(topic)
-    refresh_topic_rollup(session, topic.id, persist=True)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
     session.commit()
     session.refresh(topic)
-    return build_topic_public_current(session, topic)
+    return build_topic_public_current(session, topic, owner_id=owner_id)
 
 
 @router.get("/{topic_id}/rollup", response_model=TopicRollupPublic)
@@ -152,11 +172,12 @@ def read_topic_rollup(
     current_user: CurrentUser,
     topic_id: uuid.UUID,
 ) -> Any:
-    topic = read_topic_model(session, topic_id)
+    owner_id = _owner_scope_id(current_user)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
-    rollup = refresh_topic_rollup(session, topic_id, persist=False)
+    rollup = refresh_topic_rollup(session, topic_id, persist=False, owner_id=owner_id)
     if rollup is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     return rollup
@@ -168,13 +189,12 @@ def refresh_topic_rollup_route(
     current_user: CurrentUser,
     topic_id: uuid.UUID,
 ) -> Any:
-    topic = read_topic_model(session, topic_id)
+    owner_id = _owner_scope_id(current_user)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
-    rollup = refresh_topic_rollup(session, topic_id, persist=True)
+    rollup = refresh_topic_rollup(session, topic_id, persist=True, owner_id=owner_id)
     if rollup is None:
         raise HTTPException(status_code=404, detail="Topic not found")
-    session.commit()
-    session.refresh(topic)
-    return build_topic_rollup_public(topic)
+    return rollup

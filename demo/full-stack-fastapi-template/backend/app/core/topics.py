@@ -91,7 +91,22 @@ def build_topic_rollup_public(topic: Topic) -> TopicRollupPublic:
     return TopicRollupPublic(**rollup_payload)
 
 
-def build_topic_public_current(session: Session, topic: Topic) -> TopicPublic:
+def build_topic_public_current(
+    session: Session,
+    topic: Topic,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> TopicPublic:
+    if owner_id is not None:
+        rollup = refresh_topic_rollup(session, topic.id, persist=False, owner_id=owner_id)
+        if rollup is None:
+            return build_topic_public(topic)
+
+        refreshed_topic = Topic(**topic.model_dump(mode="python"))
+        refreshed_topic.rollup_summary = rollup.brief
+        refreshed_topic.rollup_data = rollup.model_dump(mode="json")
+        return build_topic_public(refreshed_topic)
+
     if not _topic_rollup_needs_refresh(session, topic):
         return build_topic_public(topic)
 
@@ -108,6 +123,7 @@ def build_topic_public_current(session: Session, topic: Topic) -> TopicPublic:
 def list_topic_models(
     session: Session,
     *,
+    owner_id: uuid.UUID | None = None,
     status: str | None = None,
     q: str | None = None,
     workflow_key: str | None = None,
@@ -129,40 +145,57 @@ def list_topic_models(
             )
         )
     statement = statement.order_by(col(Topic.last_used_at).desc(), col(Topic.updated_at).desc())
-    statement = statement.offset(skip).limit(limit)
-    return list(session.exec(statement).all())
+    topics = list(session.exec(statement).all())
+    if owner_id is not None:
+        actor_topic_ids = _topic_ids_with_owned_cases(session, owner_id)
+        topics = [
+            topic
+            for topic in topics
+            if _topic_visible_to_owner(topic, owner_id, actor_topic_ids=actor_topic_ids)
+        ]
+    return topics[skip : skip + limit]
 
 
 def count_topics(
     session: Session,
     *,
+    owner_id: uuid.UUID | None = None,
     status: str | None = None,
     q: str | None = None,
     workflow_key: str | None = None,
 ) -> int:
-    statement = select(Topic)
-    if status:
-        statement = statement.where(Topic.status == status.strip())
-    if workflow_key:
-        statement = statement.where(Topic.workflow_key == workflow_key.strip())
-    if q:
-        like = f"%{q.strip()}%"
-        statement = statement.where(
-            or_(
-                Topic.title.ilike(like),
-                Topic.workflow_key.ilike(like),
-                Topic.description.ilike(like),
-            )
+    return len(
+        list_topic_models(
+            session,
+            owner_id=owner_id,
+            status=status,
+            q=q,
+            workflow_key=workflow_key,
+            skip=0,
+            limit=10_000,
         )
-    return len(session.exec(statement).all())
+    )
 
 
-def read_topic_model(session: Session, topic_id: uuid.UUID) -> Topic | None:
-    return session.get(Topic, topic_id)
+def read_topic_model(
+    session: Session,
+    topic_id: uuid.UUID,
+    owner_id: uuid.UUID | None = None,
+) -> Topic | None:
+    topic = session.get(Topic, topic_id)
+    if topic is None:
+        return None
+    if owner_id is not None and not _topic_visible_to_owner(topic, owner_id, session=session):
+        return None
+    return topic
 
 
-def list_cases_for_topic(session: Session, topic_id: uuid.UUID) -> list[CasePublic]:
-    topic = read_topic_model(session, topic_id)
+def list_cases_for_topic(
+    session: Session,
+    topic_id: uuid.UUID,
+    owner_id: uuid.UUID | None = None,
+) -> list[CasePublic]:
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         return []
 
@@ -171,7 +204,13 @@ def list_cases_for_topic(session: Session, topic_id: uuid.UUID) -> list[CasePubl
         .where(CaseRecord.topic_id == topic_id)
         .order_by(col(CaseRecord.updated_at).desc(), col(CaseRecord.opened_at).desc())
     )
-    rows = session.exec(statement).all()
+    rows = list(session.exec(statement).all())
+    if owner_id is not None:
+        rows = [
+            row
+            for row in rows
+            if _case_visible_to_owner(row, topic, owner_id)
+        ]
     return [build_case_public(row, topic) for row in rows]
 
 
@@ -180,13 +219,15 @@ def refresh_topic_rollup(
     topic_id: uuid.UUID,
     *,
     persist: bool = True,
+    owner_id: uuid.UUID | None = None,
 ) -> TopicRollupPublic | None:
-    topic = read_topic_model(session, topic_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id)
     if topic is None:
         return None
 
+    should_persist = persist and owner_id is None
     existing_rollup = build_topic_rollup_public(topic)
-    cases = list_cases_for_topic(session, topic_id)
+    cases = list_cases_for_topic(session, topic_id, owner_id=owner_id)
 
     file_counts: Counter[str] = Counter()
     symbol_counts: Counter[str] = Counter()
@@ -252,7 +293,7 @@ def refresh_topic_rollup(
         updated_at=updated_at,
     )
 
-    if persist:
+    if should_persist:
         topic.rollup_summary = rollup.brief
         topic.rollup_data = rollup.model_dump(mode="json")
         topic.updated_at = get_datetime_utc()
@@ -260,8 +301,16 @@ def refresh_topic_rollup(
     return rollup
 
 
-def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResult:
-    topics = [build_topic_public_current(session, topic) for topic in list_topic_models(session)]
+def match_topics(
+    session: Session,
+    request: TopicMatchRequest,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> TopicMatchResult:
+    topics = [
+        build_topic_public_current(session, topic, owner_id=owner_id)
+        for topic in list_topic_models(session, owner_id=owner_id)
+    ]
     candidates = [_score_topic_match(topic, request) for topic in topics]
     candidates = [candidate for candidate in candidates if candidate.score > 0]
     candidates.sort(key=lambda candidate: candidate.score, reverse=True)
@@ -270,12 +319,17 @@ def match_topics(session: Session, request: TopicMatchRequest) -> TopicMatchResu
     return TopicMatchResult(policy=policy, candidates=candidates)
 
 
-def build_context_pack(session: Session, request: ContextPackBuildRequest) -> ContextPackBuildResult:
+def build_context_pack(
+    session: Session,
+    request: ContextPackBuildRequest,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> ContextPackBuildResult:
     if request.topic_id is not None:
-        topic_model = read_topic_model(session, request.topic_id)
+        topic_model = read_topic_model(session, request.topic_id, owner_id=owner_id)
         if topic_model is None:
             raise ValueError("Topic not found")
-        topic = build_topic_public_current(session, topic_model)
+        topic = build_topic_public_current(session, topic_model, owner_id=owner_id)
         policy = TopicHydrationPolicy(confidence="high", max_topics=1)
         matched_topics = [
             TopicMatchCandidate(
@@ -300,6 +354,7 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
                 contexts=request.contexts,
                 limit=request.max_topics or 5,
             ),
+            owner_id=owner_id,
         )
         policy = match_result.policy
         matched_topics = match_result.candidates
@@ -332,7 +387,7 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
         ambiguities.extend(topic.ambiguity_notes)
         questions.extend(topic.open_questions)
         negative_history.extend(topic.negative_history)
-        topic_cases = list_cases_for_topic(session, topic.id)
+        topic_cases = list_cases_for_topic(session, topic.id, owner_id=owner_id)
         ranked_cases = sorted(
             topic_cases,
             key=lambda case: _score_case_for_request(case, request),
@@ -406,6 +461,34 @@ def _default_rollup(topic: Topic) -> dict[str, Any]:
         "recent_case_ids": [],
         "updated_at": topic.updated_at,
     }
+
+
+def _topic_ids_with_owned_cases(session: Session, owner_id: uuid.UUID) -> set[uuid.UUID]:
+    statement = select(CaseRecord.topic_id).where(CaseRecord.actor_id == owner_id)
+    return set(session.exec(statement).all())
+
+
+def _topic_visible_to_owner(
+    topic: Topic,
+    owner_id: uuid.UUID,
+    *,
+    session: Session | None = None,
+    actor_topic_ids: set[uuid.UUID] | None = None,
+) -> bool:
+    owner_id_str = str(owner_id)
+    if owner_id_str in topic.owner_ids:
+        return True
+    if actor_topic_ids is None:
+        if session is None:
+            return False
+        actor_topic_ids = _topic_ids_with_owned_cases(session, owner_id)
+    return topic.id in actor_topic_ids
+
+
+def _case_visible_to_owner(case: CaseRecord, topic: Topic, owner_id: uuid.UUID) -> bool:
+    if case.actor_id == owner_id:
+        return True
+    return case.actor_id is None and str(owner_id) in topic.owner_ids
 
 
 def _score_topic_match(topic: TopicPublic, request: TopicMatchRequest) -> TopicMatchCandidate:
