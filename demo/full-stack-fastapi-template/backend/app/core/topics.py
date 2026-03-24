@@ -297,6 +297,7 @@ def build_context_pack(session: Session, request: ContextPackBuildRequest) -> Co
                 symbols=request.symbols,
                 errors=request.errors,
                 symptoms=request.symptoms,
+                contexts=request.contexts,
                 limit=request.max_topics or 5,
             ),
         )
@@ -412,32 +413,40 @@ def _score_topic_match(topic: TopicPublic, request: TopicMatchRequest) -> TopicM
     reasoning: list[str] = []
     score = 0.0
 
-    request_text = " ".join(part for part in [request.title, request.request_summary] if part)
+    request_fragments = _request_text_fragments(request)
+    request_text = _request_search_text(request)
     request_tokens = set(_tokens(request_text))
     topic_tokens = set(
         _tokens(
             " ".join(
                 [
                     topic.title,
+                    topic.workflow_key,
                     topic.description or "",
                     topic.rollup_summary or "",
                     *topic.aliases,
                     *topic.vocabulary,
+                    *topic.canonical_files,
+                    *topic.canonical_symbols,
+                    *topic.canonical_errors,
+                    *topic.canonical_symptoms,
+                    *_topic_file_hint_tokens(topic),
                 ]
             )
         )
     )
     token_overlap = sorted(request_tokens & topic_tokens)
     if token_overlap:
-        score += min(4.0, float(len(token_overlap)))
+        score += min(5.0, float(len(token_overlap)))
         matched_signals.extend(token_overlap[:4])
         reasoning.append(f"token overlap: {', '.join(token_overlap[:4])}")
 
-    score += _score_text_similarity(request_text, topic, reasoning)
-    score += _score_overlap(request.files, topic.canonical_files, matched_signals, reasoning, "files")
+    score += _score_text_similarity(request_fragments, topic, reasoning)
+    score += _score_file_overlap(request.files, topic.canonical_files, matched_signals, reasoning)
     score += _score_overlap(request.symbols, topic.canonical_symbols, matched_signals, reasoning, "symbols")
     score += _score_overlap(request.errors, topic.canonical_errors, matched_signals, reasoning, "errors")
     score += _score_overlap(request.symptoms, topic.canonical_symptoms, matched_signals, reasoning, "symptoms")
+    score += _score_context_overlap(request.contexts, topic, matched_signals, reasoning)
 
     alias_overlap = _dedupe_preserve_order(request.aliases + ([request.title] if request.title else []))
     alias_hits = _match_values(alias_overlap, topic.aliases)
@@ -469,9 +478,9 @@ def _policy_for_candidates(candidates: list[TopicMatchCandidate]) -> TopicHydrat
 
     top = candidates[0].score
     second = candidates[1].score if len(candidates) > 1 else 0.0
-    if top >= 8.0 and top - second >= 2.0:
+    if top >= 7.0 and top - second >= 1.5:
         return TopicHydrationPolicy(confidence="high", max_topics=1)
-    if top >= 4.0:
+    if top >= 3.5:
         return TopicHydrationPolicy(confidence="medium", max_topics=min(3, len(candidates)))
     return TopicHydrationPolicy(confidence="low", max_topics=min(5, len(candidates)))
 
@@ -491,14 +500,83 @@ def _score_overlap(
     return min(4.0, len(overlap) * 2.0)
 
 
+def _score_file_overlap(
+    request_values: list[str],
+    topic_values: list[str],
+    matched_signals: list[str],
+    reasoning: list[str],
+) -> float:
+    score = 0.0
+
+    exact_hits = _match_values(request_values, topic_values)
+    if exact_hits:
+        matched_signals.extend(exact_hits)
+        reasoning.append(f"files overlap: {', '.join(exact_hits[:3])}")
+        score += min(6.0, len(exact_hits) * 3.0)
+
+    directory_hits = _match_related_directories(request_values, topic_values)
+    if directory_hits:
+        matched_signals.extend(directory_hits)
+        reasoning.append(f"directory overlap: {', '.join(directory_hits[:3])}")
+        score += min(3.0, len(directory_hits) * 1.5)
+
+    basename_hits = _match_related_basenames(request_values, topic_values)
+    if basename_hits:
+        matched_signals.extend(basename_hits)
+        reasoning.append(f"file basename overlap: {', '.join(basename_hits[:3])}")
+        score += min(2.0, len(basename_hits) * 1.0)
+
+    return score
+
+
+def _score_context_overlap(
+    request_contexts: list[str],
+    topic: TopicPublic,
+    matched_signals: list[str],
+    reasoning: list[str],
+) -> float:
+    if not request_contexts:
+        return 0.0
+
+    topic_candidates = _topic_text_candidates(topic)
+    best_hit: str | None = None
+    best_ratio = 0.0
+    for context in request_contexts[:8]:
+        normalized_context = _normalize_for_match(context)
+        if not normalized_context:
+            continue
+        for candidate in topic_candidates:
+            normalized_candidate = _normalize_for_match(candidate)
+            if not normalized_candidate:
+                continue
+            ratio = SequenceMatcher(None, normalized_context, normalized_candidate).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_hit = context
+
+    if best_hit is None:
+        return 0.0
+    if best_ratio >= 0.82:
+        matched_signals.append(best_hit)
+        reasoning.append(f"context similarity: {best_ratio:.2f}")
+        return 2.5
+    if best_ratio >= 0.68:
+        matched_signals.append(best_hit)
+        reasoning.append(f"context similarity: {best_ratio:.2f}")
+        return 1.5
+    return 0.0
+
+
 def _score_case_for_request(case: CasePublic, request: ContextPackBuildRequest) -> float:
     score = 0.0
-    score += len(_match_values(case.files, request.files)) * 2.0
+    score += _simple_file_relevance_score(case.files, request.files)
     score += len(_match_values(case.symbols, request.symbols)) * 2.0
     score += len(_match_values(case.errors, request.errors)) * 2.0
     score += len(_match_values(case.symptoms, request.symptoms)) * 2.0
-    case_tokens = set(_tokens(" ".join([case.title, case.summary_current or "", case.input_summary or ""])))
-    request_tokens = set(_tokens(" ".join(part for part in [request.title, request.request_summary] if part)))
+    case_tokens = set(
+        _tokens(" ".join([case.title, case.summary_current or "", case.input_summary or "", *case.files]))
+    )
+    request_tokens = set(_tokens(_request_search_text(request)))
     score += min(3.0, float(len(case_tokens & request_tokens)))
     return score
 
@@ -558,31 +636,155 @@ def _dedupe_relevant_cases(cases: list[RelevantCaseSummary]) -> list[RelevantCas
 
 
 def _score_text_similarity(
-    request_text: str,
+    request_fragments: list[str],
     topic: TopicPublic,
     reasoning: list[str],
 ) -> float:
-    normalized_request = _normalize_for_match(request_text)
-    if not normalized_request:
+    normalized_fragments = [
+        normalized for fragment in request_fragments if (normalized := _normalize_for_match(fragment))
+    ]
+    if not normalized_fragments:
         return 0.0
 
     best_ratio = 0.0
-    for candidate in [topic.title, topic.description or "", topic.rollup_summary or ""]:
-        normalized_candidate = _normalize_for_match(candidate)
-        if not normalized_candidate:
-            continue
-        best_ratio = max(best_ratio, SequenceMatcher(None, normalized_request, normalized_candidate).ratio())
+    for normalized_request in normalized_fragments[:10]:
+        for candidate in _topic_text_candidates(topic):
+            normalized_candidate = _normalize_for_match(candidate)
+            if not normalized_candidate:
+                continue
+            best_ratio = max(
+                best_ratio,
+                SequenceMatcher(None, normalized_request, normalized_candidate).ratio(),
+            )
 
-    if best_ratio >= 0.78:
+    if best_ratio >= 0.82:
         reasoning.append(f"request-text similarity: {best_ratio:.2f}")
-        return 3.0
-    if best_ratio >= 0.62:
+        return 3.5
+    if best_ratio >= 0.68:
         reasoning.append(f"request-text similarity: {best_ratio:.2f}")
         return 2.0
-    if best_ratio >= 0.48:
+    if best_ratio >= 0.54:
         reasoning.append(f"request-text similarity: {best_ratio:.2f}")
         return 1.0
     return 0.0
+
+
+def _request_text_fragments(request: TopicMatchRequest | ContextPackBuildRequest) -> list[str]:
+    return _dedupe_preserve_order(
+        [
+            request.title,
+            request.request_summary,
+            *request.aliases,
+            *request.symbols,
+            *request.errors,
+            *request.symptoms,
+            *request.contexts,
+        ]
+    )
+
+
+def _request_search_text(request: TopicMatchRequest | ContextPackBuildRequest) -> str:
+    file_hints = [hint for path in request.files for hint in _path_hint_tokens(path)]
+    values = [
+        *_request_text_fragments(request),
+        *request.files,
+        *file_hints,
+    ]
+    return " ".join(values)
+
+
+def _topic_text_candidates(topic: TopicPublic) -> list[str]:
+    return _dedupe_preserve_order(
+        [
+            topic.title,
+            topic.workflow_key,
+            topic.description or "",
+            topic.rollup_summary or "",
+            *topic.aliases,
+            *topic.vocabulary,
+            *topic.canonical_files,
+            *topic.canonical_symbols,
+            *topic.canonical_errors,
+            *topic.canonical_symptoms,
+        ]
+    )
+
+
+def _topic_file_hint_tokens(topic: TopicPublic) -> list[str]:
+    return [hint for path in topic.canonical_files for hint in _path_hint_tokens(path)]
+
+
+def _simple_file_relevance_score(case_files: list[str], request_files: list[str]) -> float:
+    return _score_file_overlap(case_files, request_files, [], [])
+
+
+def _match_related_directories(request_values: list[str], topic_values: list[str]) -> list[str]:
+    topic_directories = {
+        directory
+        for value in topic_values
+        for directory in _path_directories(value)
+        if len(directory) > 2
+    }
+    hits: list[str] = []
+    seen: set[str] = set()
+    for value in request_values:
+        for directory in reversed(_path_directories(value)):
+            if directory in seen:
+                continue
+            if directory in topic_directories:
+                seen.add(directory)
+                hits.append(directory)
+                break
+    return hits
+
+
+def _match_related_basenames(request_values: list[str], topic_values: list[str]) -> list[str]:
+    topic_basenames = {
+        basename
+        for value in topic_values
+        if (basename := _path_basename(value)) is not None
+    }
+    hits: list[str] = []
+    seen: set[str] = set()
+    for value in request_values:
+        basename = _path_basename(value)
+        if basename is None or basename in seen or basename not in topic_basenames:
+            continue
+        seen.add(basename)
+        hits.append(basename)
+    return hits
+
+
+def _path_directories(value: str) -> list[str]:
+    normalized = _normalize_path(value)
+    if not normalized or "/" not in normalized:
+        return []
+    parts = [part for part in normalized.split("/") if part]
+    return ["/".join(parts[:index]) for index in range(1, len(parts))]
+
+
+def _path_basename(value: str) -> str | None:
+    normalized = _normalize_path(value)
+    if not normalized:
+        return None
+    return normalized.split("/")[-1]
+
+
+def _path_hint_tokens(value: str) -> list[str]:
+    normalized = _normalize_path(value)
+    if not normalized:
+        return []
+    tokens = [token for token in re.split(r"[/.]", normalized) if len(token) > 2]
+    return tokens[:12]
+
+
+def _normalize_path(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().replace("\\", "/")
+    normalized = re.sub(r"/+", "/", normalized)
+    normalized = re.sub(r"(^|/)\./", r"\1", normalized)
+    return normalized.strip("/").lower()
 
 
 def _match_values(request_values: list[str], topic_values: list[str]) -> list[str]:
@@ -712,9 +914,9 @@ def _dedupe_preserve_order(values: list[Any]) -> list[Any]:
 
 
 def _confidence_for_score(score: float) -> str:
-    if score >= 8.0:
+    if score >= 7.0:
         return "high"
-    if score >= 4.0:
+    if score >= 3.5:
         return "medium"
     return "low"
 

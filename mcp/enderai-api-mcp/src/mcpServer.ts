@@ -19,6 +19,8 @@ export type McpServerOptions = {
 const AUDIT_MAX_BYTES = 48_000;
 const AUDIT_PREVIEW_CHARS = 8_000;
 const DEFAULT_CONTEXT_PACK_CASE_LIMIT = 3;
+const DEFAULT_REUSE_WINDOW_SECONDS = 60 * 60 * 24 * 30;
+const DEFAULT_THREAD_TITLE_MAX_CHARS = 255;
 const POLICY_VERSION = "topic_case_v1";
 const WORKFLOW_MODEL = "topic_case_v1";
 const AUTH_MODEL = "single_token_hosted_mcp";
@@ -93,17 +95,14 @@ const BeginCaseArgsSchema = z
     symbols: z.array(z.string()).optional(),
     errors: z.array(z.string()).optional(),
     symptoms: z.array(z.string()).optional(),
+    contexts: z.array(z.string()).optional(),
     auto_hydrate: z.boolean().optional(),
     max_cases_per_topic: z.number().int().positive().optional(),
     reuse_within_seconds: z.number().int().nonnegative().optional(),
   })
-  .strict()
-  .refine(
-    (value) => Boolean(trimToUndefined(value.topic_title) || trimToUndefined(value.workflow_key)),
-    {
-      message: "Provide topic_title or workflow_key so the case can be attached to a topic.",
-    },
-  );
+  .strict();
+
+type BeginCaseArgs = z.infer<typeof BeginCaseArgsSchema>;
 
 const UpdateCaseArgsSchema = z
   .object({
@@ -332,6 +331,68 @@ function pruneUndefined<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
+function trimToMaxLength(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
+}
+
+function dedupeNonEmptyStrings(values: Array<string | undefined>): string[] | undefined {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = trimToUndefined(value);
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+function describeTarget(target: unknown): string | undefined {
+  if (typeof target === "string") return trimToUndefined(target);
+  if (target && typeof target === "object" && !Array.isArray(target)) {
+    const record = target as Record<string, unknown>;
+    const parts = Object.entries(record)
+      .map(([key, value]) => {
+        if (value === null || value === undefined) return undefined;
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+          return `${key}:${String(value)}`;
+        }
+        return undefined;
+      })
+      .filter((value): value is string => Boolean(value));
+    if (parts.length > 0) return parts.join(" ");
+  }
+  try {
+    return trimToUndefined(JSON.stringify(target));
+  } catch {
+    return undefined;
+  }
+}
+
+function collectContextHints(args: BeginCaseArgs): string[] | undefined {
+  return dedupeNonEmptyStrings([
+    ...(args.contexts ?? []),
+    ...(args.targets ?? []).map((target) => describeTarget(target)),
+  ]);
+}
+
+function buildTopicMatchPayload(
+  args: BeginCaseArgs,
+  requestSummary: string,
+  caseTitle: string | undefined,
+): Record<string, unknown> {
+  return pruneUndefined({
+    title: caseTitle ?? requestSummary,
+    request_summary: requestSummary,
+    aliases: args.aliases,
+    files: args.files,
+    symbols: args.symbols,
+    errors: args.errors,
+    symptoms: args.symptoms,
+    contexts: collectContextHints(args),
+  });
+}
+
 function extractExecutionStartIds(
   resData: unknown,
 ): { executionId?: string; threadId?: string } {
@@ -343,6 +404,46 @@ function extractExecutionStartIds(
       typeof execution.id === "string" ? execution.id : undefined,
     threadId: typeof thread.id === "string" ? thread.id : undefined,
   };
+}
+
+function confidenceRank(value: unknown): number {
+  const normalized =
+    typeof value === "string" ? trimToUndefined(value)?.toLowerCase() : undefined;
+  if (normalized === "high") return 3;
+  if (normalized === "medium") return 2;
+  if (normalized === "low") return 1;
+  return 0;
+}
+
+function topicIsWithinReuseWindow(
+  topic: Record<string, any>,
+  reuseWithinSeconds: number | undefined,
+): boolean {
+  if (reuseWithinSeconds === undefined) return true;
+  const lastUsedAt =
+    typeof topic.last_used_at === "string" ? trimToUndefined(topic.last_used_at) : undefined;
+  if (!lastUsedAt) return true;
+  const lastUsedMs = Date.parse(lastUsedAt);
+  if (Number.isNaN(lastUsedMs)) return true;
+  return Date.now() - lastUsedMs <= reuseWithinSeconds * 1000;
+}
+
+function selectReusableMatchedTopic(
+  matchData: unknown,
+  minimumConfidence: "high" | "medium" | "low",
+  reuseWithinSeconds: number | undefined,
+): Record<string, any> | undefined {
+  const data = asRecord(matchData);
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  for (const candidateValue of candidates) {
+    const candidate = asRecord(candidateValue);
+    const topic = asRecord(candidate.topic);
+    if (typeof topic.id !== "string") continue;
+    if (confidenceRank(candidate.confidence) < confidenceRank(minimumConfidence)) continue;
+    if (!topicIsWithinReuseWindow(topic, reuseWithinSeconds)) continue;
+    return topic;
+  }
+  return undefined;
 }
 
 function extractErrorDetail(res: ResponseSummary): string {
@@ -675,6 +776,11 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 ...stringArrayJsonSchema,
                 description: "Known symptoms to seed the case and ContextPack.",
               },
+              contexts: {
+                ...stringArrayJsonSchema,
+                description:
+                  "Optional free-form context snippets to improve backend topic matching.",
+              },
               auto_hydrate: {
                 type: "boolean",
                 description:
@@ -943,22 +1049,21 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           );
         }
 
-        const topicTitle =
+        const requestSummary = trimToUndefined(args.request_summary)!;
+        const caseTitle = trimToUndefined(args.case_title);
+        const topicTitle = trimToMaxLength(
           trimToUndefined(args.topic_title) ??
           (trimToUndefined(args.workflow_key)
             ? humanizeWorkflowKey(trimToUndefined(args.workflow_key)!)
-            : undefined);
+            : caseTitle ?? requestSummary),
+          DEFAULT_THREAD_TITLE_MAX_CHARS,
+        );
         const workflowKey =
           trimToUndefined(args.workflow_key) ??
-          (topicTitle ? slugifyWorkflowKey(topicTitle) : undefined);
-        if (!topicTitle || !workflowKey) {
-          throw new Error(
-            "enderai_begin_case requires topic_title or workflow_key so the case can be attached to a topic.",
-          );
-        }
-
-        const requestSummary = trimToUndefined(args.request_summary)!;
-        const caseTitle = trimToUndefined(args.case_title);
+          slugifyWorkflowKey(topicTitle);
+        const reuseWithinSeconds =
+          args.reuse_within_seconds ?? DEFAULT_REUSE_WINDOW_SECONDS;
+        const minimumMatchConfidence: "medium" = "medium";
         const topicLookupRes = await enderaiFetch({
           method: "GET",
           path: "/api/v1/topics/",
@@ -979,7 +1084,30 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               .map((topic) => asRecord(topic))
               .find((topic) => typeof topic.id === "string")
           : undefined;
-        let topicData = existingTopic;
+        let matchedTopic: Record<string, any> | undefined;
+        if (!existingTopic) {
+          const topicMatchRes = await enderaiFetch({
+            method: "POST",
+            path: "/api/v1/topics/match",
+            bearerToken,
+            json: {
+              ...buildTopicMatchPayload(args, requestSummary, caseTitle),
+              limit: 3,
+            },
+          });
+          if (!topicMatchRes.ok) {
+            throw new Error(
+              `enderai_begin_case failed to match existing topics: ${extractErrorDetail(topicMatchRes)} (status ${topicMatchRes.status}).`,
+            );
+          }
+          matchedTopic = selectReusableMatchedTopic(
+            topicMatchRes.data,
+            minimumMatchConfidence,
+            reuseWithinSeconds,
+          );
+        }
+
+        let topicData = existingTopic ?? matchedTopic;
         if (!topicData) {
           const topicRes = await enderaiFetch({
             method: "POST",
@@ -1021,6 +1149,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               symbols: args.symbols,
               errors: args.errors,
               symptoms: args.symptoms,
+              contexts: collectContextHints(args),
               max_cases_per_topic:
                 args.max_cases_per_topic ?? DEFAULT_CONTEXT_PACK_CASE_LIMIT,
             }),
@@ -1091,7 +1220,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             context_found:
               Boolean(contextPackRecord.context_pack_snapshot) || relevantCases.length > 0,
           },
-          reused_topic: Boolean(existingTopic),
+          reused_topic: Boolean(existingTopic || matchedTopic),
           next: {
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",

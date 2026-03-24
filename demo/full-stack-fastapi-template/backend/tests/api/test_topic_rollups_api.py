@@ -138,3 +138,73 @@ def test_topic_rollups_match_and_context_pack(client, normal_user_token_headers,
     assert pack_body["relevant_cases"][0]["case_id"] == case_a_id
     assert pack_body["context_pack_snapshot"]["canonical_files"] == ["backend/app/api/routes/cases.py"]
     assert case_b_id not in pack_body["selected_case_ids"]
+
+
+def test_topic_match_groups_related_frontend_table_work(client, normal_user_token_headers) -> None:
+    topic = client.post(
+        "/api/v1/topics/",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Frontend table layout",
+            "workflow_key": "frontend_table_layout",
+            "description": "Track shared Topics/Cases table layout and scrolling fixes.",
+            "aliases": ["topics cases table", "split table"],
+        },
+    )
+    assert topic.status_code == 201, topic.text
+    topic_id = topic.json()["id"]
+
+    case = client.post(
+        "/api/v1/cases/",
+        headers=normal_user_token_headers,
+        json={
+            "topic_id": topic_id,
+            "title": "Fix topics/cases table header alignment",
+            "status": "done",
+            "summary_current": "Shared frontend table layout now keeps headers aligned with body rows.",
+            "files": ["src/components/Common/SplitDataTable.tsx"],
+            "symbols": ["SplitDataTable"],
+            "symptoms": ["header columns drift while scrolling"],
+            "outcome": "Topics/Cases table header alignment is consistent while scrolling.",
+        },
+    )
+    assert case.status_code == 201, case.text
+    case_id = case.json()["id"]
+
+    match = client.post(
+        "/api/v1/topics/match",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Fix split table overflow clipping",
+            "request_summary": "Keep frontend table scrolling and alignment fixes grouped together.",
+            "files": ["src/components/Common/SplitScrollableTable.tsx"],
+            "contexts": [
+                "frontend table layout",
+                "topics cases table header alignment",
+            ],
+        },
+    )
+    assert match.status_code == 200, match.text
+    match_body = match.json()
+    assert match_body["policy"]["confidence"] in {"high", "medium"}
+    assert match_body["candidates"][0]["topic"]["id"] == topic_id
+
+    pack = client.post(
+        "/api/v1/context-packs/build",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Fix split table overflow clipping",
+            "request_summary": "Keep frontend table scrolling and alignment fixes grouped together.",
+            "files": ["src/components/Common/SplitScrollableTable.tsx"],
+            "contexts": [
+                "frontend table layout",
+                "topics cases table header alignment",
+            ],
+            "max_topics": 1,
+            "max_cases_per_topic": 2,
+        },
+    )
+    assert pack.status_code == 200, pack.text
+    pack_body = pack.json()
+    assert pack_body["selected_topic_ids"] == [topic_id]
+    assert pack_body["selected_case_ids"] == [case_id]
