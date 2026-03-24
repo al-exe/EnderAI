@@ -378,6 +378,29 @@ class CasesPublic(SQLModel):
     count: int
 
 
+class SearchRouteSearch(SQLModel):
+    topicId: str | None = None
+    caseId: str | None = None
+
+
+class SearchHitPublic(SQLModel):
+    kind: Literal["topic", "case"]
+    id: uuid.UUID
+    title: str
+    subtitle: str | None = None
+    excerpt: str | None = None
+    updated_at: datetime | None = None
+    route: Literal["/topics", "/cases"]
+    route_search: SearchRouteSearch = Field(default_factory=SearchRouteSearch)
+
+
+class SearchResultsPublic(SQLModel):
+    topics: list[SearchHitPublic] = Field(default_factory=list)
+    cases: list[SearchHitPublic] = Field(default_factory=list)
+    topic_count: int = 0
+    case_count: int = 0
+
+
 class CaseCreate(SQLModel):
     topic_id: uuid.UUID
     title: str | None = Field(default=None, min_length=1, max_length=255)
