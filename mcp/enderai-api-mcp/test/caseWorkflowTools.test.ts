@@ -89,6 +89,12 @@ describe("guided case workflow MCP tools", () => {
         )
         .mockResolvedValueOnce(
           jsonResponse({
+            policy: { confidence: "low", max_topics: 1 },
+            candidates: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
             id: topicId,
             title: "Core model",
             workflow_key: "core_model",
@@ -195,10 +201,19 @@ describe("guided case workflow MCP tools", () => {
       expect(beginBody.hydration.context_pack_attached).toBe(true);
       expect(beginBody.hydration.relevant_case_count).toBe(1);
       expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
-      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/");
-      expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/context-packs/build");
-      expect(mockFetch.mock.calls[3][0].toString()).toContain("/api/v1/cases/");
-      expect(JSON.parse(mockFetch.mock.calls[2][1].body)).toMatchObject({
+      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/match");
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+        title: "Hydration gap",
+        request_summary: "Hydration gap",
+        files: [
+          "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+        ],
+        limit: 3,
+      });
+      expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[3][0].toString()).toContain("/api/v1/context-packs/build");
+      expect(mockFetch.mock.calls[4][0].toString()).toContain("/api/v1/cases/");
+      expect(JSON.parse(mockFetch.mock.calls[3][1].body)).toMatchObject({
         topic_id: topicId,
         request_summary: "Hydration gap",
       });
@@ -271,9 +286,9 @@ describe("guided case workflow MCP tools", () => {
       const updateBody = JSON.parse(summarizeToolText(update.content));
       expect(updateBody.case.summary_current).toBe("Captured first evidence");
       expect(updateBody.progress_event.message).toBe("Captured first evidence");
-      expect(mockFetch.mock.calls[4][0].toString()).toContain(`/api/v1/cases/${caseId}`);
       expect(mockFetch.mock.calls[5][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(mockFetch.mock.calls[6][0].toString()).toContain(
+      expect(mockFetch.mock.calls[6][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[7][0].toString()).toContain(
         `/api/v1/cases/${caseId}/events`,
       );
 
@@ -367,6 +382,12 @@ describe("guided case workflow MCP tools", () => {
           jsonResponse({
             data: [],
             count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "low", max_topics: 1 },
+            candidates: [],
           }),
         )
         .mockResolvedValueOnce(
@@ -470,6 +491,116 @@ describe("guided case workflow MCP tools", () => {
     }
   });
 
+  it("reuses a matched topic when begin_case only has request signals", async () => {
+    const harness = await createHarness();
+    try {
+      const topicId = "33333333-3333-3333-3333-333333333333";
+      const caseId = "44444444-4444-4444-4444-444444444444";
+
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [],
+            count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "medium", max_topics: 1 },
+            candidates: [
+              {
+                topic: {
+                  id: topicId,
+                  title: "Frontend table layout",
+                  workflow_key: "frontend_table_layout",
+                  status: "open",
+                  last_used_at: "2026-03-23T06:30:00.000Z",
+                },
+                score: 5.8,
+                confidence: "medium",
+                matched_signals: ["frontend table layout"],
+                reasoning: ["context similarity: 0.84"],
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "medium", max_topics: 1 },
+            matched_topics: [],
+            selected_topic_ids: [topicId],
+            selected_case_ids: [caseId],
+            relevant_cases: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "medium",
+              matched_signals: ["frontend table layout"],
+              representative_cases: [],
+              recent_cases: [],
+              relevant_cases: [],
+              canonical_files: ["src/components/Common/SplitDataTable.tsx"],
+              canonical_symbols: [],
+              canonical_errors: [],
+              canonical_symptoms: [],
+              pinned_takeaways: [],
+              ambiguities: [],
+              questions: [],
+              negative_history: [],
+              builder_version: "v1",
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: caseId,
+            topic_id: topicId,
+            title: "Fix split table overflow clipping",
+            status: "running",
+            input_summary: "Fix split table overflow clipping",
+            summary_current: "Fix split table overflow clipping",
+            files: ["src/components/Common/SplitScrollableTable.tsx"],
+            symbols: [],
+            errors: [],
+            symptoms: [],
+            commands: [],
+            hypotheses: [],
+            changes: [],
+            next_steps: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "medium",
+            },
+          }),
+        );
+
+      const begin = await harness.client.callTool({
+        name: "enderai_begin_case",
+        arguments: {
+          request_summary: "Fix split table overflow clipping",
+          files: ["src/components/Common/SplitScrollableTable.tsx"],
+          contexts: ["frontend table layout", "topics cases table header alignment"],
+        },
+      });
+      const beginBody = JSON.parse(summarizeToolText(begin.content));
+      expect(beginBody.topic.id).toBe(topicId);
+      expect(beginBody.reused_topic).toBe(true);
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
+      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/match");
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+        title: "Fix split table overflow clipping",
+        request_summary: "Fix split table overflow clipping",
+        files: ["src/components/Common/SplitScrollableTable.tsx"],
+        contexts: ["frontend table layout", "topics cases table header alignment"],
+        limit: 3,
+      });
+      expect(JSON.parse(mockFetch.mock.calls[3][1].body)).toMatchObject({
+        topic_id: topicId,
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it("allows begin_case to recover from a stale closed active case", async () => {
     const harness = await createHarness();
     try {
@@ -510,6 +641,12 @@ describe("guided case workflow MCP tools", () => {
           jsonResponse({
             data: [],
             count: 0,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "low", max_topics: 1 },
+            candidates: [],
           }),
         )
         .mockResolvedValueOnce(

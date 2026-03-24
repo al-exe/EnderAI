@@ -185,6 +185,17 @@ class CaseEvent(SQLModel, table=True):
     supersedes_event_id: int | None = Field(default=None, foreign_key="case_event.id")
 
 
+class TopicMatchSignals(SQLModel):
+    title: str | None = None
+    request_summary: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    contexts: list[str] = Field(default_factory=list)
+
+
 HypothesisStatus = Literal["open", "supported", "disproven"]
 ChangeKind = Literal["code", "config", "infra", "docs", "test"]
 ConfidenceLevel = Literal["high", "medium", "low"]
@@ -315,14 +326,7 @@ class TopicUpdate(SQLModel):
     owner_ids: list[uuid.UUID] | None = None
 
 
-class TopicMatchRequest(SQLModel):
-    title: str | None = None
-    request_summary: str | None = None
-    aliases: list[str] = Field(default_factory=list)
-    files: list[str] = Field(default_factory=list)
-    symbols: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    symptoms: list[str] = Field(default_factory=list)
+class TopicMatchRequest(TopicMatchSignals):
     limit: int = 5
 
 
@@ -477,15 +481,8 @@ class CaseHydrationView(SQLModel):
     context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
 
 
-class ContextPackBuildRequest(SQLModel):
+class ContextPackBuildRequest(TopicMatchSignals):
     topic_id: uuid.UUID | None = None
-    title: str | None = None
-    request_summary: str | None = None
-    aliases: list[str] = Field(default_factory=list)
-    files: list[str] = Field(default_factory=list)
-    symbols: list[str] = Field(default_factory=list)
-    errors: list[str] = Field(default_factory=list)
-    symptoms: list[str] = Field(default_factory=list)
     max_topics: int | None = None
     max_cases_per_topic: int = 3
 
