@@ -181,12 +181,24 @@ def read_topic_model(
     session: Session,
     topic_id: uuid.UUID,
     owner_id: uuid.UUID | None = None,
+    *,
+    claim_legacy_orphans: bool = False,
 ) -> Topic | None:
     topic = session.get(Topic, topic_id)
     if topic is None:
         return None
     if owner_id is not None and not _topic_visible_to_owner(topic, owner_id, session=session):
-        return None
+        if claim_legacy_orphans:
+            claimed = claim_legacy_orphan_topics_for_owner(
+                session,
+                owner_id,
+                topic_id=topic_id,
+            )
+            if claimed:
+                session.flush()
+                topic = session.get(Topic, topic_id)
+        if topic is None or not _topic_visible_to_owner(topic, owner_id, session=session):
+            return None
     return topic
 
 
@@ -466,6 +478,53 @@ def _default_rollup(topic: Topic) -> dict[str, Any]:
 def _topic_ids_with_owned_cases(session: Session, owner_id: uuid.UUID) -> set[uuid.UUID]:
     statement = select(CaseRecord.topic_id).where(CaseRecord.actor_id == owner_id)
     return set(session.exec(statement).all())
+
+
+def claim_legacy_orphan_topics_for_owner(
+    session: Session,
+    owner_id: uuid.UUID,
+    *,
+    topic_id: uuid.UUID | None = None,
+) -> int:
+    # Compatibility bridge for rows created before ownership metadata was enforced.
+    # Once claimed, the topic/cases behave like normal owned data.
+    owner_id_str = str(owner_id)
+    now = get_datetime_utc()
+    claimed_topics = 0
+
+    if topic_id is not None:
+        topics = [session.get(Topic, topic_id)]
+    else:
+        topics = list(session.exec(select(Topic)).all())
+
+    for topic in topics:
+        if topic is None:
+            continue
+        if owner_id_str in topic.owner_ids:
+            continue
+        if topic.owner_ids:
+            continue
+
+        cases = list(
+            session.exec(
+                select(CaseRecord).where(CaseRecord.topic_id == topic.id)
+            ).all()
+        )
+        if any(case.actor_id not in {None, owner_id} for case in cases):
+            continue
+
+        topic.owner_ids = [owner_id_str]
+        topic.updated_at = now
+        session.add(topic)
+        claimed_topics += 1
+
+        for case in cases:
+            if case.actor_id is None:
+                case.actor_id = owner_id
+                case.updated_at = now
+                session.add(case)
+
+    return claimed_topics
 
 
 def _topic_visible_to_owner(
