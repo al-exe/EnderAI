@@ -16,7 +16,7 @@ from app.core.cases import (
     render_case_hydration,
     render_case_memo,
 )
-from app.core.topics import refresh_topic_rollup
+from app.core.topics import _case_visible_to_owner, read_topic_model, refresh_topic_rollup
 from app.models import (
     CaseCreate,
     CaseEvent,
@@ -36,6 +36,26 @@ from app.models import (
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
+def _owner_scope_id(current_user: CurrentUser) -> uuid.UUID:
+    return current_user.id
+
+
+def _get_visible_case_and_topic(
+    session: SessionDep,
+    current_user: CurrentUser,
+    case_id: uuid.UUID,
+) -> tuple[CaseRecord, Topic]:
+    owner_id = _owner_scope_id(current_user)
+    case_record = session.get(CaseRecord, case_id)
+    if case_record is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    topic = read_topic_model(session, case_record.topic_id, owner_id=owner_id)
+    if topic is None or not _case_visible_to_owner(case_record, topic, owner_id):
+        raise HTTPException(status_code=404, detail="Case not found")
+    return case_record, topic
+
+
 @router.get("/", response_model=CasesPublic)
 def read_cases(
     session: SessionDep,
@@ -46,6 +66,7 @@ def read_cases(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
+    owner_id = _owner_scope_id(current_user)
     statement = select(CaseRecord)
     if topic_id is not None:
         statement = statement.where(CaseRecord.topic_id == topic_id)
@@ -61,15 +82,21 @@ def read_cases(
             )
         )
 
-    count = len(session.exec(statement).all())
     statement = statement.order_by(col(CaseRecord.updated_at).desc(), col(CaseRecord.opened_at).desc())
-    statement = statement.offset(skip).limit(limit)
-    cases = list(session.exec(statement).all())
-    topic_ids = {case.topic_id for case in cases}
+    candidate_cases = list(session.exec(statement).all())
+    topic_ids = {case.topic_id for case in candidate_cases}
     topics = {
         topic.id: topic
         for topic in session.exec(select(Topic).where(col(Topic.id).in_(topic_ids))).all()
     } if topic_ids else {}
+    visible_cases = [
+        case
+        for case in candidate_cases
+        if (topic := topics.get(case.topic_id)) is not None
+        and _case_visible_to_owner(case, topic, owner_id)
+    ]
+    count = len(visible_cases)
+    cases = visible_cases[skip : skip + limit]
     return CasesPublic(
         data=[build_case_public(case, topics.get(case.topic_id)) for case in cases],
         count=count,
@@ -82,9 +109,12 @@ def create_case(
     current_user: CurrentUser,
     case_in: CaseCreate,
 ) -> Any:
-    topic = session.get(Topic, case_in.topic_id)
+    owner_id = _owner_scope_id(current_user)
+    topic = read_topic_model(session, case_in.topic_id, owner_id=owner_id)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
+    if case_in.actor_id is not None and case_in.actor_id != owner_id:
+        raise HTTPException(status_code=403, detail="actor_id must match the current user")
 
     title = (
         (case_in.title or "").strip()
@@ -100,7 +130,7 @@ def create_case(
         updated_at=now,
         status=case_in.status.strip() if case_in.status.strip() else "open",
         closed_at=now if is_terminal_case_status(case_in.status) else None,
-        actor_id=case_in.actor_id,
+        actor_id=owner_id,
         source=case_in.source.strip() if isinstance(case_in.source, str) and case_in.source.strip() else None,
         input_summary=(case_in.input_summary.strip() if isinstance(case_in.input_summary, str) and case_in.input_summary.strip() else None),
         summary_current=(case_in.summary_current.strip() if isinstance(case_in.summary_current, str) and case_in.summary_current.strip() else None),
@@ -130,11 +160,13 @@ def create_case(
         topic_id=topic.id,
         case_id=case_record.id,
     ).model_dump(mode="json")
+    if str(owner_id) not in topic.owner_ids:
+        topic.owner_ids = [*topic.owner_ids, str(owner_id)]
     topic.last_used_at = now
     topic.updated_at = now
     session.add(topic)
     session.add(case_record)
-    refresh_topic_rollup(session, topic.id, persist=True)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
     session.commit()
     session.refresh(case_record)
     session.refresh(topic)
@@ -143,10 +175,7 @@ def create_case(
 
 @router.get("/{case_id}", response_model=CasePublic)
 def read_case(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
-    topic = session.get(Topic, case_record.topic_id)
+    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
     return build_case_public(case_record, topic)
 
 
@@ -157,23 +186,25 @@ def update_case(
     case_id: uuid.UUID,
     case_in: CaseUpdate,
 ) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
-    topic = session.get(Topic, case_record.topic_id)
-    if topic is None:
-        raise HTTPException(status_code=404, detail="Topic not found")
+    owner_id = _owner_scope_id(current_user)
+    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
 
     update = case_in.model_dump(mode="json", exclude_unset=True)
     if not update:
         raise HTTPException(status_code=422, detail="No fields to update")
+    if "actor_id" in update and update["actor_id"] != owner_id:
+        raise HTTPException(status_code=403, detail="actor_id must match the current user")
+    if case_record.actor_id is None:
+        case_record.actor_id = owner_id
+    if str(owner_id) not in topic.owner_ids:
+        topic.owner_ids = [*topic.owner_ids, str(owner_id)]
 
     apply_case_update(case_record, update)
     topic.last_used_at = get_datetime_utc()
     topic.updated_at = topic.last_used_at
     session.add(case_record)
     session.add(topic)
-    refresh_topic_rollup(session, topic.id, persist=True)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
     session.commit()
     session.refresh(case_record)
     session.refresh(topic)
@@ -182,27 +213,19 @@ def update_case(
 
 @router.get("/{case_id}/memo", response_model=CaseMemoView)
 def read_case_memo(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
-    topic = session.get(Topic, case_record.topic_id)
+    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
     return render_case_memo(build_case_public(case_record, topic))
 
 
 @router.get("/{case_id}/hydration", response_model=CaseHydrationView)
 def read_case_hydration(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
-    topic = session.get(Topic, case_record.topic_id)
+    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
     return render_case_hydration(build_case_public(case_record, topic))
 
 
 @router.get("/{case_id}/events", response_model=CaseEventsPublic)
 def read_case_events(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
+    _get_visible_case_and_topic(session, current_user, case_id)
     statement = (
         select(CaseEvent)
         .where(CaseEvent.case_id == case_id)
@@ -222,9 +245,7 @@ def create_case_event_route(
     case_id: uuid.UUID,
     event_in: CaseEventCreate,
 ) -> Any:
-    case_record = session.get(CaseRecord, case_id)
-    if case_record is None:
-        raise HTTPException(status_code=404, detail="Case not found")
+    _get_visible_case_and_topic(session, current_user, case_id)
 
     case_event = build_case_event(case_id, event_in)
     session.add(case_event)

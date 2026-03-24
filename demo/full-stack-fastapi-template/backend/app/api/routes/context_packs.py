@@ -9,6 +9,10 @@ from app.models import ContextPackBuildRequest, ContextPackBuildResult
 router = APIRouter(prefix="/context-packs", tags=["context-packs"])
 
 
+def _owner_scope_id(current_user: CurrentUser):
+    return current_user.id
+
+
 @router.post("/build", response_model=ContextPackBuildResult)
 def build_context_pack_route(
     session: SessionDep,
@@ -16,6 +20,10 @@ def build_context_pack_route(
     request: ContextPackBuildRequest,
 ) -> Any:
     try:
-        return build_context_pack(session, request)
+        return build_context_pack(
+            session,
+            request,
+            owner_id=_owner_scope_id(current_user),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
