@@ -85,7 +85,7 @@ def build_case_public(case_record: CaseRecord, topic: Topic | None) -> CasePubli
     )
 
 
-def build_default_case_data(case_record: CaseRecord) -> dict[str, Any]:
+def build_default_case_data(_case_record: CaseRecord) -> dict[str, Any]:
     # Keep narrative scalars on CaseRecord columns, not inside the legacy JSON payload.
     return {
         "files": [],

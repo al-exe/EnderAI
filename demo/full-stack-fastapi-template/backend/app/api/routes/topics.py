@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.demo import ensure_demo_workspace
 from app.core.topics import (
     allocate_topic_identity,
     build_topic_public_current,
@@ -15,7 +16,17 @@ from app.core.topics import (
     read_topic_model,
     refresh_topic_rollup,
 )
-from app.models import Topic, TopicCreate, TopicMatchRequest, TopicMatchResult, TopicPublic, TopicRollupPublic, TopicsPublic, TopicUpdate, get_datetime_utc
+from app.models import (
+    Topic,
+    TopicCreate,
+    TopicMatchRequest,
+    TopicMatchResult,
+    TopicPublic,
+    TopicRollupPublic,
+    TopicsPublic,
+    TopicUpdate,
+    get_datetime_utc,
+)
 
 router = APIRouter(prefix="/topics", tags=["topics"])
 
@@ -28,6 +39,7 @@ def _owner_scope_id(current_user: CurrentUser) -> uuid.UUID:
 def read_topics(
     session: SessionDep,
     current_user: CurrentUser,
+    demo: bool = Query(default=False),
     status: str | None = None,
     q: str | None = None,
     workflow_key: str | None = None,
@@ -35,12 +47,16 @@ def read_topics(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
     if claimed:
         session.commit()
     topics = list_topic_models(
         session,
         owner_id=owner_id,
+        demo=demo,
         status=status,
         q=q,
         workflow_key=workflow_key,
@@ -49,12 +65,13 @@ def read_topics(
     )
     return TopicsPublic(
         data=[
-            build_topic_public_current(session, topic, owner_id=owner_id)
+            build_topic_public_current(session, topic, owner_id=owner_id, demo=demo)
             for topic in topics
         ],
         count=count_topics(
             session,
             owner_id=owner_id,
+            demo=demo,
             status=status,
             q=q,
             workflow_key=workflow_key,
@@ -101,24 +118,36 @@ def match_topics_route(
     session: SessionDep,
     current_user: CurrentUser,
     request: TopicMatchRequest,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
     if claimed:
         session.commit()
-    return match_topics(session, request, owner_id=owner_id)
+    return match_topics(session, request, owner_id=owner_id, demo=demo)
 
 
 @router.get("/{topic_id}", response_model=TopicPublic)
-def read_topic(session: SessionDep, current_user: CurrentUser, topic_id: uuid.UUID) -> Any:
+def read_topic(
+    session: SessionDep,
+    current_user: CurrentUser,
+    topic_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
     if claimed:
         session.commit()
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
-    return build_topic_public_current(session, topic, owner_id=owner_id)
+    return build_topic_public_current(session, topic, owner_id=owner_id, demo=demo)
 
 
 @router.patch("/{topic_id}", response_model=TopicPublic)
@@ -127,12 +156,16 @@ def update_topic(
     current_user: CurrentUser,
     topic_id: uuid.UUID,
     topic_in: TopicUpdate,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
     if claimed:
         session.commit()
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
@@ -174,10 +207,10 @@ def update_topic(
     session.add(topic)
     session.commit()
     session.refresh(topic)
-    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id, demo=demo)
     session.commit()
     session.refresh(topic)
-    return build_topic_public_current(session, topic, owner_id=owner_id)
+    return build_topic_public_current(session, topic, owner_id=owner_id, demo=demo)
 
 
 @router.get("/{topic_id}/rollup", response_model=TopicRollupPublic)
@@ -185,16 +218,26 @@ def read_topic_rollup(
     session: SessionDep,
     current_user: CurrentUser,
     topic_id: uuid.UUID,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
     if claimed:
         session.commit()
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
-    rollup = refresh_topic_rollup(session, topic_id, persist=False, owner_id=owner_id)
+    rollup = refresh_topic_rollup(
+        session,
+        topic_id,
+        persist=False,
+        owner_id=owner_id,
+        demo=demo,
+    )
     if rollup is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     return rollup
@@ -205,16 +248,26 @@ def refresh_topic_rollup_route(
     session: SessionDep,
     current_user: CurrentUser,
     topic_id: uuid.UUID,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
     if claimed:
         session.commit()
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
-    rollup = refresh_topic_rollup(session, topic_id, persist=True, owner_id=owner_id)
+    rollup = refresh_topic_rollup(
+        session,
+        topic_id,
+        persist=True,
+        owner_id=owner_id,
+        demo=demo,
+    )
     if rollup is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     return rollup

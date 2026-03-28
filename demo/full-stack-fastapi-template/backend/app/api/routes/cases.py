@@ -16,8 +16,10 @@ from app.core.cases import (
     render_case_hydration,
     render_case_memo,
 )
+from app.core.demo import ensure_demo_workspace
 from app.core.topics import (
     _case_visible_to_owner,
+    _topic_matches_demo_mode,
     claim_legacy_orphan_topics_for_owner,
     read_topic_model,
     refresh_topic_rollup,
@@ -49,6 +51,8 @@ def _get_visible_case_and_topic(
     session: SessionDep,
     current_user: CurrentUser,
     case_id: uuid.UUID,
+    *,
+    demo: bool = False,
 ) -> tuple[CaseRecord, Topic]:
     owner_id = _owner_scope_id(current_user)
     case_record = session.get(CaseRecord, case_id)
@@ -63,8 +67,12 @@ def _get_visible_case_and_topic(
     if claimed:
         session.commit()
 
-    topic = read_topic_model(session, case_record.topic_id, owner_id=owner_id)
-    if topic is None or not _case_visible_to_owner(case_record, topic, owner_id):
+    topic = read_topic_model(session, case_record.topic_id, owner_id=owner_id, demo=demo)
+    if (
+        topic is None
+        or not _topic_matches_demo_mode(topic, demo)
+        or not _case_visible_to_owner(case_record, topic, owner_id)
+    ):
         raise HTTPException(status_code=404, detail="Case not found")
     return case_record, topic
 
@@ -73,6 +81,7 @@ def _get_visible_case_and_topic(
 def read_cases(
     session: SessionDep,
     current_user: CurrentUser,
+    demo: bool = Query(default=False),
     topic_id: uuid.UUID | None = None,
     status: str | None = None,
     q: str | None = None,
@@ -80,6 +89,9 @@ def read_cases(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
     claimed = claim_legacy_orphan_topics_for_owner(
         session,
         owner_id,
@@ -114,6 +126,7 @@ def read_cases(
         case
         for case in candidate_cases
         if (topic := topics.get(case.topic_id)) is not None
+        and _topic_matches_demo_mode(topic, demo)
         and _case_visible_to_owner(case, topic, owner_id)
     ]
     count = len(visible_cases)
@@ -129,9 +142,13 @@ def create_case(
     session: SessionDep,
     current_user: CurrentUser,
     case_in: CaseCreate,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    topic = read_topic_model(session, case_in.topic_id, owner_id=owner_id)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    topic = read_topic_model(session, case_in.topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     if case_in.actor_id is not None and case_in.actor_id != owner_id:
@@ -187,7 +204,7 @@ def create_case(
     topic.updated_at = now
     session.add(topic)
     session.add(case_record)
-    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id, demo=demo)
     session.commit()
     session.refresh(case_record)
     session.refresh(topic)
@@ -195,8 +212,21 @@ def create_case(
 
 
 @router.get("/{case_id}", response_model=CasePublic)
-def read_case(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
+def read_case(
+    session: SessionDep,
+    current_user: CurrentUser,
+    case_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    case_record, topic = _get_visible_case_and_topic(
+        session,
+        current_user,
+        case_id,
+        demo=demo,
+    )
     return build_case_public(case_record, topic)
 
 
@@ -206,9 +236,18 @@ def update_case(
     current_user: CurrentUser,
     case_id: uuid.UUID,
     case_in: CaseUpdate,
+    demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    case_record, topic = _get_visible_case_and_topic(
+        session,
+        current_user,
+        case_id,
+        demo=demo,
+    )
 
     update = case_in.model_dump(mode="json", exclude_unset=True)
     if not update:
@@ -225,7 +264,7 @@ def update_case(
     topic.updated_at = topic.last_used_at
     session.add(case_record)
     session.add(topic)
-    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id)
+    refresh_topic_rollup(session, topic.id, persist=True, owner_id=owner_id, demo=demo)
     session.commit()
     session.refresh(case_record)
     session.refresh(topic)
@@ -233,20 +272,54 @@ def update_case(
 
 
 @router.get("/{case_id}/memo", response_model=CaseMemoView)
-def read_case_memo(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
+def read_case_memo(
+    session: SessionDep,
+    current_user: CurrentUser,
+    case_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    case_record, topic = _get_visible_case_and_topic(
+        session,
+        current_user,
+        case_id,
+        demo=demo,
+    )
     return render_case_memo(build_case_public(case_record, topic))
 
 
 @router.get("/{case_id}/hydration", response_model=CaseHydrationView)
-def read_case_hydration(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    case_record, topic = _get_visible_case_and_topic(session, current_user, case_id)
+def read_case_hydration(
+    session: SessionDep,
+    current_user: CurrentUser,
+    case_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    case_record, topic = _get_visible_case_and_topic(
+        session,
+        current_user,
+        case_id,
+        demo=demo,
+    )
     return render_case_hydration(build_case_public(case_record, topic))
 
 
 @router.get("/{case_id}/events", response_model=CaseEventsPublic)
-def read_case_events(session: SessionDep, current_user: CurrentUser, case_id: uuid.UUID) -> Any:
-    _get_visible_case_and_topic(session, current_user, case_id)
+def read_case_events(
+    session: SessionDep,
+    current_user: CurrentUser,
+    case_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    _get_visible_case_and_topic(session, current_user, case_id, demo=demo)
     statement = (
         select(CaseEvent)
         .where(CaseEvent.case_id == case_id)
@@ -265,8 +338,12 @@ def create_case_event_route(
     current_user: CurrentUser,
     case_id: uuid.UUID,
     event_in: CaseEventCreate,
+    demo: bool = Query(default=False),
 ) -> Any:
-    _get_visible_case_and_topic(session, current_user, case_id)
+    if demo and ensure_demo_workspace(session, current_user):
+        session.commit()
+        session.refresh(current_user)
+    _get_visible_case_and_topic(session, current_user, case_id, demo=demo)
 
     case_event = build_case_event(case_id, event_in)
     session.add(case_event)

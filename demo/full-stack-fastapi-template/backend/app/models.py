@@ -51,6 +51,10 @@ class User(UserBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+    demo_seeded_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
 
 
 class UserPublic(UserBase):
@@ -146,6 +150,7 @@ class Topic(SQLModel, table=True):
     description: str | None = None
     aliases: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     status: str = Field(default="open", min_length=1, max_length=64)
+    is_demo: bool = Field(default=False, index=True)
     owner_ids: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
     updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]

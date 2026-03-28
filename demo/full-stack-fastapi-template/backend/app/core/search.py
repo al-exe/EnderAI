@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -5,14 +6,17 @@ from datetime import datetime, timezone
 from sqlmodel import Session, col, select
 
 from app.core.cases import build_case_public
-from app.core.topics import build_topic_public
+from app.core.topics import (
+    _case_visible_to_owner,
+    build_topic_public_current,
+    list_topic_models,
+)
 from app.models import (
     CasePublic,
     CaseRecord,
     SearchHitPublic,
     SearchResultsPublic,
     SearchRouteSearch,
-    Topic,
     TopicPublic,
 )
 
@@ -27,19 +31,20 @@ def search_topics_and_cases(
     session: Session,
     q: str,
     *,
+    owner_id: uuid.UUID,
+    demo: bool = False,
     limit_per_kind: int = 5,
 ) -> SearchResultsPublic:
     query = _normalize_text(q)
     if len(query) < 2:
         raise ValueError("q must be at least 2 non-space characters")
 
-    topics = list(
-        session.exec(
-            select(Topic).order_by(
-                col(Topic.last_used_at).desc(),
-                col(Topic.updated_at).desc(),
-            )
-        ).all()
+    topics = list_topic_models(
+        session,
+        owner_id=owner_id,
+        demo=demo,
+        skip=0,
+        limit=10_000,
     )
     topic_models = {topic.id: topic for topic in topics}
     cases = list(
@@ -54,18 +59,33 @@ def search_topics_and_cases(
     topic_hits = [
         scored
         for topic in topics
-        if (scored := _score_topic_hit(build_topic_public(topic), query)) is not None
+        if (
+            scored := _score_topic_hit(
+                build_topic_public_current(
+                    session,
+                    topic,
+                    owner_id=owner_id,
+                    demo=demo,
+                ),
+                query,
+            )
+        )
+        is not None
     ]
     case_hits = [
         scored
         for case_record in cases
         if (
-            scored := _score_case_hit(
-                build_case_public(case_record, topic_models.get(case_record.topic_id)),
-                query,
+            (topic := topic_models.get(case_record.topic_id)) is not None
+            and _case_visible_to_owner(case_record, topic, owner_id)
+            and (
+                scored := _score_case_hit(
+                    build_case_public(case_record, topic),
+                    query,
+                )
             )
+            is not None
         )
-        is not None
     ]
 
     _sort_hits(topic_hits)
