@@ -96,9 +96,16 @@ def build_topic_public_current(
     topic: Topic,
     *,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> TopicPublic:
     if owner_id is not None:
-        rollup = refresh_topic_rollup(session, topic.id, persist=False, owner_id=owner_id)
+        rollup = refresh_topic_rollup(
+            session,
+            topic.id,
+            persist=False,
+            owner_id=owner_id,
+            demo=demo,
+        )
         if rollup is None:
             return build_topic_public(topic)
 
@@ -110,7 +117,7 @@ def build_topic_public_current(
     if not _topic_rollup_needs_refresh(session, topic):
         return build_topic_public(topic)
 
-    rollup = refresh_topic_rollup(session, topic.id, persist=False)
+    rollup = refresh_topic_rollup(session, topic.id, persist=False, demo=demo)
     if rollup is None:
         return build_topic_public(topic)
 
@@ -124,6 +131,7 @@ def list_topic_models(
     session: Session,
     *,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
     status: str | None = None,
     q: str | None = None,
     workflow_key: str | None = None,
@@ -153,6 +161,7 @@ def list_topic_models(
             for topic in topics
             if _topic_visible_to_owner(topic, owner_id, actor_topic_ids=actor_topic_ids)
         ]
+    topics = [topic for topic in topics if _topic_matches_demo_mode(topic, demo)]
     return topics[skip : skip + limit]
 
 
@@ -160,6 +169,7 @@ def count_topics(
     session: Session,
     *,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
     status: str | None = None,
     q: str | None = None,
     workflow_key: str | None = None,
@@ -168,6 +178,7 @@ def count_topics(
         list_topic_models(
             session,
             owner_id=owner_id,
+            demo=demo,
             status=status,
             q=q,
             workflow_key=workflow_key,
@@ -182,10 +193,13 @@ def read_topic_model(
     topic_id: uuid.UUID,
     owner_id: uuid.UUID | None = None,
     *,
+    demo: bool = False,
     claim_legacy_orphans: bool = False,
 ) -> Topic | None:
     topic = session.get(Topic, topic_id)
     if topic is None:
+        return None
+    if not _topic_matches_demo_mode(topic, demo):
         return None
     if owner_id is not None and not _topic_visible_to_owner(topic, owner_id, session=session):
         if claim_legacy_orphans:
@@ -197,7 +211,11 @@ def read_topic_model(
             if claimed:
                 session.flush()
                 topic = session.get(Topic, topic_id)
-        if topic is None or not _topic_visible_to_owner(topic, owner_id, session=session):
+        if (
+            topic is None
+            or not _topic_matches_demo_mode(topic, demo)
+            or not _topic_visible_to_owner(topic, owner_id, session=session)
+        ):
             return None
     return topic
 
@@ -206,8 +224,9 @@ def list_cases_for_topic(
     session: Session,
     topic_id: uuid.UUID,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> list[CasePublic]:
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         return []
 
@@ -232,14 +251,15 @@ def refresh_topic_rollup(
     *,
     persist: bool = True,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> TopicRollupPublic | None:
-    topic = read_topic_model(session, topic_id, owner_id=owner_id)
+    topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
     if topic is None:
         return None
 
     should_persist = persist and owner_id is None
     existing_rollup = build_topic_rollup_public(topic)
-    cases = list_cases_for_topic(session, topic_id, owner_id=owner_id)
+    cases = list_cases_for_topic(session, topic_id, owner_id=owner_id, demo=demo)
 
     file_counts: Counter[str] = Counter()
     symbol_counts: Counter[str] = Counter()
@@ -318,10 +338,11 @@ def match_topics(
     request: TopicMatchRequest,
     *,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> TopicMatchResult:
     topics = [
-        build_topic_public_current(session, topic, owner_id=owner_id)
-        for topic in list_topic_models(session, owner_id=owner_id)
+        build_topic_public_current(session, topic, owner_id=owner_id, demo=demo)
+        for topic in list_topic_models(session, owner_id=owner_id, demo=demo)
     ]
     candidates = [_score_topic_match(topic, request) for topic in topics]
     candidates = [candidate for candidate in candidates if candidate.score > 0]
@@ -336,12 +357,23 @@ def build_context_pack(
     request: ContextPackBuildRequest,
     *,
     owner_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> ContextPackBuildResult:
     if request.topic_id is not None:
-        topic_model = read_topic_model(session, request.topic_id, owner_id=owner_id)
+        topic_model = read_topic_model(
+            session,
+            request.topic_id,
+            owner_id=owner_id,
+            demo=demo,
+        )
         if topic_model is None:
             raise ValueError("Topic not found")
-        topic = build_topic_public_current(session, topic_model, owner_id=owner_id)
+        topic = build_topic_public_current(
+            session,
+            topic_model,
+            owner_id=owner_id,
+            demo=demo,
+        )
         policy = TopicHydrationPolicy(confidence="high", max_topics=1)
         matched_topics = [
             TopicMatchCandidate(
@@ -367,6 +399,7 @@ def build_context_pack(
                 limit=request.max_topics or 5,
             ),
             owner_id=owner_id,
+            demo=demo,
         )
         policy = match_result.policy
         matched_topics = match_result.candidates
@@ -399,7 +432,12 @@ def build_context_pack(
         ambiguities.extend(topic.ambiguity_notes)
         questions.extend(topic.open_questions)
         negative_history.extend(topic.negative_history)
-        topic_cases = list_cases_for_topic(session, topic.id, owner_id=owner_id)
+        topic_cases = list_cases_for_topic(
+            session,
+            topic.id,
+            owner_id=owner_id,
+            demo=demo,
+        )
         ranked_cases = sorted(
             topic_cases,
             key=lambda case: _score_case_for_request(case, request),
@@ -542,6 +580,10 @@ def _topic_visible_to_owner(
             return False
         actor_topic_ids = _topic_ids_with_owned_cases(session, owner_id)
     return topic.id in actor_topic_ids
+
+
+def _topic_matches_demo_mode(topic: Topic, demo: bool) -> bool:
+    return topic.is_demo if demo else not topic.is_demo
 
 
 def _case_visible_to_owner(case: CaseRecord, topic: Topic, owner_id: uuid.UUID) -> bool:

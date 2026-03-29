@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.core.security import verify_password
-from app.models import User, UserCreate
+from app.models import CaseRecord, Topic, User, UserCreate
 from tests.utils.user import create_random_user
 from tests.utils.utils import random_email, random_lower_string
 
@@ -55,6 +55,40 @@ def test_create_user_new_email(
         user = crud.get_user_by_email(session=db, email=username)
         assert user
         assert user.email == created_user["email"]
+
+
+def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
+    email = random_email()
+    password = random_lower_string()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/users/signup",
+        json={
+            "email": email,
+            "password": password,
+            "full_name": "Demo Seeded User",
+        },
+    )
+    assert 200 <= response.status_code < 300, response.text
+
+    db.expire_all()
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.demo_seeded_at is not None
+
+    demo_topics = [
+        topic
+        for topic in db.exec(select(Topic).where(Topic.is_demo.is_(True))).all()
+        if str(user.id) in topic.owner_ids
+    ]
+    assert len(demo_topics) >= 1
+
+    demo_topic_ids = {topic.id for topic in demo_topics}
+    demo_cases = db.exec(
+        select(CaseRecord).where(CaseRecord.actor_id == user.id)
+    ).all()
+    assert len(demo_cases) >= 1
+    assert any(case.topic_id in demo_topic_ids for case in demo_cases)
 
 
 def test_get_existing_user_as_superuser(
