@@ -1,5 +1,6 @@
 import warnings
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AnyUrl,
@@ -20,6 +21,27 @@ def parse_cors(v: Any) -> list[str] | str:
     elif isinstance(v, list | str):
         return v
     raise ValueError(v)
+
+
+def expand_cors_origin_aliases(origins: list[str]) -> list[str]:
+    aliases_by_origin = {
+        "https://enderai.xyz": "https://www.enderai.xyz",
+        "https://www.enderai.xyz": "https://enderai.xyz",
+    }
+    expanded: list[str] = []
+    for origin in origins:
+        normalized_origin = origin.rstrip("/")
+        expanded.append(normalized_origin)
+
+        parsed_origin = urlsplit(normalized_origin)
+        if parsed_origin.path or parsed_origin.query or parsed_origin.fragment:
+            continue
+
+        alias = aliases_by_origin.get(normalized_origin)
+        if alias:
+            expanded.append(alias)
+
+    return list(dict.fromkeys(expanded))
 
 
 class Settings(BaseSettings):
@@ -48,9 +70,10 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def all_cors_origins(self) -> list[str]:
-        return [str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS] + [
-            self.FRONTEND_HOST
-        ]
+        configured_origins = [
+            str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS
+        ] + [self.FRONTEND_HOST.rstrip("/")]
+        return expand_cors_origin_aliases(configured_origins)
 
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None
