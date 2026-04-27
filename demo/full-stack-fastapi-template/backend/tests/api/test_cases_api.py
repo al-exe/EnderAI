@@ -51,7 +51,7 @@ def test_cases_round_trip_and_render_views(client, normal_user_token_headers, db
         json={
             "title": "Hydration mismatch debugging",
             "status": "done",
-            "source": "codex",
+            "source": "ai-agent",
             "input_summary": "Case hydration omitted commands and file clues.",
             "summary_current": "Canonical case document is now aligned.",
             "files": ["backend/app/api/routes/cases.py", "backend/app/core/cases.py"],

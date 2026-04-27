@@ -17,7 +17,7 @@ For the current product flow:
 1. create the user account
 2. have the user set their password via reset link
 3. open `Settings -> Connect Agent`
-4. choose either `Codex CLI` or `Generic MCP client`
+4. configure an MCP-capable AI client
 5. create or rotate a credential
 6. copy the generated setup snippet and the minimal agent instruction snippet
 7. reconnect the client and verify with `enderai_session_info`
@@ -42,7 +42,7 @@ There is no separate backend-token step in the recommended flow.
 The Connect Agent page should generate:
 - the hosted MCP URL
 - the one MCP token the user needs
-- client-specific setup for Codex or a generic hosted MCP client
+- client-agnostic setup for an MCP-capable AI client
 - a short workflow snippet telling the agent to start meaningful work with `enderai_begin_case`
 
 ## Generic Hosted MCP Client
@@ -77,9 +77,9 @@ Generic flow:
 3. enter the prompted MCP token
 4. verify with `enderai_session_info`
 
-## Codex CLI
+## MCP Client TOML Example
 
-Example `~/.codex/config.toml` block:
+Example MCP server config block:
 
 ```toml
 [mcp_servers.enderai-api]
@@ -93,10 +93,10 @@ Example shell export:
 export ENDERAI_MCP_TOKEN="REDACTED"
 ```
 
-Codex flow:
-1. run the MCP token export in the shell that will launch `codex`
-2. add the TOML block to `~/.codex/config.toml`
-3. launch `codex`
+Client flow:
+1. run the MCP token export in the shell or environment that launches your AI client
+2. add the TOML block to the client's MCP config file
+3. restart or reconnect the client
 4. verify with `enderai_session_info`
 
 ## Agent Instruction Layer

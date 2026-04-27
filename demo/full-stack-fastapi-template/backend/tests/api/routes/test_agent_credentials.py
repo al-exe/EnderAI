@@ -14,14 +14,14 @@ def test_create_agent_credential_returns_token_and_metadata(
     r = client.post(
         f"{settings.API_V1_STR}/agent-credentials/",
         headers=normal_user_token_headers,
-        json={"label": "Codex laptop"},
+        json={"label": "AI laptop"},
     )
 
     assert r.status_code == 201
     payload = r.json()
     assert payload["mcp_access_token"]
     assert payload["token_type"] == "bearer"
-    assert payload["credential"]["label"] == "Codex laptop"
+    assert payload["credential"]["label"] == "AI laptop"
     assert payload["credential"]["revoked_at"] is None
     assert payload["credential"]["current_token_expires_at"] is not None
 
@@ -48,7 +48,7 @@ def test_agent_mcp_token_authenticates_and_updates_last_used_at(
     create_res = client.post(
         f"{settings.API_V1_STR}/agent-credentials/",
         headers=normal_user_token_headers,
-        json={"label": "Hosted Codex"},
+        json={"label": "Hosted AI client"},
     )
     token = create_res.json()["mcp_access_token"]
     credential_id = create_res.json()["credential"]["id"]
@@ -71,7 +71,7 @@ def test_mcp_agent_token_validates_and_can_call_backend(
     create_res = client.post(
         f"{settings.API_V1_STR}/agent-credentials/",
         headers=normal_user_token_headers,
-        json={"label": "Hosted Codex MCP"},
+        json={"label": "Hosted MCP client"},
     )
     mcp_token = create_res.json()["mcp_access_token"]
     credential_id = create_res.json()["credential"]["id"]

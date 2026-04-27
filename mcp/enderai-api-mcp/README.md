@@ -117,9 +117,9 @@ Example config:
 }
 ```
 
-## Codex CLI
+## MCP Client TOML Example
 
-Example `~/.codex/config.toml` block:
+Example MCP server config block:
 
 ```toml
 [mcp_servers.enderai-api]

@@ -92,7 +92,7 @@ Write-like low-level requests should require:
 
 The setup UI should generate:
 - the one MCP token the user needs
-- client-specific setup for `Codex CLI` or a generic hosted MCP client
+- client-agnostic setup for an MCP-capable AI client
 - a short workflow instruction snippet telling the agent to start meaningful work with `enderai_begin_case`
 
 The setup UI should not generate:
@@ -131,7 +131,7 @@ Recommended verification flow:
 
 The implementation is successful when:
 - users only receive one token in the Connect Agent flow
-- generic and Codex snippets only reference `ENDERAI_MCP_TOKEN`
+- setup snippets only reference `ENDERAI_MCP_TOKEN`
 - meaningful work starts with `enderai_begin_case`
 - `enderai_begin_case` auto-hydrates prior context by default
 - `enderai_request` write-like calls do not bypass the active-case workflow

@@ -113,7 +113,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Pgbouncer saturation after worker autoscaling",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="API latency jumped after scaling background workers; pods were healthy but new requests stalled waiting on DB sockets.",
                 summary_current="The worker autoscaler amplified burst concurrency faster than pgbouncer transaction pools could recycle connections.",
                 files=[
@@ -215,7 +215,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Locale-sensitive timestamps broke hydration",
                 status="done",
-                source="codex",
+                source="ai-agent",
                 input_summary="The pricing page hydrated differently by region because server-side and client-side locale formatting diverged.",
                 summary_current="Rendering user-visible dates during SSR introduced region-specific text drift that React treated as a hydration mismatch.",
                 files=[
@@ -312,7 +312,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Refresh tokens invalid after provider key rollover",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="Hosted MCP sessions started failing refresh after the identity provider rotated signing keys and revoked stale offline sessions.",
                 summary_current="The refresh path assumed long-lived provider sessions that were invalidated during the key rollover window.",
                 files=[
@@ -410,7 +410,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Network-idle wait hid a background analytics race",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="Checkout tests intermittently hung on network-idle even though the form was ready for interaction.",
                 summary_current="A background analytics beacon kept the page from reaching network-idle, making the wait strategy fundamentally unstable.",
                 files=[
@@ -503,7 +503,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Backfill created duplicate invoice line items",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="Historical invoice backfills replayed the same line item when the source order emitted both legacy and new billing events.",
                 summary_current="The migration backfill double-counted orders that were mirrored into the ledger during the cutover window.",
                 files=[
@@ -602,7 +602,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Re-embedding with a smaller model hurt code recall",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="Search latency improved after a cheaper embedding model swap, but developers reported worse recall for code-heavy queries.",
                 summary_current="The smaller embedding model compressed code syntax too aggressively, which tanked recall for stack-trace and symbol searches.",
                 files=[
@@ -697,7 +697,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
             _case(
                 title="Delete tombstones were overwritten by stale edits",
                 status="resolved",
-                source="codex",
+                source="ai-agent",
                 input_summary="Offline clients occasionally resurrected deleted tasks after reconnect because stale patches beat tombstones in merge order.",
                 summary_current="Delete tombstones lacked a stronger precedence rule, so reconnecting edits could replay over a server-side delete.",
                 files=[

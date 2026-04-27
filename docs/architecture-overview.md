@@ -157,7 +157,7 @@ The current hosted MCP token flow remains supported as-is:
 
 - the user stores the MCP token locally in `~/.enderai_mcp_token`
 - the file is protected with `chmod 600`
-- shell startup loads it into the local environment for clients like Codex CLI
+- shell startup loads it into the local environment for MCP-capable AI clients
 - the hosted MCP validates that token and reuses the corresponding backend identity
 
 This file-based setup remains the current supported guidance until intentionally replaced.
