@@ -7,6 +7,7 @@ from app.api.routes import (
     login,
     private,
     search,
+    skills,
     topics,
     users,
     utils,
@@ -21,6 +22,7 @@ api_router.include_router(topics.router)
 api_router.include_router(cases.router)
 api_router.include_router(search.router)
 api_router.include_router(context_packs.router)
+api_router.include_router(skills.router)
 api_router.include_router(utils.router)
 
 if settings.ENVIRONMENT == "local":

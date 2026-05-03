@@ -54,6 +54,7 @@ describe("guided case workflow MCP tools", () => {
         expect.arrayContaining([
           "enderai_begin_case",
           "enderai_update_case",
+          "enderai_use_skill",
           "enderai_finish_case",
           "enderai_request",
           "enderai_session_info",
@@ -491,6 +492,152 @@ describe("guided case workflow MCP tools", () => {
     }
   });
 
+  it("uses a generated skill for the active case", async () => {
+    const harness = await createHarness();
+    try {
+      const topicId = "11111111-1111-1111-1111-111111111111";
+      const caseId = "22222222-2222-2222-2222-222222222222";
+      const skillId = "33333333-3333-3333-3333-333333333333";
+
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ data: [], count: 0 }))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "low", max_topics: 1 },
+            candidates: [],
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: topicId,
+            title: "Hosted MCP OAuth Rotation",
+            workflow_key: "hosted_mcp_oauth_rotation",
+            status: "open",
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            policy: { confidence: "high", max_topics: 1 },
+            matched_topics: [],
+            selected_topic_ids: [topicId],
+            selected_case_ids: [],
+            relevant_cases: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "high",
+              topic_summary: "Hosted MCP refresh-token rotation fixes.",
+              matched_signals: ["invalid_grant"],
+              representative_cases: [],
+              recent_cases: [],
+              relevant_cases: [],
+              canonical_files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+              canonical_symbols: ["refreshHostedSession"],
+              canonical_errors: ["invalid_grant"],
+              canonical_symptoms: ["hosted agents failed after key rollover"],
+              pinned_takeaways: ["Clear cached credentials on invalid_grant."],
+              ambiguities: [],
+              questions: [],
+              negative_history: [],
+              builder_version: "v1",
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: caseId,
+            topic_id: topicId,
+            title: "OAuth rollover failure",
+            status: "running",
+            input_summary: "Hosted MCP returns invalid_grant after key rollover.",
+            summary_current: "Hosted MCP returns invalid_grant after key rollover.",
+            files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+            symbols: ["refreshHostedSession"],
+            errors: ["invalid_grant"],
+            symptoms: ["hosted agents failed after key rollover"],
+            commands: [],
+            hypotheses: [],
+            changes: [],
+            next_steps: [],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "high",
+              topic_summary: "Hosted MCP refresh-token rotation fixes.",
+              pinned_takeaways: ["Clear cached credentials on invalid_grant."],
+              questions: [],
+            },
+          }),
+        );
+
+      await harness.client.callTool({
+        name: "enderai_begin_case",
+        arguments: {
+          topic_title: "Hosted MCP OAuth Rotation",
+          workflow_key: "hosted_mcp_oauth_rotation",
+          request_summary: "Hosted MCP returns invalid_grant after key rollover.",
+          files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+          errors: ["invalid_grant"],
+        },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            id: caseId,
+            topic_id: topicId,
+            title: "OAuth rollover failure",
+            status: "running",
+            input_summary: "Hosted MCP returns invalid_grant after key rollover.",
+            summary_current: "Hosted MCP returns invalid_grant after key rollover.",
+            files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+            symbols: ["refreshHostedSession"],
+            errors: ["invalid_grant"],
+            symptoms: ["hosted agents failed after key rollover"],
+            context_pack_snapshot: {
+              topic_id: topicId,
+              confidence: "high",
+              topic_summary: "Hosted MCP refresh-token rotation fixes.",
+              pinned_takeaways: ["Clear cached credentials on invalid_grant."],
+              questions: [],
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            selected_skill: {
+              id: skillId,
+              title: "Hosted MCP OAuth Rotation Workflow Skill",
+              instructions_md: "# Skill: Hosted MCP OAuth Rotation",
+            },
+            matched_skills: [],
+            instructions_md: "# Skill: Hosted MCP OAuth Rotation",
+            confidence: "high",
+            matched_signals: ["invalid_grant"],
+            provenance: { topic: { id: topicId } },
+            agent_usage_note: "Use the returned skill after ContextPack hydration.",
+          }),
+        );
+
+      const useSkill = await harness.client.callTool({
+        name: "enderai_use_skill",
+        arguments: {},
+      });
+      const useSkillBody = JSON.parse((useSkill.content as any)[0].text);
+
+      expect(useSkillBody.skill_use.selected_skill.id).toBe(skillId);
+      expect(useSkillBody.next.case_id).toBe(caseId);
+      expect(mockFetch.mock.calls[5][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[6][0].toString()).toContain("/api/v1/skills/use");
+      expect(JSON.parse(mockFetch.mock.calls[6][1].body)).toMatchObject({
+        case_id: caseId,
+        request_summary: "Hosted MCP returns invalid_grant after key rollover.",
+        files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+        errors: ["invalid_grant"],
+      });
+    } finally {
+      await harness.close();
+    }
+  });
+
   it("reuses a matched topic when begin_case only has request signals", async () => {
     const harness = await createHarness();
     try {
@@ -514,7 +661,7 @@ describe("guided case workflow MCP tools", () => {
                   title: "Frontend table layout",
                   workflow_key: "frontend_table_layout",
                   status: "open",
-                  last_used_at: "2026-03-23T06:30:00.000Z",
+                  last_used_at: "2026-05-02T06:30:00.000Z",
                 },
                 score: 5.8,
                 confidence: "medium",

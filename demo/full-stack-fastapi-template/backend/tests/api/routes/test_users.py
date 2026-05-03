@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app import crud
 from app.core.config import settings
 from app.core.security import verify_password
-from app.models import CaseRecord, Topic, User, UserCreate
+from app.models import CaseRecord, Skill, Topic, User, UserCreate
 from tests.utils.user import create_random_user
 from tests.utils.utils import random_email, random_lower_string
 
@@ -88,6 +88,13 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     demo_cases = db.exec(select(CaseRecord).where(CaseRecord.actor_id == user.id)).all()
     assert len(demo_cases) >= 1
     assert any(case.topic_id in demo_topic_ids for case in demo_cases)
+
+    demo_skills = [
+        skill
+        for skill in db.exec(select(Skill).where(Skill.is_demo.is_(True))).all()
+        if str(user.id) in skill.owner_ids
+    ]
+    assert len(demo_skills) >= 1
 
 
 def test_signup_user_can_read_but_cannot_write_until_activated(
