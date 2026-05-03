@@ -6,6 +6,7 @@ export const REQUIRED_HOOK_TOOLS = [
   "enderai_request",
   "enderai_session_info",
   "enderai_update_case",
+  "enderai_use_skill",
 ];
 
 export const REQUIRED_HOOK_ROUTE_PATHS = [
@@ -15,6 +16,13 @@ export const REQUIRED_HOOK_ROUTE_PATHS = [
   "/api/v1/topics/match",
   "/api/v1/topics/{topic_id}/rollup",
   "/api/v1/context-packs/build",
+  "/api/v1/skills/",
+  "/api/v1/skills/generate",
+  "/api/v1/skills/match",
+  "/api/v1/skills/use",
+  "/api/v1/skills/{skill_id}",
+  "/api/v1/skills/{skill_id}/refresh",
+  "/api/v1/skills/{skill_id}/use",
   "/api/v1/cases/",
   "/api/v1/cases/{case_id}",
   "/api/v1/cases/{case_id}/events",

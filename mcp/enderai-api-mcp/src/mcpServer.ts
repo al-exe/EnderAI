@@ -19,6 +19,7 @@ export type McpServerOptions = {
 const AUDIT_MAX_BYTES = 48_000;
 const AUDIT_PREVIEW_CHARS = 8_000;
 const DEFAULT_CONTEXT_PACK_CASE_LIMIT = 3;
+const DEFAULT_SKILL_LIMIT = 3;
 const DEFAULT_REUSE_WINDOW_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_THREAD_TITLE_MAX_CHARS = 255;
 const POLICY_VERSION = "topic_case_v1";
@@ -163,6 +164,25 @@ const FinishCaseArgsSchema = z
     closing_data: z.record(z.unknown()).optional(),
   })
   .strict();
+
+const UseSkillArgsSchema = z
+  .object({
+    skill_id: z.string().uuid().optional(),
+    case_id: z.string().uuid().optional(),
+    title: z.string().min(1).optional(),
+    request_summary: z.string().min(1).optional(),
+    aliases: z.array(z.string()).optional(),
+    files: z.array(z.string()).optional(),
+    symbols: z.array(z.string()).optional(),
+    errors: z.array(z.string()).optional(),
+    symptoms: z.array(z.string()).optional(),
+    contexts: z.array(z.string()).optional(),
+    max_skills: z.number().int().positive().max(10).optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict();
+
+type UseSkillArgs = z.infer<typeof UseSkillArgsSchema>;
 
 const EnderaiRequestArgsSchema = z
   .object({
@@ -390,6 +410,68 @@ function buildTopicMatchPayload(
     errors: args.errors,
     symptoms: args.symptoms,
     contexts: collectContextHints(args),
+  });
+}
+
+function collectArrayField(record: Record<string, any>, key: string): string[] {
+  const value = record[key];
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+function buildUseSkillPayload(
+  args: UseSkillArgs,
+  caseData: Record<string, any> | null,
+): Record<string, unknown> {
+  const contextPack = asRecord(caseData?.context_pack_snapshot);
+  const contextTakeaways = Array.isArray(contextPack.pinned_takeaways)
+    ? contextPack.pinned_takeaways.filter((item) => typeof item === "string")
+    : [];
+  const contextQuestions = Array.isArray(contextPack.questions)
+    ? contextPack.questions.filter((item) => typeof item === "string")
+    : [];
+  const caseTitle = typeof caseData?.title === "string" ? caseData.title : undefined;
+  const caseInputSummary =
+    typeof caseData?.input_summary === "string" ? caseData.input_summary : undefined;
+  const caseSummary =
+    typeof caseData?.summary_current === "string" ? caseData.summary_current : undefined;
+  const topicSummary =
+    typeof contextPack.topic_summary === "string" ? contextPack.topic_summary : undefined;
+  const resolvedCaseId =
+    args.case_id ?? (typeof caseData?.id === "string" ? caseData.id : undefined);
+
+  return pruneUndefined({
+    skill_id: args.skill_id,
+    case_id: resolvedCaseId,
+    title: trimToUndefined(args.title) ?? trimToUndefined(caseTitle),
+    request_summary:
+      trimToUndefined(args.request_summary) ??
+      trimToUndefined(caseInputSummary) ??
+      trimToUndefined(caseSummary),
+    aliases: args.aliases,
+    files: dedupeNonEmptyStrings([
+      ...(args.files ?? []),
+      ...collectArrayField(caseData ?? {}, "files"),
+    ]),
+    symbols: dedupeNonEmptyStrings([
+      ...(args.symbols ?? []),
+      ...collectArrayField(caseData ?? {}, "symbols"),
+    ]),
+    errors: dedupeNonEmptyStrings([
+      ...(args.errors ?? []),
+      ...collectArrayField(caseData ?? {}, "errors"),
+    ]),
+    symptoms: dedupeNonEmptyStrings([
+      ...(args.symptoms ?? []),
+      ...collectArrayField(caseData ?? {}, "symptoms"),
+    ]),
+    contexts: dedupeNonEmptyStrings([
+      ...(args.contexts ?? []),
+      caseSummary,
+      topicSummary,
+      ...contextTakeaways,
+      ...contextQuestions,
+    ]),
+    max_skills: args.max_skills ?? DEFAULT_SKILL_LIMIT,
   });
 }
 
@@ -876,6 +958,68 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
         },
         {
+          name: "enderai_use_skill",
+          description:
+            "Use this after enderai_begin_case and ContextPack hydration to retrieve a generated EnderAI Skill for the active case. Skills are advisory workflow instructions generated from Topics, Cases, or ContextPacks.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              skill_id: {
+                type: "string",
+                description: "Optional explicit Skill id. If omitted, EnderAI matches skills from request and active-case signals.",
+              },
+              case_id: {
+                type: "string",
+                description:
+                  "Optional explicit Case id. If omitted, the active case from enderai_begin_case is used when present.",
+              },
+              title: {
+                type: "string",
+                description: "Optional title signal for skill matching.",
+              },
+              request_summary: {
+                type: "string",
+                description: "Optional request summary signal for skill matching.",
+              },
+              aliases: {
+                ...stringArrayJsonSchema,
+                description: "Optional aliases or workflow hints for skill matching.",
+              },
+              files: {
+                ...stringArrayJsonSchema,
+                description: "Relevant file paths for skill matching.",
+              },
+              symbols: {
+                ...stringArrayJsonSchema,
+                description: "Relevant symbols for skill matching.",
+              },
+              errors: {
+                ...stringArrayJsonSchema,
+                description: "Known error strings for skill matching.",
+              },
+              symptoms: {
+                ...stringArrayJsonSchema,
+                description: "Known symptoms for skill matching.",
+              },
+              contexts: {
+                ...stringArrayJsonSchema,
+                description: "Free-form context snippets for skill matching.",
+              },
+              max_skills: {
+                type: "integer",
+                description: "Maximum matched skills to return. Defaults to 3.",
+                minimum: 1,
+                maximum: 10,
+              },
+              demo: {
+                type: "boolean",
+                description: "Read demo-mode skills instead of live user skills.",
+              },
+            },
+          },
+        },
+        {
           name: "enderai_finish_case",
           description:
             "Use this as the terminal step to close the active Case with a terminal status. Requires a prior enderai_begin_case call in this MCP session unless case_id is supplied. Clears the active case context on success.",
@@ -1222,6 +1366,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
           reused_topic: Boolean(existingTopic || matchedTopic),
           next: {
+            use_skill_tool: "enderai_use_skill",
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
             case_id: caseId,
@@ -1311,6 +1456,95 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           executionId: caseId,
           message: "Update case",
           tool: "enderai_update_case",
+          request: args,
+          response: result,
+        });
+        return toolJson(result);
+      }
+
+      if (name === "enderai_use_skill") {
+        const args = UseSkillArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        const activeContext = await reconcileActiveCaseContext({ bearerToken });
+
+        if (
+          args.case_id &&
+          activeContext.caseId &&
+          activeContext.caseId !== args.case_id
+        ) {
+          return toolError(
+            `enderai_use_skill is currently attached to case ${activeContext.caseId}. Run enderai_finish_case before switching to case ${args.case_id}.`,
+          );
+        }
+
+        let caseData = activeContext.caseData;
+        const caseId = args.case_id ?? activeContext.caseId ?? undefined;
+        if (caseId && (!caseData || caseData.id !== caseId)) {
+          const caseRes = await enderaiFetch({
+            method: "GET",
+            path: `/api/v1/cases/${caseId}`,
+            bearerToken,
+            query: args.demo ? { demo: true } : undefined,
+          });
+          if (!caseRes.ok) {
+            throw new Error(
+              `enderai_use_skill failed to read the case: ${extractErrorDetail(caseRes)} (status ${caseRes.status}).`,
+            );
+          }
+          caseData = asRecord(caseRes.data);
+          const topicId =
+            typeof caseData.topic_id === "string" ? caseData.topic_id : undefined;
+          setActiveCaseContext(caseId, topicId);
+        }
+
+        const payload = buildUseSkillPayload(args, caseData);
+        const hasMatchSignals =
+          Boolean(payload.skill_id) ||
+          Boolean(payload.case_id) ||
+          Boolean(payload.title) ||
+          Boolean(payload.request_summary) ||
+          (Array.isArray(payload.files) && payload.files.length > 0) ||
+          (Array.isArray(payload.symbols) && payload.symbols.length > 0) ||
+          (Array.isArray(payload.errors) && payload.errors.length > 0) ||
+          (Array.isArray(payload.symptoms) && payload.symptoms.length > 0) ||
+          (Array.isArray(payload.contexts) && payload.contexts.length > 0);
+        if (!hasMatchSignals) {
+          return toolError(
+            "enderai_use_skill requires an active case, case_id, skill_id, or request signals to match a generated Skill.",
+          );
+        }
+
+        const skillRes = await enderaiFetch({
+          method: "POST",
+          path: "/api/v1/skills/use",
+          bearerToken,
+          query: args.demo ? { demo: true } : undefined,
+          json: payload,
+        });
+        if (!skillRes.ok) {
+          throw new Error(
+            `enderai_use_skill failed: ${extractErrorDetail(skillRes)} (status ${skillRes.status}).`,
+          );
+        }
+
+        const result = {
+          skill_use: skillRes.data,
+          case: caseData,
+          next: {
+            update_tool: "enderai_update_case",
+            finish_tool: "enderai_finish_case",
+            case_id: caseId ?? null,
+            topic_id:
+              typeof caseData?.topic_id === "string"
+                ? caseData.topic_id
+                : auditState.threadId ?? null,
+          },
+        };
+        await auditWorkflowTool({
+          bearerToken,
+          executionId: caseId,
+          message: "Use generated skill",
+          tool: "enderai_use_skill",
           request: args,
           response: result,
         });
@@ -1550,6 +1784,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           session_ready: Boolean(bearerToken),
           next: {
             begin_tool: "enderai_begin_case",
+            use_skill_tool: "enderai_use_skill",
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
           },

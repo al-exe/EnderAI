@@ -4,6 +4,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.cases import is_terminal_case_status, normalize_context_pack_snapshot
+from app.core.skills import ensure_demo_skills_for_owner
 from app.models import CaseRecord, Topic, User, get_datetime_utc
 
 DEMO_SEED_VERSION = 1
@@ -122,23 +123,62 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "infra/terraform/rds.tf",
                 ],
                 symbols=["PoolManager", "open_transaction", "max_client_conn"],
-                errors=["remaining connection slots are reserved", "too many clients already"],
-                symptoms=["p95 latency spiked after autoscale", "idle pods still showed blocked requests"],
+                errors=[
+                    "remaining connection slots are reserved",
+                    "too many clients already",
+                ],
+                symptoms=[
+                    "p95 latency spiked after autoscale",
+                    "idle pods still showed blocked requests",
+                ],
                 commands=[
-                    _command("kubectl top pods -n api", "compare load before and after scale-out", "CPU stayed modest; request wait time moved to DB"),
-                    _command("psql -c \"select * from pg_stat_activity\"", "inspect connection pressure", "most sessions were waiting on client read/write"),
-                    _command("kubectl logs deploy/pgbouncer", "verify pool churn", "pool wait time grew with worker count"),
+                    _command(
+                        "kubectl top pods -n api",
+                        "compare load before and after scale-out",
+                        "CPU stayed modest; request wait time moved to DB",
+                    ),
+                    _command(
+                        'psql -c "select * from pg_stat_activity"',
+                        "inspect connection pressure",
+                        "most sessions were waiting on client read/write",
+                    ),
+                    _command(
+                        "kubectl logs deploy/pgbouncer",
+                        "verify pool churn",
+                        "pool wait time grew with worker count",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The autoscaler is outpacing transaction-pool recycling.", "supported", "Wait metrics grew linearly with worker replica count."),
-                    _hypothesis("RDS max_connections was mis-sized for the instance class.", "open", "Headroom was thin but not the first trigger."),
+                    _hypothesis(
+                        "The autoscaler is outpacing transaction-pool recycling.",
+                        "supported",
+                        "Wait metrics grew linearly with worker replica count.",
+                    ),
+                    _hypothesis(
+                        "RDS max_connections was mis-sized for the instance class.",
+                        "open",
+                        "Headroom was thin but not the first trigger.",
+                    ),
                 ],
                 changes=[
-                    _change("infra", "Capped worker burst scaling and raised pgbouncer reserve pool.", ["infra/k8s/worker-hpa.yaml", "infra/terraform/rds.tf"], ["PR-418"]),
-                    _change("code", "Moved a long-lived report query off the request path.", ["backend/app/db/pool.py"], ["KAN-124"]),
+                    _change(
+                        "infra",
+                        "Capped worker burst scaling and raised pgbouncer reserve pool.",
+                        ["infra/k8s/worker-hpa.yaml", "infra/terraform/rds.tf"],
+                        ["PR-418"],
+                    ),
+                    _change(
+                        "code",
+                        "Moved a long-lived report query off the request path.",
+                        ["backend/app/db/pool.py"],
+                        ["KAN-124"],
+                    ),
                 ],
                 outcome="Autoscaling no longer creates a self-inflicted connection storm during burst traffic.",
-                next_steps=["Add pool wait time to the default dashboard", "Load-test replica promotion behavior"],
+                next_steps=[
+                    "Add pool wait time to the default dashboard",
+                    "Load-test replica promotion behavior",
+                ],
                 matched_signals=["pgbouncer", "connection slots", "autoscaling"],
                 opened_days_ago=18,
                 updated_days_ago=17,
@@ -155,21 +195,51 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "ops/pgbouncer/pgbouncer.ini",
                 ],
                 symbols=["PrismaClient", "pgbouncer", "statement_cache_size"],
-                errors=["prepared statement does not exist", "cached plan must not change result type"],
-                symptoms=["query retries hid the issue for low traffic", "only pooled environments failed"],
+                errors=[
+                    "prepared statement does not exist",
+                    "cached plan must not change result type",
+                ],
+                symptoms=[
+                    "query retries hid the issue for low traffic",
+                    "only pooled environments failed",
+                ],
                 commands=[
-                    _command("bun test services/orders/test/db.integration.ts", "reproduce prepared statement errors in CI config", "transaction pooling reproduced the failure"),
-                    _command("SHOW CONFIG", "compare pgbouncer flags", "max_prepared_statements was disabled"),
+                    _command(
+                        "bun test services/orders/test/db.integration.ts",
+                        "reproduce prepared statement errors in CI config",
+                        "transaction pooling reproduced the failure",
+                    ),
+                    _command(
+                        "SHOW CONFIG",
+                        "compare pgbouncer flags",
+                        "max_prepared_statements was disabled",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The ORM is relying on session affinity that transaction pooling breaks.", "supported", "Errors disappeared after disabling prepared statements."),
-                    _hypothesis("The issue is Postgres version specific.", "disproven", "It reproduced on both 14 and 16."),
+                    _hypothesis(
+                        "The ORM is relying on session affinity that transaction pooling breaks.",
+                        "supported",
+                        "Errors disappeared after disabling prepared statements.",
+                    ),
+                    _hypothesis(
+                        "The issue is Postgres version specific.",
+                        "disproven",
+                        "It reproduced on both 14 and 16.",
+                    ),
                 ],
                 changes=[
-                    _change("config", "Disabled prepared statements for pooled production traffic.", ["services/orders/src/db.ts", "ops/pgbouncer/pgbouncer.ini"], ["PR-426"]),
+                    _change(
+                        "config",
+                        "Disabled prepared statements for pooled production traffic.",
+                        ["services/orders/src/db.ts", "ops/pgbouncer/pgbouncer.ini"],
+                        ["PR-426"],
+                    ),
                 ],
                 outcome="Order-service traffic stopped flaking under pooled production traffic.",
-                next_steps=["Benchmark the perf hit from disabled prepared statements", "Revisit session pooling for write-heavy jobs"],
+                next_steps=[
+                    "Benchmark the perf hit from disabled prepared statements",
+                    "Revisit session pooling for write-heavy jobs",
+                ],
                 matched_signals=["prepared statement", "prisma", "transaction pooling"],
                 opened_days_ago=15,
                 updated_days_ago=14,
@@ -187,16 +257,36 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["select_replica", "RetryPolicy", "replicaLagSeconds"],
                 errors=["read timed out", "replica replay lag exceeded threshold"],
-                symptoms=["primary connections rose only after replica lag", "timeouts clustered on analytics endpoints"],
+                symptoms=[
+                    "primary connections rose only after replica lag",
+                    "timeouts clustered on analytics endpoints",
+                ],
                 commands=[
-                    _command("psql -c \"select now()-pg_last_xact_replay_timestamp()\"", "measure replay lag", "lag peaked above 90 seconds"),
-                    _command("curl -H 'x-debug-route: 1' /api/v1/reports", "trace replica fallback path", "retries escalated to the primary after lag checks"),
+                    _command(
+                        'psql -c "select now()-pg_last_xact_replay_timestamp()"',
+                        "measure replay lag",
+                        "lag peaked above 90 seconds",
+                    ),
+                    _command(
+                        "curl -H 'x-debug-route: 1' /api/v1/reports",
+                        "trace replica fallback path",
+                        "retries escalated to the primary after lag checks",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Fallback retries are making a replica problem look like a primary problem.", "supported", "Primary traffic jumped only after fallback engaged."),
+                    _hypothesis(
+                        "Fallback retries are making a replica problem look like a primary problem.",
+                        "supported",
+                        "Primary traffic jumped only after fallback engaged.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Short-circuited stale replicas instead of retrying them through the primary.", ["backend/app/read_router.py", "backend/app/retry.py"], ["PR-430"]),
+                    _change(
+                        "code",
+                        "Short-circuited stale replicas instead of retrying them through the primary.",
+                        ["backend/app/read_router.py", "backend/app/retry.py"],
+                        ["PR-430"],
+                    ),
                 ],
                 outcome="Replica lag alarms now surface before the primary is flooded with fallback reads.",
                 next_steps=["Wire replay lag into autoscaling constraints"],
@@ -224,17 +314,42 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "frontend/src/components/HeroStats.tsx",
                 ],
                 symbols=["formatRelativeDate", "HeroStats", "Intl.DateTimeFormat"],
-                errors=["Hydration failed because the initial UI does not match what was rendered on the server."],
-                symptoms=["only reproed on non-US locales", "error disappeared after hard refresh"],
+                errors=[
+                    "Hydration failed because the initial UI does not match what was rendered on the server."
+                ],
+                symptoms=[
+                    "only reproed on non-US locales",
+                    "error disappeared after hard refresh",
+                ],
                 commands=[
-                    _command("pnpm test:e2e pricing.spec.ts --project=webkit", "reproduce mismatch with locale emulation", "fr-FR and ja-JP failed consistently"),
-                    _command("pnpm build && pnpm preview", "verify production rendering path", "SSR markup contained localized timestamps"),
+                    _command(
+                        "pnpm test:e2e pricing.spec.ts --project=webkit",
+                        "reproduce mismatch with locale emulation",
+                        "fr-FR and ja-JP failed consistently",
+                    ),
+                    _command(
+                        "pnpm build && pnpm preview",
+                        "verify production rendering path",
+                        "SSR markup contained localized timestamps",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Locale formatting is happening on both server and client with different timezones.", "supported", "Server rendered UTC while clients rendered local time."),
+                    _hypothesis(
+                        "Locale formatting is happening on both server and client with different timezones.",
+                        "supported",
+                        "Server rendered UTC while clients rendered local time.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Deferred humanized timestamps until after hydration and kept SSR copy stable.", ["frontend/src/lib/formatDate.ts", "frontend/src/components/HeroStats.tsx"], ["PR-512"]),
+                    _change(
+                        "code",
+                        "Deferred humanized timestamps until after hydration and kept SSR copy stable.",
+                        [
+                            "frontend/src/lib/formatDate.ts",
+                            "frontend/src/components/HeroStats.tsx",
+                        ],
+                        ["PR-512"],
+                    ),
                 ],
                 outcome="Marketing pages now hydrate cleanly across locales.",
                 next_steps=["Audit remaining relative-time components"],
@@ -254,16 +369,40 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["FunnelChart", "buildGradientId", "useId"],
                 errors=["Expected server HTML to contain a matching <defs>"],
-                symptoms=["hydration warnings only on pages with SVG charts", "rerenders fixed the paint after hydration"],
+                symptoms=[
+                    "hydration warnings only on pages with SVG charts",
+                    "rerenders fixed the paint after hydration",
+                ],
                 commands=[
-                    _command("pnpm test FunnelChart.test.tsx", "lock down deterministic IDs", "snapshot failed before useId migration"),
+                    _command(
+                        "pnpm test FunnelChart.test.tsx",
+                        "lock down deterministic IDs",
+                        "snapshot failed before useId migration",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The chart library is generating IDs with Math.random().", "supported", "Replacing it with useId removed the drift."),
+                    _hypothesis(
+                        "The chart library is generating IDs with Math.random().",
+                        "supported",
+                        "Replacing it with useId removed the drift.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Replaced random gradient IDs with React useId and stable prefixes.", ["frontend/src/components/Marketing/FunnelChart.tsx", "frontend/src/lib/chartIds.ts"], ["PR-519"]),
-                    _change("test", "Added hydration snapshot coverage for the hero chart.", ["frontend/src/components/Marketing/FunnelChart.test.tsx"], ["PR-519"]),
+                    _change(
+                        "code",
+                        "Replaced random gradient IDs with React useId and stable prefixes.",
+                        [
+                            "frontend/src/components/Marketing/FunnelChart.tsx",
+                            "frontend/src/lib/chartIds.ts",
+                        ],
+                        ["PR-519"],
+                    ),
+                    _change(
+                        "test",
+                        "Added hydration snapshot coverage for the hero chart.",
+                        ["frontend/src/components/Marketing/FunnelChart.test.tsx"],
+                        ["PR-519"],
+                    ),
                 ],
                 outcome="The hero chart now hydrates without broken gradients or console noise.",
                 next_steps=["Review other inline SVG components for random IDs"],
@@ -284,16 +423,36 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["loadFlags", "serializeFlags", "edgeFlagSnapshot"],
                 errors=["Text content does not match server-rendered HTML"],
-                symptoms=["wrong CTA appeared for a split second", "only pages behind edge worker reproed"],
+                symptoms=[
+                    "wrong CTA appeared for a split second",
+                    "only pages behind edge worker reproed",
+                ],
                 commands=[
-                    _command("wrangler dev", "compare edge snapshot to client bootstrap payload", "edge flags lagged one deploy behind"),
-                    _command("pnpm test flags.integration.ts", "validate flag serialization contract", "bootstrap payload ignored worker snapshot"),
+                    _command(
+                        "wrangler dev",
+                        "compare edge snapshot to client bootstrap payload",
+                        "edge flags lagged one deploy behind",
+                    ),
+                    _command(
+                        "pnpm test flags.integration.ts",
+                        "validate flag serialization contract",
+                        "bootstrap payload ignored worker snapshot",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The client is discarding the edge-provided flag snapshot.", "supported", "Hydration stabilized after bootstrapping from the serialized flags."),
+                    _hypothesis(
+                        "The client is discarding the edge-provided flag snapshot.",
+                        "supported",
+                        "Hydration stabilized after bootstrapping from the serialized flags.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Bootstrapped client flags from the edge snapshot and tightened cache invalidation.", ["frontend/src/lib/flags.ts", "edge/worker/flags.ts"], ["PR-523"]),
+                    _change(
+                        "code",
+                        "Bootstrapped client flags from the edge snapshot and tightened cache invalidation.",
+                        ["frontend/src/lib/flags.ts", "edge/worker/flags.ts"],
+                        ["PR-523"],
+                    ),
                 ],
                 outcome="The hero variant stays stable between SSR and hydration.",
                 next_steps=["Expose flag snapshot age in debug headers"],
@@ -320,19 +479,51 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "mcp/enderai-api-mcp/src/sessionAuth.ts",
                     "docs/hosted-mcp-onboarding.md",
                 ],
-                symbols=["rotateHostedCredential", "refreshHostedSession", "sessionAuth"],
+                symbols=[
+                    "rotateHostedCredential",
+                    "refreshHostedSession",
+                    "sessionAuth",
+                ],
                 errors=["invalid_grant", "refresh token revoked"],
-                symptoms=["existing agents failed silently until command execution", "new logins worked"],
+                symptoms=[
+                    "existing agents failed silently until command execution",
+                    "new logins worked",
+                ],
                 commands=[
-                    _command("npm test sessionAuth.test.ts", "replay revoked refresh token flow", "client stayed in a bad cached state"),
-                    _command("curl /api/v1/agent-credentials/issue", "verify credential issuance after relogin", "fresh sessions recovered immediately"),
+                    _command(
+                        "npm test sessionAuth.test.ts",
+                        "replay revoked refresh token flow",
+                        "client stayed in a bad cached state",
+                    ),
+                    _command(
+                        "curl /api/v1/agent-credentials/issue",
+                        "verify credential issuance after relogin",
+                        "fresh sessions recovered immediately",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The hosted client is not distinguishing revoked refresh tokens from transient transport errors.", "supported", "It kept retrying with a dead token."),
+                    _hypothesis(
+                        "The hosted client is not distinguishing revoked refresh tokens from transient transport errors.",
+                        "supported",
+                        "It kept retrying with a dead token.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Forced credential re-issue on invalid_grant and surfaced relogin guidance.", ["backend/app/api/routes/agent_credentials.py", "mcp/enderai-api-mcp/src/sessionAuth.ts"], ["PR-602"]),
-                    _change("docs", "Expanded onboarding docs for expired hosted sessions.", ["docs/hosted-mcp-onboarding.md"], ["PR-602"]),
+                    _change(
+                        "code",
+                        "Forced credential re-issue on invalid_grant and surfaced relogin guidance.",
+                        [
+                            "backend/app/api/routes/agent_credentials.py",
+                            "mcp/enderai-api-mcp/src/sessionAuth.ts",
+                        ],
+                        ["PR-602"],
+                    ),
+                    _change(
+                        "docs",
+                        "Expanded onboarding docs for expired hosted sessions.",
+                        ["docs/hosted-mcp-onboarding.md"],
+                        ["PR-602"],
+                    ),
                 ],
                 outcome="Hosted agents now recover cleanly from provider-side refresh token revocation.",
                 next_steps=["Add telemetry for refresh-failure reasons by provider"],
@@ -353,19 +544,44 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["validateAudience", "TokenPayload", "MCP_PUBLIC_URL"],
                 errors=["invalid audience", "token is not intended for this resource"],
-                symptoms=["hosted MCP failed but local HTTP flow passed", "retrying from the CLI changed nothing"],
+                symptoms=[
+                    "hosted MCP failed but local HTTP flow passed",
+                    "retrying from the CLI changed nothing",
+                ],
                 commands=[
-                    _command("npm test http.test.ts", "lock expected audience behavior", "hosted proxy path failed"),
-                    _command("terraform plan", "inspect MCP proxy env wiring", "audience env var pointed at API host"),
+                    _command(
+                        "npm test http.test.ts",
+                        "lock expected audience behavior",
+                        "hosted proxy path failed",
+                    ),
+                    _command(
+                        "terraform plan",
+                        "inspect MCP proxy env wiring",
+                        "audience env var pointed at API host",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The proxy is validating against the wrong audience after the origin split.", "supported", "Switching to the MCP origin fixed both CLI and Cursor flows."),
+                    _hypothesis(
+                        "The proxy is validating against the wrong audience after the origin split.",
+                        "supported",
+                        "Switching to the MCP origin fixed both CLI and Cursor flows.",
+                    ),
                 ],
                 changes=[
-                    _change("config", "Aligned hosted MCP audience validation with the MCP origin.", ["infra/cloudflare/mcp-proxy.tf", "mcp/enderai-api-mcp/src/httpServer.ts"], ["PR-607"]),
+                    _change(
+                        "config",
+                        "Aligned hosted MCP audience validation with the MCP origin.",
+                        [
+                            "infra/cloudflare/mcp-proxy.tf",
+                            "mcp/enderai-api-mcp/src/httpServer.ts",
+                        ],
+                        ["PR-607"],
+                    ),
                 ],
                 outcome="Hosted MCP tokens validate consistently across proxy and backend layers.",
-                next_steps=["Add an integration test that exercises the full hosted proxy path"],
+                next_steps=[
+                    "Add an integration test that exercises the full hosted proxy path"
+                ],
                 matched_signals=["audience", "mcp proxy", "hosted origin"],
                 opened_days_ago=10,
                 updated_days_ago=9,
@@ -381,20 +597,45 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "mcp/enderai-api-mcp/src/sessionAuth.ts",
                     "mcp/enderai-api-mcp/test/sessionAuth.test.ts",
                 ],
-                symbols=["cachedCredential", "clearCachedCredential", "refreshSessionToken"],
+                symbols=[
+                    "cachedCredential",
+                    "clearCachedCredential",
+                    "refreshSessionToken",
+                ],
                 errors=["Could not validate credentials", "credential revoked"],
-                symptoms=["rotation looked broken until the client restarted", "one machine failed while another worked"],
+                symptoms=[
+                    "rotation looked broken until the client restarted",
+                    "one machine failed while another worked",
+                ],
                 commands=[
-                    _command("npm test mcpAuth.test.ts", "reproduce stale in-memory session cache", "revoked token stayed hot in memory"),
+                    _command(
+                        "npm test mcpAuth.test.ts",
+                        "reproduce stale in-memory session cache",
+                        "revoked token stayed hot in memory",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The client only refreshes tokens on expiry, not on server-side revocation.", "supported", "Explicit cache clears fixed the session immediately."),
+                    _hypothesis(
+                        "The client only refreshes tokens on expiry, not on server-side revocation.",
+                        "supported",
+                        "Explicit cache clears fixed the session immediately.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Cleared cached hosted credentials when the backend returned revocation errors.", ["mcp/enderai-api-mcp/src/mcpServer.ts", "mcp/enderai-api-mcp/src/sessionAuth.ts"], ["PR-611"]),
+                    _change(
+                        "code",
+                        "Cleared cached hosted credentials when the backend returned revocation errors.",
+                        [
+                            "mcp/enderai-api-mcp/src/mcpServer.ts",
+                            "mcp/enderai-api-mcp/src/sessionAuth.ts",
+                        ],
+                        ["PR-611"],
+                    ),
                 ],
                 outcome="Credential rotation no longer requires restarting the CLI client.",
-                next_steps=["Emit a user-facing toast when a rotation invalidates the local session"],
+                next_steps=[
+                    "Emit a user-facing toast when a rotation invalidates the local session"
+                ],
                 matched_signals=["credential revoked", "cached session", "rotation"],
                 opened_days_ago=8,
                 updated_days_ago=7,
@@ -419,16 +660,37 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["waitForLoadState", "sendCheckoutBeacon", "completeCheckout"],
                 errors=["Timeout 30000ms exceeded while waiting for networkidle"],
-                symptoms=["failures clustered on CI and not locally", "retrying often passed immediately"],
+                symptoms=[
+                    "failures clustered on CI and not locally",
+                    "retrying often passed immediately",
+                ],
                 commands=[
-                    _command("bunx playwright test checkout.spec.ts --repeat-each=30", "measure flake pattern", "timeouts disappeared when analytics was mocked"),
+                    _command(
+                        "bunx playwright test checkout.spec.ts --repeat-each=30",
+                        "measure flake pattern",
+                        "timeouts disappeared when analytics was mocked",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Network-idle is the wrong readiness signal for checkout.", "supported", "Waiting on the submit button state removed the flake."),
+                    _hypothesis(
+                        "Network-idle is the wrong readiness signal for checkout.",
+                        "supported",
+                        "Waiting on the submit button state removed the flake.",
+                    ),
                 ],
                 changes=[
-                    _change("test", "Replaced network-idle waits with explicit checkout readiness assertions.", ["frontend/tests/checkout.spec.ts"], ["PR-701"]),
-                    _change("code", "Marked analytics beacons as fire-and-forget in test environments.", ["frontend/src/lib/analytics.ts"], ["PR-701"]),
+                    _change(
+                        "test",
+                        "Replaced network-idle waits with explicit checkout readiness assertions.",
+                        ["frontend/tests/checkout.spec.ts"],
+                        ["PR-701"],
+                    ),
+                    _change(
+                        "code",
+                        "Marked analytics beacons as fire-and-forget in test environments.",
+                        ["frontend/src/lib/analytics.ts"],
+                        ["PR-701"],
+                    ),
                 ],
                 outcome="Checkout tests now wait on user-visible readiness instead of incidental network silence.",
                 next_steps=["Audit the rest of the suite for network-idle waits"],
@@ -448,15 +710,31 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["fillCardForm", "BillingForm", "onAutoFill"],
                 errors=["locator.fill: element is not editable"],
-                symptoms=["only WebKit reproed", "video showed focus bouncing between fields"],
+                symptoms=[
+                    "only WebKit reproed",
+                    "video showed focus bouncing between fields",
+                ],
                 commands=[
-                    _command("bunx playwright test checkout.spec.ts --project=webkit --debug", "inspect focus transitions", "zip autofill landed after card focus"),
+                    _command(
+                        "bunx playwright test checkout.spec.ts --project=webkit --debug",
+                        "inspect focus transitions",
+                        "zip autofill landed after card focus",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("A delayed autofill event is stealing focus after the test script moves on.", "supported", "Waiting for the final zip autofill stabilized the sequence."),
+                    _hypothesis(
+                        "A delayed autofill event is stealing focus after the test script moves on.",
+                        "supported",
+                        "Waiting for the final zip autofill stabilized the sequence.",
+                    ),
                 ],
                 changes=[
-                    _change("test", "Inserted explicit focus assertions before typing card digits.", ["frontend/tests/checkout.spec.ts"], ["PR-706"]),
+                    _change(
+                        "test",
+                        "Inserted explicit focus assertions before typing card digits.",
+                        ["frontend/tests/checkout.spec.ts"],
+                        ["PR-706"],
+                    ),
                 ],
                 outcome="WebKit checkout runs no longer type card data into the wrong field.",
                 next_steps=["Add a reusable helper for autofill-heavy forms"],
@@ -476,18 +754,36 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["promoEndsAt", "shouldShowPromo", "PromoBanner"],
                 errors=["Expected countdown to contain 1h", "received 0h"],
-                symptoms=["failures concentrated around one UTC boundary", "retries often passed a few minutes later"],
+                symptoms=[
+                    "failures concentrated around one UTC boundary",
+                    "retries often passed a few minutes later",
+                ],
                 commands=[
-                    _command("bunx playwright test promo-banner.spec.ts --workers=1", "replay boundary timing failure", "countdown crossed a date boundary"),
+                    _command(
+                        "bunx playwright test promo-banner.spec.ts --workers=1",
+                        "replay boundary timing failure",
+                        "countdown crossed a date boundary",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The test should freeze the clock instead of sampling real time.", "supported", "Using a fixed browser clock eliminated the midnight flake."),
+                    _hypothesis(
+                        "The test should freeze the clock instead of sampling real time.",
+                        "supported",
+                        "Using a fixed browser clock eliminated the midnight flake.",
+                    ),
                 ],
                 changes=[
-                    _change("test", "Mocked the browser clock and promo window in countdown tests.", ["frontend/tests/promo-banner.spec.ts"], ["PR-710"]),
+                    _change(
+                        "test",
+                        "Mocked the browser clock and promo window in countdown tests.",
+                        ["frontend/tests/promo-banner.spec.ts"],
+                        ["PR-710"],
+                    ),
                 ],
                 outcome="Promo countdown coverage is now deterministic regardless of CI wall-clock time.",
-                next_steps=["Move all date-sensitive UI tests onto the shared clock helper"],
+                next_steps=[
+                    "Move all date-sensitive UI tests onto the shared clock helper"
+                ],
                 matched_signals=["countdown", "midnight", "clock"],
                 opened_days_ago=9,
                 updated_days_ago=8,
@@ -512,18 +808,48 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "sql/ledger/dedupe_invoice_lines.sql",
                 ],
                 symbols=["backfill_invoices", "reconcile_invoice", "invoice_line_hash"],
-                errors=["duplicate key value violates unique constraint invoice_line_hash"],
-                symptoms=["customer totals were doubled for cutover-day orders", "re-running the backfill worsened the issue"],
+                errors=[
+                    "duplicate key value violates unique constraint invoice_line_hash"
+                ],
+                symptoms=[
+                    "customer totals were doubled for cutover-day orders",
+                    "re-running the backfill worsened the issue",
+                ],
                 commands=[
-                    _command("uv run python services/ledger/backfill_invoices.py --dry-run", "inspect duplicate generation path", "mirror events were replayed twice"),
-                    _command("psql -f sql/ledger/dedupe_invoice_lines.sql", "measure duplicate scope", "duplicates were isolated to the cutover window"),
+                    _command(
+                        "uv run python services/ledger/backfill_invoices.py --dry-run",
+                        "inspect duplicate generation path",
+                        "mirror events were replayed twice",
+                    ),
+                    _command(
+                        "psql -f sql/ledger/dedupe_invoice_lines.sql",
+                        "measure duplicate scope",
+                        "duplicates were isolated to the cutover window",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Mirror events from the legacy bus were not de-duplicated during backfill.", "supported", "Hash collisions mapped exactly to mirrored orders."),
+                    _hypothesis(
+                        "Mirror events from the legacy bus were not de-duplicated during backfill.",
+                        "supported",
+                        "Hash collisions mapped exactly to mirrored orders.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Added deterministic invoice-line hashes and skipped mirrored duplicates during backfill.", ["services/ledger/backfill_invoices.py", "services/ledger/src/reconcile.py"], ["PR-810"]),
-                    _change("sql", "Added one-off dedupe cleanup for the affected invoices.", ["sql/ledger/dedupe_invoice_lines.sql"], ["PR-810"]),
+                    _change(
+                        "code",
+                        "Added deterministic invoice-line hashes and skipped mirrored duplicates during backfill.",
+                        [
+                            "services/ledger/backfill_invoices.py",
+                            "services/ledger/src/reconcile.py",
+                        ],
+                        ["PR-810"],
+                    ),
+                    _change(
+                        "sql",
+                        "Added one-off dedupe cleanup for the affected invoices.",
+                        ["sql/ledger/dedupe_invoice_lines.sql"],
+                        ["PR-810"],
+                    ),
                 ],
                 outcome="Invoice backfills are now idempotent across the cutover window.",
                 next_steps=["Add replay-safety checks to the migration runbook"],
@@ -544,16 +870,40 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["create_refund", "LedgerClient", "Idempotency-Key"],
                 errors=["duplicate compensation detected"],
-                symptoms=["refund totals drifted by small amounts", "manual replay reproduced the duplicate"],
+                symptoms=[
+                    "refund totals drifted by small amounts",
+                    "manual replay reproduced the duplicate",
+                ],
                 commands=[
-                    _command("pytest services/billing/tests/test_refunds.py -k duplicate", "reproduce retry behavior", "duplicate compensations reproduced on network timeout"),
+                    _command(
+                        "pytest services/billing/tests/test_refunds.py -k duplicate",
+                        "reproduce retry behavior",
+                        "duplicate compensations reproduced on network timeout",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Refund retries are missing the shared idempotency wrapper.", "supported", "Refund requests omitted the header entirely."),
+                    _hypothesis(
+                        "Refund retries are missing the shared idempotency wrapper.",
+                        "supported",
+                        "Refund requests omitted the header entirely.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Routed refund writes through the shared ledger idempotency helper.", ["services/billing/src/refunds.py", "services/ledger/src/client.py"], ["PR-818"]),
-                    _change("test", "Added explicit retry coverage for refund idempotency.", ["services/billing/tests/test_refunds.py"], ["PR-818"]),
+                    _change(
+                        "code",
+                        "Routed refund writes through the shared ledger idempotency helper.",
+                        [
+                            "services/billing/src/refunds.py",
+                            "services/ledger/src/client.py",
+                        ],
+                        ["PR-818"],
+                    ),
+                    _change(
+                        "test",
+                        "Added explicit retry coverage for refund idempotency.",
+                        ["services/billing/tests/test_refunds.py"],
+                        ["PR-818"],
+                    ),
                 ],
                 outcome="Refund retries no longer create duplicate compensating ledger entries.",
                 next_steps=["Backfill idempotency coverage for write-off flows"],
@@ -574,16 +924,39 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["poll_outbox", "publish_invoice_created", "outboxLagSeconds"],
                 errors=["outbox lag above SLA"],
-                symptoms=["invoices remained pending despite successful writes", "lag drained only after traffic subsided"],
+                symptoms=[
+                    "invoices remained pending despite successful writes",
+                    "lag drained only after traffic subsided",
+                ],
                 commands=[
-                    _command("kubectl top deploy ledger-worker", "measure worker saturation", "CPU pinned during batch replay"),
-                    _command("psql -c \"select count(*) from ledger_outbox where published_at is null\"", "measure queue depth", "queue depth rose with batch size"),
+                    _command(
+                        "kubectl top deploy ledger-worker",
+                        "measure worker saturation",
+                        "CPU pinned during batch replay",
+                    ),
+                    _command(
+                        'psql -c "select count(*) from ledger_outbox where published_at is null"',
+                        "measure queue depth",
+                        "queue depth rose with batch size",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The poller concurrency is too low for the cutover batch profile.", "supported", "Doubling workers drained the queue immediately."),
+                    _hypothesis(
+                        "The poller concurrency is too low for the cutover batch profile.",
+                        "supported",
+                        "Doubling workers drained the queue immediately.",
+                    ),
                 ],
                 changes=[
-                    _change("infra", "Raised ledger worker concurrency and added outbox lag alerts.", ["infra/k8s/ledger-worker.yaml", "dashboards/ledger-outbox.json"], ["PR-823"]),
+                    _change(
+                        "infra",
+                        "Raised ledger worker concurrency and added outbox lag alerts.",
+                        [
+                            "infra/k8s/ledger-worker.yaml",
+                            "dashboards/ledger-outbox.json",
+                        ],
+                        ["PR-823"],
+                    ),
                 ],
                 outcome="Ledger publishing now keeps up with the migration batch profile.",
                 next_steps=["Model outbox backlog during quarter-end invoice volume"],
@@ -612,20 +985,44 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["reindex_embeddings", "run_code_recall_eval", "embed_chunks"],
                 errors=["relevance regression", "top-5 recall below threshold"],
-                symptoms=["natural-language queries were fine", "symbol-heavy queries dropped sharply"],
+                symptoms=[
+                    "natural-language queries were fine",
+                    "symbol-heavy queries dropped sharply",
+                ],
                 commands=[
-                    _command("uv run python search/reindex_embeddings.py --sample 5000", "compare embedding families", "cheap model underperformed on code queries"),
-                    _command("uv run python search/eval/run.py code_recall", "measure recall deltas", "top-5 recall dropped 17 points"),
+                    _command(
+                        "uv run python search/reindex_embeddings.py --sample 5000",
+                        "compare embedding families",
+                        "cheap model underperformed on code queries",
+                    ),
+                    _command(
+                        "uv run python search/eval/run.py code_recall",
+                        "measure recall deltas",
+                        "top-5 recall dropped 17 points",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The smaller model preserves prose semantics better than code structure.", "supported", "Regression was worst on stack traces and file paths."),
+                    _hypothesis(
+                        "The smaller model preserves prose semantics better than code structure.",
+                        "supported",
+                        "Regression was worst on stack traces and file paths.",
+                    ),
                 ],
                 changes=[
-                    _change("config", "Restored the larger embedding model for code-heavy corpora and split evals by content type.", ["search/src/embed.py", "search/eval/code_recall.yaml"], ["PR-911"]),
+                    _change(
+                        "config",
+                        "Restored the larger embedding model for code-heavy corpora and split evals by content type.",
+                        ["search/src/embed.py", "search/eval/code_recall.yaml"],
+                        ["PR-911"],
+                    ),
                 ],
                 outcome="Code recall recovered without reverting all latency work for prose queries.",
                 next_steps=["Try mixed-model retrieval with content-type routing"],
-                matched_signals=["embedding model", "code recall", "relevance regression"],
+                matched_signals=[
+                    "embedding model",
+                    "code recall",
+                    "relevance regression",
+                ],
                 opened_days_ago=17,
                 updated_days_ago=16,
             ),
@@ -641,15 +1038,34 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["chunk_markdown", "split_fenced_block", "ChunkBoundary"],
                 errors=["excerpt lost function signature"],
-                symptoms=["search hits started in the middle of code blocks", "reranking could not repair missing context"],
+                symptoms=[
+                    "search hits started in the middle of code blocks",
+                    "reranking could not repair missing context",
+                ],
                 commands=[
-                    _command("pytest search/tests/test_chunk_markdown.py", "reproduce fence-splitting behavior", "chunker cut through fenced blocks"),
+                    _command(
+                        "pytest search/tests/test_chunk_markdown.py",
+                        "reproduce fence-splitting behavior",
+                        "chunker cut through fenced blocks",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("The chunker is ignoring markdown fences and only counting tokens.", "supported", "Fence-aware chunking fixed the broken excerpts."),
+                    _hypothesis(
+                        "The chunker is ignoring markdown fences and only counting tokens.",
+                        "supported",
+                        "Fence-aware chunking fixed the broken excerpts.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Made markdown chunking fence-aware and added regression tests for code blocks.", ["search/src/chunk_markdown.py", "search/tests/test_chunk_markdown.py"], ["PR-917"]),
+                    _change(
+                        "code",
+                        "Made markdown chunking fence-aware and added regression tests for code blocks.",
+                        [
+                            "search/src/chunk_markdown.py",
+                            "search/tests/test_chunk_markdown.py",
+                        ],
+                        ["PR-917"],
+                    ),
                 ],
                 outcome="Retrieved chunks now preserve full code blocks and produce coherent excerpts.",
                 next_steps=["Backfill the reindex for docs-heavy repositories"],
@@ -670,15 +1086,31 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["build_filter_query", "index_metadata", "repositoryLabel"],
                 errors=["zero hits for migrated docs"],
-                symptoms=["query expansion still returned nothing", "older docs remained searchable"],
+                symptoms=[
+                    "query expansion still returned nothing",
+                    "older docs remained searchable",
+                ],
                 commands=[
-                    _command("uv run python search/eval/run.py migrated_docs", "measure migrated-doc recall", "filter path removed all newly migrated content"),
+                    _command(
+                        "uv run python search/eval/run.py migrated_docs",
+                        "measure migrated-doc recall",
+                        "filter path removed all newly migrated content",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Repository labels changed during migration but filter mapping did not.", "supported", "Normalizing labels restored migrated-doc hits."),
+                    _hypothesis(
+                        "Repository labels changed during migration but filter mapping did not.",
+                        "supported",
+                        "Normalizing labels restored migrated-doc hits.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Normalized repository metadata before filter construction.", ["search/src/filters.py", "search/src/index_metadata.py"], ["PR-922"]),
+                    _change(
+                        "code",
+                        "Normalized repository metadata before filter construction.",
+                        ["search/src/filters.py", "search/src/index_metadata.py"],
+                        ["PR-922"],
+                    ),
                 ],
                 outcome="Migrated documentation reappeared in vector search results.",
                 next_steps=["Add schema checks on metadata ingestion"],
@@ -707,16 +1139,40 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["mergeTaskPatch", "applyTombstone", "SyncRevision"],
                 errors=["deleted task reappeared after sync"],
-                symptoms=["only happened after long offline windows", "server logs showed valid delete events"],
+                symptoms=[
+                    "only happened after long offline windows",
+                    "server logs showed valid delete events",
+                ],
                 commands=[
-                    _command("pnpm test tombstones.spec.ts", "reproduce stale patch overwrite", "offline patch replay resurrected the deleted task"),
+                    _command(
+                        "pnpm test tombstones.spec.ts",
+                        "reproduce stale patch overwrite",
+                        "offline patch replay resurrected the deleted task",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Tombstones need stronger precedence than stale field patches.", "supported", "Applying tombstones first eliminated resurrection."),
+                    _hypothesis(
+                        "Tombstones need stronger precedence than stale field patches.",
+                        "supported",
+                        "Applying tombstones first eliminated resurrection.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Gave tombstones terminal precedence during sync merge.", ["mobile/src/sync/mergeEngine.ts", "backend/app/api/routes/tasks.py"], ["PR-1008"]),
-                    _change("test", "Added regression coverage for reconnecting stale edits after delete.", ["mobile/tests/sync/tombstones.spec.ts"], ["PR-1008"]),
+                    _change(
+                        "code",
+                        "Gave tombstones terminal precedence during sync merge.",
+                        [
+                            "mobile/src/sync/mergeEngine.ts",
+                            "backend/app/api/routes/tasks.py",
+                        ],
+                        ["PR-1008"],
+                    ),
+                    _change(
+                        "test",
+                        "Added regression coverage for reconnecting stale edits after delete.",
+                        ["mobile/tests/sync/tombstones.spec.ts"],
+                        ["PR-1008"],
+                    ),
                 ],
                 outcome="Deleted records stay deleted even after long offline edit sessions.",
                 next_steps=["Audit other entity types for tombstone precedence"],
@@ -736,15 +1192,34 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                 ],
                 symbols=["nextRevision", "compareRevisions", "HybridLogicalClock"],
                 errors=["newer edit lost after reconnect"],
-                symptoms=["only one device class reproed", "merge order disagreed with server receive time"],
+                symptoms=[
+                    "only one device class reproed",
+                    "merge order disagreed with server receive time",
+                ],
                 commands=[
-                    _command("pnpm test revisionClock.spec.ts", "simulate skewed device clocks", "future-skewed device won incorrect conflicts"),
+                    _command(
+                        "pnpm test revisionClock.spec.ts",
+                        "simulate skewed device clocks",
+                        "future-skewed device won incorrect conflicts",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Wall-clock timestamps are insufficient for offline conflict resolution.", "supported", "Hybrid logical clocks fixed the ordering drift."),
+                    _hypothesis(
+                        "Wall-clock timestamps are insufficient for offline conflict resolution.",
+                        "supported",
+                        "Hybrid logical clocks fixed the ordering drift.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Switched sync revisions from wall-clock timestamps to a hybrid logical clock.", ["mobile/src/sync/revisionClock.ts", "mobile/src/sync/mergeEngine.ts"], ["PR-1013"]),
+                    _change(
+                        "code",
+                        "Switched sync revisions from wall-clock timestamps to a hybrid logical clock.",
+                        [
+                            "mobile/src/sync/revisionClock.ts",
+                            "mobile/src/sync/mergeEngine.ts",
+                        ],
+                        ["PR-1013"],
+                    ),
                 ],
                 outcome="Conflict ordering is now stable even with skewed device clocks.",
                 next_steps=["Roll HLC adoption across attachments sync"],
@@ -763,19 +1238,51 @@ DEMO_TOPICS: list[dict[str, Any]] = [
                     "backend/app/core/conflicts.py",
                     "mobile/tests/sync/optimistic-merge.spec.ts",
                 ],
-                symbols=["optimisticMerge", "reconcile_conflict", "ConflictResolutionError"],
+                symbols=[
+                    "optimisticMerge",
+                    "reconcile_conflict",
+                    "ConflictResolutionError",
+                ],
                 errors=["conflict reconciliation rejected client patch"],
-                symptoms=["notes visibly rewrote themselves after reconnect", "support tickets mentioned disappearing bullet points"],
+                symptoms=[
+                    "notes visibly rewrote themselves after reconnect",
+                    "support tickets mentioned disappearing bullet points",
+                ],
                 commands=[
-                    _command("pytest backend/tests/test_conflicts.py", "compare backend reconciliation to optimistic merge", "backend rejected combinations the client accepted"),
-                    _command("pnpm test optimistic-merge.spec.ts", "reproduce jarring overwrite behavior", "UI showed divergent merge previews"),
+                    _command(
+                        "pytest backend/tests/test_conflicts.py",
+                        "compare backend reconciliation to optimistic merge",
+                        "backend rejected combinations the client accepted",
+                    ),
+                    _command(
+                        "pnpm test optimistic-merge.spec.ts",
+                        "reproduce jarring overwrite behavior",
+                        "UI showed divergent merge previews",
+                    ),
                 ],
                 hypotheses=[
-                    _hypothesis("Client optimistic merge rules drifted from backend reconciliation.", "supported", "Sharing the merge rule table fixed the divergence."),
+                    _hypothesis(
+                        "Client optimistic merge rules drifted from backend reconciliation.",
+                        "supported",
+                        "Sharing the merge rule table fixed the divergence.",
+                    ),
                 ],
                 changes=[
-                    _change("code", "Aligned optimistic merge rules with backend reconciliation tables.", ["mobile/src/sync/optimisticMerge.ts", "backend/app/core/conflicts.py"], ["PR-1019"]),
-                    _change("test", "Added cross-platform fixtures for shared merge-rule validation.", ["mobile/tests/sync/optimistic-merge.spec.ts"], ["PR-1019"]),
+                    _change(
+                        "code",
+                        "Aligned optimistic merge rules with backend reconciliation tables.",
+                        [
+                            "mobile/src/sync/optimisticMerge.ts",
+                            "backend/app/core/conflicts.py",
+                        ],
+                        ["PR-1019"],
+                    ),
+                    _change(
+                        "test",
+                        "Added cross-platform fixtures for shared merge-rule validation.",
+                        ["mobile/tests/sync/optimistic-merge.spec.ts"],
+                        ["PR-1019"],
+                    ),
                 ],
                 outcome="Optimistic merge previews now match the server’s eventual reconciliation result.",
                 next_steps=["Export shared conflict fixtures from the backend package"],
@@ -790,7 +1297,7 @@ DEMO_TOPICS: list[dict[str, Any]] = [
 
 def ensure_demo_workspace(session: Session, user: User) -> bool:
     if user.demo_seeded_at is not None:
-        return False
+        return ensure_demo_skills_for_owner(session, user.id) > 0
 
     owner_id = user.id
     owner_id_str = str(owner_id)
@@ -800,6 +1307,7 @@ def ensure_demo_workspace(session: Session, user: User) -> bool:
         if owner_id_str in topic.owner_ids
     ]
     if existing_demo_topics:
+        ensure_demo_skills_for_owner(session, owner_id)
         user.demo_seeded_at = get_datetime_utc()
         session.add(user)
         return True
@@ -828,7 +1336,9 @@ def ensure_demo_workspace(session: Session, user: User) -> bool:
         for case_seed in topic_seed["cases"]:
             opened_at = seeded_at - timedelta(days=case_seed["opened_days_ago"])
             updated_at = seeded_at - timedelta(days=case_seed["updated_days_ago"])
-            closed_at = updated_at if is_terminal_case_status(case_seed["status"]) else None
+            closed_at = (
+                updated_at if is_terminal_case_status(case_seed["status"]) else None
+            )
             case_record = CaseRecord(
                 topic_id=topic.id,
                 title=case_seed["title"],
@@ -881,4 +1391,5 @@ def ensure_demo_workspace(session: Session, user: User) -> bool:
 
     user.demo_seeded_at = seeded_at
     session.add(user)
+    ensure_demo_skills_for_owner(session, owner_id)
     return True

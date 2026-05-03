@@ -188,6 +188,42 @@ class CaseRecord(SQLModel, table=True):
     context_pack_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
 
 
+class Skill(SQLModel, table=True):
+    __tablename__ = "skill"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    title: str = Field(min_length=1, max_length=255)
+    slug: str = Field(index=True, max_length=255)
+    description: str | None = None
+    status: str = Field(default="published", min_length=1, max_length=64)
+    source_type: str = Field(default="topic", min_length=1, max_length=64)
+    source_topic_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="topic.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    source_case_ids: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    owner_ids: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    is_demo: bool = Field(default=False, index=True)
+    trigger_phrases: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    files: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    symbols: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    errors: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    symptoms: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    instructions_md: str
+    confidence: str = Field(default="medium", min_length=1, max_length=16)
+    source_snapshot: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
+    usage_count: int = 0
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    last_used_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
+
+
 class CaseEvent(SQLModel, table=True):
     __tablename__ = "case_event"
 
@@ -542,6 +578,81 @@ class ContextPackBuildResult(SQLModel):
     context_pack_snapshot: ContextPackSnapshot = Field(
         default_factory=ContextPackSnapshot
     )
+
+
+SkillSourceType = Literal["topic", "case", "context_pack", "demo", "manual"]
+SkillStatus = Literal["draft", "published", "archived"]
+
+
+class SkillPublic(SQLModel):
+    id: uuid.UUID
+    title: str
+    slug: str
+    description: str | None = None
+    status: str = "published"
+    source_type: str = "topic"
+    source_topic_id: uuid.UUID | None = None
+    source_case_ids: list[uuid.UUID] = Field(default_factory=list)
+    owner_ids: list[uuid.UUID] = Field(default_factory=list)
+    is_demo: bool = False
+    trigger_phrases: list[str] = Field(default_factory=list)
+    files: list[str] = Field(default_factory=list)
+    symbols: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    symptoms: list[str] = Field(default_factory=list)
+    instructions_md: str
+    confidence: ConfidenceLevel = "medium"
+    source_snapshot: dict[str, Any] = Field(default_factory=dict)
+    usage_count: int = 0
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class SkillsPublic(SQLModel):
+    data: list[SkillPublic]
+    count: int
+
+
+class SkillGenerateRequest(SQLModel):
+    topic_id: uuid.UUID | None = None
+    case_id: uuid.UUID | None = None
+    context_pack: ContextPackBuildRequest | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    status: SkillStatus = "published"
+    force_refresh: bool = False
+
+
+class SkillMatchRequest(TopicMatchSignals):
+    limit: int = 5
+
+
+class SkillMatchCandidate(SQLModel):
+    skill: SkillPublic
+    score: float
+    confidence: ConfidenceLevel
+    matched_signals: list[str] = Field(default_factory=list)
+    reasoning: list[str] = Field(default_factory=list)
+
+
+class SkillMatchResult(SQLModel):
+    candidates: list[SkillMatchCandidate] = Field(default_factory=list)
+
+
+class SkillUseRequest(TopicMatchSignals):
+    skill_id: uuid.UUID | None = None
+    case_id: uuid.UUID | None = None
+    max_skills: int = Field(default=3, ge=1, le=10)
+
+
+class SkillUseResult(SQLModel):
+    selected_skill: SkillPublic | None = None
+    matched_skills: list[SkillMatchCandidate] = Field(default_factory=list)
+    instructions_md: str | None = None
+    confidence: ConfidenceLevel = "low"
+    matched_signals: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    agent_usage_note: str
 
 
 class Message(SQLModel):
