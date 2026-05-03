@@ -38,6 +38,10 @@ def test_demo_mode_routes_filter_live_and_demo_workspaces(
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
     assert user.demo_seeded_at is not None
+    user.is_active = True
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
     empty_live_topics = client.get("/api/v1/topics/", headers=headers)
     assert empty_live_topics.status_code == 200, empty_live_topics.text
@@ -210,7 +214,7 @@ def test_demo_mode_lazily_seeds_existing_users(
     password = random_lower_string()
     crud.create_user(
         session=db,
-        user_create=UserCreate(email=email, password=password),
+        user_create=UserCreate(email=email, password=password, is_active=True),
     )
     headers = user_authentication_headers(
         client=client,

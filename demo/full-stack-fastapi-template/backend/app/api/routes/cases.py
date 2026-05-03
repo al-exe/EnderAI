@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import col, or_, select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ActiveUser, CurrentUser, SessionDep
 from app.core.cases import (
     apply_case_update,
     build_case_event,
@@ -59,15 +59,21 @@ def _get_visible_case_and_topic(
     if case_record is None:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    claimed = claim_legacy_orphan_topics_for_owner(
-        session,
-        owner_id,
-        topic_id=case_record.topic_id,
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(
+            session,
+            owner_id,
+            topic_id=case_record.topic_id,
+        )
+        if current_user.is_active
+        else False
     )
     if claimed:
         session.commit()
 
-    topic = read_topic_model(session, case_record.topic_id, owner_id=owner_id, demo=demo)
+    topic = read_topic_model(
+        session, case_record.topic_id, owner_id=owner_id, demo=demo
+    )
     if (
         topic is None
         or not _topic_matches_demo_mode(topic, demo)
@@ -89,13 +95,17 @@ def read_cases(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = claim_legacy_orphan_topics_for_owner(
-        session,
-        owner_id,
-        topic_id=topic_id,
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(
+            session,
+            owner_id,
+            topic_id=topic_id,
+        )
+        if current_user.is_active
+        else False
     )
     if claimed:
         session.commit()
@@ -115,13 +125,21 @@ def read_cases(
             )
         )
 
-    statement = statement.order_by(col(CaseRecord.updated_at).desc(), col(CaseRecord.opened_at).desc())
+    statement = statement.order_by(
+        col(CaseRecord.updated_at).desc(), col(CaseRecord.opened_at).desc()
+    )
     candidate_cases = list(session.exec(statement).all())
     topic_ids = {case.topic_id for case in candidate_cases}
-    topics = {
-        topic.id: topic
-        for topic in session.exec(select(Topic).where(col(Topic.id).in_(topic_ids))).all()
-    } if topic_ids else {}
+    topics = (
+        {
+            topic.id: topic
+            for topic in session.exec(
+                select(Topic).where(col(Topic.id).in_(topic_ids))
+            ).all()
+        }
+        if topic_ids
+        else {}
+    )
     visible_cases = [
         case
         for case in candidate_cases
@@ -140,7 +158,7 @@ def read_cases(
 @router.post("/", response_model=CasePublic, status_code=201)
 def create_case(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     case_in: CaseCreate,
     demo: bool = Query(default=False),
 ) -> Any:
@@ -152,7 +170,9 @@ def create_case(
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
     if case_in.actor_id is not None and case_in.actor_id != owner_id:
-        raise HTTPException(status_code=403, detail="actor_id must match the current user")
+        raise HTTPException(
+            status_code=403, detail="actor_id must match the current user"
+        )
 
     title = (
         (case_in.title or "").strip()
@@ -169,9 +189,20 @@ def create_case(
         status=case_in.status.strip() if case_in.status.strip() else "open",
         closed_at=now if is_terminal_case_status(case_in.status) else None,
         actor_id=owner_id,
-        source=case_in.source.strip() if isinstance(case_in.source, str) and case_in.source.strip() else None,
-        input_summary=(case_in.input_summary.strip() if isinstance(case_in.input_summary, str) and case_in.input_summary.strip() else None),
-        summary_current=(case_in.summary_current.strip() if isinstance(case_in.summary_current, str) and case_in.summary_current.strip() else None),
+        source=case_in.source.strip()
+        if isinstance(case_in.source, str) and case_in.source.strip()
+        else None,
+        input_summary=(
+            case_in.input_summary.strip()
+            if isinstance(case_in.input_summary, str) and case_in.input_summary.strip()
+            else None
+        ),
+        summary_current=(
+            case_in.summary_current.strip()
+            if isinstance(case_in.summary_current, str)
+            and case_in.summary_current.strip()
+            else None
+        ),
     )
     case_data = build_default_case_data(case_record)
     case_data.update(
@@ -180,8 +211,12 @@ def create_case(
             "symbols": case_in.symbols,
             "errors": case_in.errors,
             "symptoms": case_in.symptoms,
-            "commands": [command.model_dump(mode="json") for command in case_in.commands],
-            "hypotheses": [hypothesis.model_dump(mode="json") for hypothesis in case_in.hypotheses],
+            "commands": [
+                command.model_dump(mode="json") for command in case_in.commands
+            ],
+            "hypotheses": [
+                hypothesis.model_dump(mode="json") for hypothesis in case_in.hypotheses
+            ],
             "changes": [change.model_dump(mode="json") for change in case_in.changes],
             "outcome": case_in.outcome,
             "next_steps": case_in.next_steps,
@@ -218,7 +253,7 @@ def read_case(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -233,13 +268,13 @@ def read_case(
 @router.patch("/{case_id}", response_model=CasePublic)
 def update_case(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     case_id: uuid.UUID,
     case_in: CaseUpdate,
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -253,7 +288,9 @@ def update_case(
     if not update:
         raise HTTPException(status_code=422, detail="No fields to update")
     if "actor_id" in update and update["actor_id"] != owner_id:
-        raise HTTPException(status_code=403, detail="actor_id must match the current user")
+        raise HTTPException(
+            status_code=403, detail="actor_id must match the current user"
+        )
     if case_record.actor_id is None:
         case_record.actor_id = owner_id
     if str(owner_id) not in topic.owner_ids:
@@ -278,7 +315,7 @@ def read_case_memo(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -297,7 +334,7 @@ def read_case_hydration(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -316,7 +353,7 @@ def read_case_events(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     _get_visible_case_and_topic(session, current_user, case_id, demo=demo)
@@ -335,7 +372,7 @@ def read_case_events(
 @router.post("/{case_id}/events", response_model=CaseEventPublic, status_code=201)
 def create_case_event_route(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     case_id: uuid.UUID,
     event_in: CaseEventCreate,
     demo: bool = Query(default=False),

@@ -74,6 +74,7 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     db.expire_all()
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
+    assert user.is_active is False
     assert user.demo_seeded_at is not None
 
     demo_topics = [
@@ -84,11 +85,54 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     assert len(demo_topics) >= 1
 
     demo_topic_ids = {topic.id for topic in demo_topics}
-    demo_cases = db.exec(
-        select(CaseRecord).where(CaseRecord.actor_id == user.id)
-    ).all()
+    demo_cases = db.exec(select(CaseRecord).where(CaseRecord.actor_id == user.id)).all()
     assert len(demo_cases) >= 1
     assert any(case.topic_id in demo_topic_ids for case in demo_cases)
+
+
+def test_signup_user_can_read_but_cannot_write_until_activated(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+
+    signup_res = client.post(
+        f"{settings.API_V1_STR}/users/signup",
+        json={"email": email, "password": password, "full_name": "Pending User"},
+    )
+    assert signup_res.status_code == 200, signup_res.text
+    assert signup_res.json()["is_active"] is False
+
+    login_res = client.post(
+        f"{settings.API_V1_STR}/login/access-token",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200, login_res.text
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    read_res = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+    assert read_res.status_code == 200, read_res.text
+    assert read_res.json()["email"] == email
+
+    update_res = client.patch(
+        f"{settings.API_V1_STR}/users/me",
+        headers=headers,
+        json={"full_name": "Blocked Update"},
+    )
+    assert update_res.status_code == 403
+    assert update_res.json() == {"detail": "Inactive users cannot write data"}
+
+    topic_res = client.post(
+        f"{settings.API_V1_STR}/topics/",
+        headers=headers,
+        json={"title": "Blocked pending user topic"},
+    )
+    assert topic_res.status_code == 403
+    assert topic_res.json() == {"detail": "Inactive users cannot write data"}
+
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.full_name == "Pending User"
 
 
 def test_get_existing_user_as_superuser(
@@ -454,7 +498,7 @@ def test_update_user_email_exists(
 def test_delete_user_me(client: TestClient, db: Session) -> None:
     username = random_email()
     password = random_lower_string()
-    user_in = UserCreate(email=username, password=password)
+    user_in = UserCreate(email=username, password=password, is_active=True)
     user = crud.create_user(session=db, user_create=user_in)
     user_id = user.id
 

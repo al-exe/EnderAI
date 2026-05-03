@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import ActiveUser, CurrentUser, SessionDep
 from app.core.demo import ensure_demo_workspace
 from app.core.topics import (
     allocate_topic_identity,
@@ -47,10 +47,14 @@ def read_topics(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(session, owner_id)
+        if current_user.is_active
+        else False
+    )
     if claimed:
         session.commit()
     topics = list_topic_models(
@@ -82,7 +86,7 @@ def read_topics(
 @router.post("/", response_model=TopicPublic, status_code=201)
 def create_topic(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     topic_in: TopicCreate,
 ) -> Any:
     title = topic_in.title.strip()
@@ -96,8 +100,14 @@ def create_topic(
         title=title,
         slug=slug,
         workflow_key=workflow_key,
-        description=topic_in.description.strip() if isinstance(topic_in.description, str) and topic_in.description.strip() else None,
-        aliases=[alias.strip() for alias in topic_in.aliases if isinstance(alias, str) and alias.strip()],
+        description=topic_in.description.strip()
+        if isinstance(topic_in.description, str) and topic_in.description.strip()
+        else None,
+        aliases=[
+            alias.strip()
+            for alias in topic_in.aliases
+            if isinstance(alias, str) and alias.strip()
+        ],
         status=topic_in.status.strip() if topic_in.status.strip() else "open",
         owner_ids=[str(owner_id)],
         created_at=now,
@@ -121,10 +131,14 @@ def match_topics_route(
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(session, owner_id)
+        if current_user.is_active
+        else False
+    )
     if claimed:
         session.commit()
     return match_topics(session, request, owner_id=owner_id, demo=demo)
@@ -138,10 +152,14 @@ def read_topic(
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+        if current_user.is_active
+        else False
+    )
     if claimed:
         session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
@@ -153,7 +171,7 @@ def read_topic(
 @router.patch("/{topic_id}", response_model=TopicPublic)
 def update_topic(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     topic_id: uuid.UUID,
     topic_in: TopicUpdate,
     demo: bool = Query(default=False),
@@ -188,15 +206,29 @@ def update_topic(
     if "workflow_key" in update and update["workflow_key"] is not None:
         workflow_key = str(update["workflow_key"]).strip()
         if not workflow_key:
-            raise HTTPException(status_code=422, detail="workflow_key must not be empty")
-        duplicate = session.exec(select(Topic.id).where(Topic.workflow_key == workflow_key, Topic.id != topic.id)).first()
+            raise HTTPException(
+                status_code=422, detail="workflow_key must not be empty"
+            )
+        duplicate = session.exec(
+            select(Topic.id).where(
+                Topic.workflow_key == workflow_key, Topic.id != topic.id
+            )
+        ).first()
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="workflow_key already exists")
         topic.workflow_key = workflow_key
     if "description" in update:
-        topic.description = update["description"].strip() if isinstance(update["description"], str) and update["description"].strip() else None
+        topic.description = (
+            update["description"].strip()
+            if isinstance(update["description"], str) and update["description"].strip()
+            else None
+        )
     if "aliases" in update and update["aliases"] is not None:
-        topic.aliases = [alias.strip() for alias in update["aliases"] if isinstance(alias, str) and alias.strip()]
+        topic.aliases = [
+            alias.strip()
+            for alias in update["aliases"]
+            if isinstance(alias, str) and alias.strip()
+        ]
     if "status" in update and update["status"] is not None:
         status = str(update["status"]).strip()
         if not status:
@@ -221,10 +253,14 @@ def read_topic_rollup(
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+    claimed = (
+        claim_legacy_orphan_topics_for_owner(session, owner_id, topic_id=topic_id)
+        if current_user.is_active
+        else False
+    )
     if claimed:
         session.commit()
     topic = read_topic_model(session, topic_id, owner_id=owner_id, demo=demo)
@@ -246,7 +282,7 @@ def read_topic_rollup(
 @router.post("/{topic_id}/rollup/refresh", response_model=TopicRollupPublic)
 def refresh_topic_rollup_route(
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     topic_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:

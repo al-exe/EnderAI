@@ -14,7 +14,7 @@ def get_datetime_utc() -> datetime:
 
 class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
-    is_active: bool = True
+    is_active: bool = False
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
 
@@ -152,8 +152,12 @@ class Topic(SQLModel, table=True):
     status: str = Field(default="open", min_length=1, max_length=64)
     is_demo: bool = Field(default=False, index=True)
     owner_ids: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
-    created_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
-    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
     last_used_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
     rollup_summary: str | None = None
     rollup_version: int = 1
@@ -164,10 +168,16 @@ class CaseRecord(SQLModel, table=True):
     __tablename__ = "case_record"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    topic_id: uuid.UUID = Field(foreign_key="topic.id", nullable=False, index=True, ondelete="CASCADE")
+    topic_id: uuid.UUID = Field(
+        foreign_key="topic.id", nullable=False, index=True, ondelete="CASCADE"
+    )
     title: str = Field(min_length=1, max_length=255)
-    opened_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
-    updated_at: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
+    opened_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
     closed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
     status: str = Field(default="open", min_length=1, max_length=64)
     actor_id: uuid.UUID | None = None
@@ -182,8 +192,12 @@ class CaseEvent(SQLModel, table=True):
     __tablename__ = "case_event"
 
     id: int | None = Field(default=None, primary_key=True)
-    case_id: uuid.UUID = Field(foreign_key="case_record.id", nullable=False, index=True, ondelete="CASCADE")
-    ts: datetime | None = Field(default_factory=get_datetime_utc, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
+    case_id: uuid.UUID = Field(
+        foreign_key="case_record.id", nullable=False, index=True, ondelete="CASCADE"
+    )
+    ts: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
     type: str = Field(min_length=1, max_length=128)
     message: str | None = None
     data: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB)  # type: ignore[arg-type]
@@ -375,7 +389,9 @@ class CasePublic(SQLModel):
     changes: list[ChangeRecord] = Field(default_factory=list)
     outcome: str | None = None
     next_steps: list[str] = Field(default_factory=list)
-    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+    context_pack_snapshot: ContextPackSnapshot = Field(
+        default_factory=ContextPackSnapshot
+    )
 
 
 class CasesPublic(SQLModel):
@@ -506,7 +522,9 @@ class CaseHydrationView(SQLModel):
     open_questions: list[str] = Field(default_factory=list)
     recent_changes: list[ChangeRecord] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
-    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+    context_pack_snapshot: ContextPackSnapshot = Field(
+        default_factory=ContextPackSnapshot
+    )
 
 
 class ContextPackBuildRequest(TopicMatchSignals):
@@ -521,7 +539,9 @@ class ContextPackBuildResult(SQLModel):
     selected_topic_ids: list[uuid.UUID] = Field(default_factory=list)
     selected_case_ids: list[uuid.UUID] = Field(default_factory=list)
     relevant_cases: list[RelevantCaseSummary] = Field(default_factory=list)
-    context_pack_snapshot: ContextPackSnapshot = Field(default_factory=ContextPackSnapshot)
+    context_pack_snapshot: ContextPackSnapshot = Field(
+        default_factory=ContextPackSnapshot
+    )
 
 
 class Message(SQLModel):

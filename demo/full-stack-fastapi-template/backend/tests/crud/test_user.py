@@ -34,12 +34,12 @@ def test_not_authenticate_user(db: Session) -> None:
     assert user is None
 
 
-def test_check_if_user_is_active(db: Session) -> None:
+def test_create_user_defaults_to_inactive(db: Session) -> None:
     email = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=email, password=password)
     user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is True
+    assert user.is_active is False
 
 
 def test_check_if_user_is_active_inactive(db: Session) -> None:
@@ -104,7 +104,7 @@ def test_authenticate_user_with_bcrypt_upgrades_to_argon2(db: Session) -> None:
     assert bcrypt_hash.startswith("$2")  # bcrypt hashes start with $2
 
     # Create user with bcrypt hash directly in the database
-    user = User(email=email, hashed_password=bcrypt_hash)
+    user = User(email=email, hashed_password=bcrypt_hash, is_active=True)
     db.add(user)
     db.commit()
     db.refresh(user)
