@@ -108,6 +108,11 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
     user = session.get(User, token_data.sub)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if token_data.token_kind is None:
+        user.last_seen_at = get_datetime_utc()
+        session.add(user)
+        session.commit()
+        session.refresh(user)
     return user
 
 

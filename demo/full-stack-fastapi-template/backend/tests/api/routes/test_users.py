@@ -8,7 +8,7 @@ from app import crud
 from app.core.config import settings
 from app.core.security import verify_password
 from app.models import CaseRecord, Skill, Topic, User, UserCreate
-from tests.utils.user import create_random_user
+from tests.utils.user import create_random_user, user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
 
@@ -32,6 +32,28 @@ def test_get_users_normal_user_me(
     assert current_user["is_active"] is True
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
+
+
+def test_user_last_seen_updates_on_authenticated_page_access(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    assert user.last_seen_at is None
+
+    headers = user_authentication_headers(client=client, email=email, password=password)
+    r = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+
+    assert r.status_code == 200
+    current_user = r.json()
+    assert current_user["last_seen_at"] is not None
+
+    db.refresh(user)
+    assert user.last_seen_at is not None
 
 
 def test_create_user_new_email(
@@ -281,6 +303,7 @@ def test_retrieve_users(
     assert "count" in all_users
     for item in all_users["data"]:
         assert "email" in item
+        assert "last_seen_at" in item
 
 
 def test_update_user_me(
