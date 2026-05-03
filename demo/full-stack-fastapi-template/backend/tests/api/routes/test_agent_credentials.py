@@ -97,7 +97,7 @@ def test_mcp_agent_token_validates_and_can_call_backend(
     assert credential.last_used_at is not None
 
 
-def test_inactive_user_agent_tokens_are_rejected(
+def test_inactive_user_agent_tokens_can_read_but_not_write(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     create_res = client.post(
@@ -120,15 +120,35 @@ def test_inactive_user_agent_tokens_are_rejected(
         f"{settings.API_V1_STR}/agent-credentials/validate-mcp-token",
         headers={"Authorization": f"Bearer {mcp_token}"},
     )
-    assert validate_res.status_code == 400
-    assert validate_res.json() == {"detail": "Inactive user"}
+    assert validate_res.status_code == 200
 
     auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",
         headers={"Authorization": f"Bearer {mcp_token}"},
     )
-    assert auth_res.status_code == 400
-    assert auth_res.json() == {"detail": "Inactive user"}
+    assert auth_res.status_code == 200
+
+    list_res = client.get(
+        f"{settings.API_V1_STR}/agent-credentials/",
+        headers={"Authorization": f"Bearer {mcp_token}"},
+    )
+    assert list_res.status_code == 200
+
+    topic_res = client.post(
+        f"{settings.API_V1_STR}/topics/",
+        headers={"Authorization": f"Bearer {mcp_token}"},
+        json={"title": "Blocked inactive MCP write"},
+    )
+    assert topic_res.status_code == 403
+    assert topic_res.json() == {"detail": "Inactive users cannot write data"}
+
+    create_res = client.post(
+        f"{settings.API_V1_STR}/agent-credentials/",
+        headers=normal_user_token_headers,
+        json={"label": "Blocked inactive credential"},
+    )
+    assert create_res.status_code == 403
+    assert create_res.json() == {"detail": "Inactive users cannot write data"}
 
     db.expire_all()
     credential = db.get(AgentCredential, uuid.UUID(credential_id))
@@ -187,9 +207,7 @@ def test_rotate_agent_credential_invalidates_old_tokens(
         headers={"Authorization": f"Bearer {old_mcp_token}"},
     )
     assert old_mcp_validate_res.status_code == 403
-    assert old_mcp_validate_res.json() == {
-        "detail": "Could not validate credentials"
-    }
+    assert old_mcp_validate_res.json() == {"detail": "Could not validate credentials"}
 
     new_auth_res = client.post(
         f"{settings.API_V1_STR}/login/test-token",

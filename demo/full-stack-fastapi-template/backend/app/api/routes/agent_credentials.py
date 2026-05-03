@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlmodel import select
 
 from app.api.deps import (
+    ActiveUser,
     CurrentUser,
     SessionDep,
     TokenDep,
@@ -98,7 +99,7 @@ def read_agent_credentials(
 def create_agent_credential(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     body: AgentCredentialCreate,
 ) -> AgentCredentialIssueResult:
     now = get_datetime_utc()
@@ -124,7 +125,7 @@ def create_agent_credential(
 def rotate_agent_credential(
     *,
     session: SessionDep,
-    current_user: CurrentUser,
+    current_user: ActiveUser,
     credential_id: uuid.UUID,
 ) -> AgentCredentialIssueResult:
     credential = _get_owned_credential(session, current_user, credential_id)
@@ -159,7 +160,7 @@ def validate_mcp_token(
 
 @router.delete("/{credential_id}", response_model=Message)
 def revoke_agent_credential(
-    *, session: SessionDep, current_user: CurrentUser, credential_id: uuid.UUID
+    *, session: SessionDep, current_user: ActiveUser, credential_id: uuid.UUID
 ) -> Message:
     credential = _get_owned_credential(session, current_user, credential_id)
     if credential.revoked_at is None:

@@ -18,7 +18,7 @@ def search_route(
     demo: bool = Query(default=False),
     limit_per_kind: int = Query(default=5, ge=1, le=10),
 ) -> Any:
-    if demo and ensure_demo_workspace(session, current_user):
+    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     if len(q.strip()) < 2:
