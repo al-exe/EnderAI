@@ -1,4 +1,4 @@
-def test_global_search_returns_grouped_topic_and_case_hits(
+def test_global_search_returns_grouped_topic_case_and_skill_hits(
     client,
     normal_user_token_headers,
 ) -> None:
@@ -53,6 +53,14 @@ def test_global_search_returns_grouped_topic_and_case_hits(
     assert case_res.status_code == 201, case_res.text
     case_id = case_res.json()["id"]
 
+    skill_res = client.post(
+        "/api/v1/skills/generate",
+        headers=normal_user_token_headers,
+        json={"topic_id": topic_id},
+    )
+    assert skill_res.status_code == 201, skill_res.text
+    skill_id = skill_res.json()["id"]
+
     title_match = client.get(
         "/api/v1/search/",
         headers=normal_user_token_headers,
@@ -86,6 +94,18 @@ def test_global_search_returns_grouped_topic_and_case_hits(
     assert hypothesis_match.status_code == 200, hypothesis_match.text
     hypothesis_body = hypothesis_match.json()
     assert hypothesis_body["cases"][0]["id"] == case_id
+
+    skill_match = client.get(
+        "/api/v1/search/",
+        headers=normal_user_token_headers,
+        params={"q": "Workflow Skill"},
+    )
+    assert skill_match.status_code == 200, skill_match.text
+    skill_body = skill_match.json()
+    assert skill_body["skill_count"] >= 1
+    assert skill_body["skills"][0]["id"] == skill_id
+    assert skill_body["skills"][0]["route"] == "/skills"
+    assert skill_body["skills"][0]["route_search"]["skillId"] == skill_id
 
 
 def test_global_search_rejects_short_queries(client, normal_user_token_headers) -> None:
