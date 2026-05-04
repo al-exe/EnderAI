@@ -143,13 +143,14 @@ The main app shell should not surface any retired demo-template concepts.
 The hosted MCP service exposes:
 
 - `enderai_begin_case`
+- `enderai_use_skill`
 - `enderai_update_case`
 - `enderai_finish_case`
 - `enderai_request`
 - `enderai_openapi`
 - `enderai_health_check`
 
-Its guided workflow is aligned to the same Topic / Case / ContextPack model as the backend and frontend.
+Its guided workflow is aligned to the same Topic / Case / ContextPack model as the backend and frontend. `enderai_begin_case` and `enderai_use_skill` also sync matched generated Skills to local markdown files so agents can read task-specific workflow guidance before acting.
 
 ## Auth and Token Flow
 

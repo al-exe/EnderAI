@@ -107,6 +107,7 @@ The setup page should also provide a short workflow reminder such as:
 If EnderAI tools are available:
 - Start meaningful user-initiated work with `enderai_begin_case`.
 - Let EnderAI auto-hydrate relevant prior context before work begins.
+- Read any `local_skill_files` returned by `skill_hydration` or `enderai_use_skill` before applying generated Skill guidance.
 - Use `enderai_update_case` as material progress develops.
 - Use `enderai_finish_case` when the work is complete.
 - Prefer the guided case tools over raw `enderai_request` calls.
@@ -118,10 +119,11 @@ The canonical workflow is:
 
 1. user initiates meaningful work
 2. agent calls `enderai_begin_case`
-3. EnderAI auto-hydrates context if relevant prior context exists
-4. active work begins
-5. agent calls `enderai_update_case` as the work develops
-6. agent calls `enderai_finish_case` at completion
+3. EnderAI auto-hydrates context and generated Skill matches if relevant prior context exists
+4. agent reads any returned local Skill markdown files for this task
+5. active work begins
+6. agent calls `enderai_update_case` as the work develops
+7. agent calls `enderai_finish_case` at completion
 
 `enderai_request` remains available as a lower-level escape hatch, but it is not the normal entrypoint for meaningful work.
 

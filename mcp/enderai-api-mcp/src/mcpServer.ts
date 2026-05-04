@@ -8,6 +8,11 @@ import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { enderaiFetch, type ResponseSummary } from "./http.js";
 import { rewriteDeprecatedApiPath } from "./deprecatedPathRewrite.js";
+import {
+  getLocalSkillsDirectory,
+  syncSkillUseResultToLocalFiles,
+  type SkillSyncResult,
+} from "./skillSync.js";
 
 export type McpServerOptions = {
   // Optional backend bearer token provider used for all tool calls in this server instance.
@@ -475,6 +480,137 @@ function buildUseSkillPayload(
   });
 }
 
+function hasSkillMatchSignals(payload: Record<string, unknown>): boolean {
+  return (
+    Boolean(payload.skill_id) ||
+    Boolean(payload.case_id) ||
+    Boolean(payload.title) ||
+    Boolean(payload.request_summary) ||
+    (Array.isArray(payload.files) && payload.files.length > 0) ||
+    (Array.isArray(payload.symbols) && payload.symbols.length > 0) ||
+    (Array.isArray(payload.errors) && payload.errors.length > 0) ||
+    (Array.isArray(payload.symptoms) && payload.symptoms.length > 0) ||
+    (Array.isArray(payload.contexts) && payload.contexts.length > 0)
+  );
+}
+
+function summarizeSkill(skillValue: unknown): Record<string, unknown> | null {
+  const skill = asRecord(skillValue);
+  const id = typeof skill.id === "string" ? skill.id : undefined;
+  if (!id) return null;
+  return pruneUndefined({
+    id,
+    title: typeof skill.title === "string" ? skill.title : undefined,
+    slug: typeof skill.slug === "string" ? skill.slug : undefined,
+    confidence: typeof skill.confidence === "string" ? skill.confidence : undefined,
+    source_type: typeof skill.source_type === "string" ? skill.source_type : undefined,
+    updated_at: typeof skill.updated_at === "string" ? skill.updated_at : undefined,
+  });
+}
+
+function summarizeSkillCandidate(candidateValue: unknown): Record<string, unknown> | null {
+  const candidate = asRecord(candidateValue);
+  const skill = summarizeSkill(candidate.skill);
+  if (!skill) return null;
+  return pruneUndefined({
+    skill,
+    score: typeof candidate.score === "number" ? candidate.score : undefined,
+    confidence:
+      typeof candidate.confidence === "string" ? candidate.confidence : undefined,
+    matched_signals: Array.isArray(candidate.matched_signals)
+      ? candidate.matched_signals.filter((item) => typeof item === "string")
+      : undefined,
+    reasoning: Array.isArray(candidate.reasoning)
+      ? candidate.reasoning.filter((item) => typeof item === "string")
+      : undefined,
+  });
+}
+
+function summarizeSkillUseForHydration(
+  skillUseData: unknown,
+  localSkillSync: SkillSyncResult,
+): Record<string, unknown> {
+  const data = asRecord(skillUseData);
+  const matchedSkills = Array.isArray(data.matched_skills)
+    ? data.matched_skills
+        .map((candidate) => summarizeSkillCandidate(candidate))
+        .filter((candidate): candidate is Record<string, unknown> => Boolean(candidate))
+    : [];
+  return {
+    status: localSkillSync.local_skill_files.length > 0 ? "synced" : "none",
+    selected_skill: summarizeSkill(data.selected_skill),
+    matched_skills: matchedSkills,
+    matched_skill_count: matchedSkills.length,
+    confidence: typeof data.confidence === "string" ? data.confidence : "low",
+    matched_signals: Array.isArray(data.matched_signals)
+      ? data.matched_signals.filter((item) => typeof item === "string")
+      : [],
+    local_skill_sync: localSkillSync,
+  };
+}
+
+async function tryHydrateSkillsForCase(params: {
+  bearerToken?: string;
+  caseData: Record<string, any>;
+}): Promise<Record<string, unknown>> {
+  const payload = buildUseSkillPayload({ max_skills: DEFAULT_SKILL_LIMIT }, params.caseData);
+  if (!hasSkillMatchSignals(payload)) {
+    return {
+      status: "skipped",
+      reason: "No case or request signals were available for Skill matching.",
+      local_skill_sync: {
+        directory: getLocalSkillsDirectory(),
+        index_path: null,
+        local_skill_files: [],
+        agent_instructions: [
+          "No EnderAI Skill matching was attempted because no signals were available.",
+        ],
+      },
+    };
+  }
+
+  try {
+    const skillRes = await enderaiFetch({
+      method: "POST",
+      path: "/api/v1/skills/use",
+      bearerToken: params.bearerToken,
+      json: payload,
+    });
+    if (!skillRes.ok) {
+      return {
+        status: "failed",
+        error: extractErrorDetail(skillRes),
+        backend_status: skillRes.status,
+        local_skill_sync: {
+          directory: getLocalSkillsDirectory(),
+          index_path: null,
+          local_skill_files: [],
+          agent_instructions: [
+            "EnderAI Skill matching failed. Continue with Topic/Case context and retry enderai_use_skill if needed.",
+          ],
+        },
+      };
+    }
+
+    const localSkillSync = await syncSkillUseResultToLocalFiles(skillRes.data);
+    return summarizeSkillUseForHydration(skillRes.data, localSkillSync);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      status: "failed",
+      error: msg,
+      local_skill_sync: {
+        directory: getLocalSkillsDirectory(),
+        index_path: null,
+        local_skill_files: [],
+        agent_instructions: [
+          "EnderAI Skill matching or local Skill sync failed. Continue with Topic/Case context and retry enderai_use_skill if needed.",
+        ],
+      },
+    };
+  }
+}
+
 function extractExecutionStartIds(
   resData: unknown,
 ): { executionId?: string; threadId?: string } {
@@ -797,7 +933,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_begin_case",
           description:
-            "Use this first when a user initiates meaningful work. Starts a guided Topic/Case workflow, automatically hydrates relevant prior context by default, remembers the returned ids for this MCP session, and returns the ids needed for enderai_update_case and enderai_finish_case.",
+            "Use this first when a user initiates meaningful work. Starts a guided Topic/Case workflow, automatically hydrates relevant prior context by default, syncs matching generated EnderAI Skills to local markdown files when available, remembers the returned ids for this MCP session, and returns the ids needed for enderai_update_case and enderai_finish_case.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -960,7 +1096,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_use_skill",
           description:
-            "Use this after enderai_begin_case and ContextPack hydration to retrieve a generated EnderAI Skill for the active case. Skills are advisory workflow instructions generated from Topics, Cases, or ContextPacks.",
+            "Use this after enderai_begin_case and ContextPack hydration to retrieve and locally sync generated EnderAI Skill markdown for the active case. Skills are advisory workflow instructions generated from Topics, Cases, or ContextPacks.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1345,6 +1481,26 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           );
         }
         setActiveCaseContext(caseId, topicId);
+        const skillHydration =
+          args.auto_hydrate === false
+            ? {
+                status: "skipped",
+                reason: "auto_hydrate was false.",
+                local_skill_sync: {
+                  directory: getLocalSkillsDirectory(),
+                  index_path: null,
+                  local_skill_files: [],
+                  agent_instructions: [
+                    "Skill sync was skipped because auto_hydrate was false. Run enderai_use_skill after beginning the case if skill guidance is needed.",
+                  ],
+                },
+              }
+            : await tryHydrateSkillsForCase({ bearerToken, caseData });
+        const skillHydrationRecord = asRecord(skillHydration);
+        const localSkillSyncRecord = asRecord(skillHydrationRecord.local_skill_sync);
+        const localSkillFiles = Array.isArray(localSkillSyncRecord.local_skill_files)
+          ? localSkillSyncRecord.local_skill_files
+          : [];
         const result = {
           policy_version: POLICY_VERSION,
           workflow_model: WORKFLOW_MODEL,
@@ -1352,10 +1508,16 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           topic: topicData,
           case: caseRes.data,
           context_pack: contextPack,
+          skill_hydration: skillHydration,
           hydration: {
             auto_hydrate_requested: args.auto_hydrate !== false,
             hydration_status: args.auto_hydrate === false ? "skipped" : "attached",
             context_pack_attached: Boolean(contextPackRecord.context_pack_snapshot),
+            skill_hydration_status:
+              typeof skillHydrationRecord.status === "string"
+                ? skillHydrationRecord.status
+                : "unknown",
+            local_skill_file_count: localSkillFiles.length,
             matched_topic_id:
               typeof contextPackSnapshot.topic_id === "string"
                 ? contextPackSnapshot.topic_id
@@ -1367,6 +1529,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           reused_topic: Boolean(existingTopic || matchedTopic),
           next: {
             use_skill_tool: "enderai_use_skill",
+            local_skills_dir: getLocalSkillsDirectory(),
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
             case_id: caseId,
@@ -1498,17 +1661,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         }
 
         const payload = buildUseSkillPayload(args, caseData);
-        const hasMatchSignals =
-          Boolean(payload.skill_id) ||
-          Boolean(payload.case_id) ||
-          Boolean(payload.title) ||
-          Boolean(payload.request_summary) ||
-          (Array.isArray(payload.files) && payload.files.length > 0) ||
-          (Array.isArray(payload.symbols) && payload.symbols.length > 0) ||
-          (Array.isArray(payload.errors) && payload.errors.length > 0) ||
-          (Array.isArray(payload.symptoms) && payload.symptoms.length > 0) ||
-          (Array.isArray(payload.contexts) && payload.contexts.length > 0);
-        if (!hasMatchSignals) {
+        if (!hasSkillMatchSignals(payload)) {
           return toolError(
             "enderai_use_skill requires an active case, case_id, skill_id, or request signals to match a generated Skill.",
           );
@@ -1526,14 +1679,17 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             `enderai_use_skill failed: ${extractErrorDetail(skillRes)} (status ${skillRes.status}).`,
           );
         }
+        const localSkillSync = await syncSkillUseResultToLocalFiles(skillRes.data);
 
         const result = {
           skill_use: skillRes.data,
+          local_skill_sync: localSkillSync,
           case: caseData,
           next: {
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
             case_id: caseId ?? null,
+            local_skills_dir: localSkillSync.directory,
             topic_id:
               typeof caseData?.topic_id === "string"
                 ? caseData.topic_id
@@ -1781,6 +1937,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           user,
           active_case_id: auditState.executionId ?? null,
           active_topic_id: auditState.threadId ?? null,
+          local_skills_dir: getLocalSkillsDirectory(),
+          skills_discovery:
+            "enderai_begin_case and enderai_use_skill sync matched EnderAI Skills as markdown files under local_skills_dir. Read the returned local_skill_files before applying skill guidance.",
           session_ready: Boolean(bearerToken),
           next: {
             begin_tool: "enderai_begin_case",

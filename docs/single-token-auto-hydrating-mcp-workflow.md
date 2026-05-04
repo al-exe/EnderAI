@@ -13,11 +13,12 @@ The canonical meaningful-work lifecycle is:
 
 1. the user initiates meaningful work
 2. the agent calls `enderai_begin_case`
-3. EnderAI automatically hydrates relevant prior context if it exists
+3. EnderAI automatically hydrates relevant prior context and generated Skill matches if they exist
 4. the case becomes active
-5. the agent proceeds with work
-6. the agent calls `enderai_update_case` as work develops
-7. the agent calls `enderai_finish_case` when complete
+5. the agent reads any returned local Skill markdown files for this task
+6. the agent proceeds with work
+7. the agent calls `enderai_update_case` as work develops
+8. the agent calls `enderai_finish_case` when complete
 
 ## Auth Model
 
@@ -53,8 +54,12 @@ This is the normal entrypoint for feature work, debugging, investigation, refact
 - gather related prior cases when available
 - build a compact `ContextPack`
 - attach that hydration snapshot to the started case
+- match generated Skills from the hydrated case signals
+- sync matched Skill markdown locally and return the file paths to read
 
 If no relevant prior context exists, the case still starts normally.
+
+Generated Skill guidance is advisory. Agents should read only the `local_skill_files` returned by `skill_hydration` or `enderai_use_skill` for the current task unless the user asks for broader Skill exploration.
 
 ### Progress updates
 
@@ -76,6 +81,7 @@ When work completes or stops, the agent should close the case with `enderai_fini
 
 The guided workflow tools are the default surface:
 - `enderai_begin_case`
+- `enderai_use_skill`
 - `enderai_update_case`
 - `enderai_finish_case`
 - `enderai_session_info`
@@ -120,6 +126,7 @@ Recommended verification flow:
 - remove client-provided backend-token override behavior from the normal flow
 - expose `enderai_session_info`
 - make `enderai_begin_case` return explicit hydration metadata
+- make `enderai_begin_case` and `enderai_use_skill` sync matched generated Skills to local markdown
 - reject write-like `enderai_request` calls when no active case exists unless an explicit override reason is supplied
 
 ### Frontend
@@ -134,5 +141,6 @@ The implementation is successful when:
 - setup snippets only reference `ENDERAI_MCP_TOKEN`
 - meaningful work starts with `enderai_begin_case`
 - `enderai_begin_case` auto-hydrates prior context by default
+- matched generated Skills are returned as local markdown file paths for the agent to read
 - `enderai_request` write-like calls do not bypass the active-case workflow
 - onboarding docs and templates no longer describe a second backend token
