@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, col, select
 
 from app.core.cases import build_case_public
+from app.core.skills import build_skill_public, list_skill_models
 from app.core.topics import (
     _case_visible_to_owner,
     build_topic_public_current,
@@ -17,6 +18,7 @@ from app.models import (
     SearchHitPublic,
     SearchResultsPublic,
     SearchRouteSearch,
+    SkillPublic,
     TopicPublic,
 )
 
@@ -55,6 +57,13 @@ def search_topics_and_cases(
             )
         ).all()
     )
+    skills = list_skill_models(
+        session,
+        owner_id=owner_id,
+        demo=demo,
+        skip=0,
+        limit=10_000,
+    )
 
     topic_hits = [
         scored
@@ -87,15 +96,23 @@ def search_topics_and_cases(
             is not None
         )
     ]
+    skill_hits = [
+        scored
+        for skill in skills
+        if (scored := _score_skill_hit(build_skill_public(skill), query)) is not None
+    ]
 
     _sort_hits(topic_hits)
     _sort_hits(case_hits)
+    _sort_hits(skill_hits)
 
     return SearchResultsPublic(
         topics=[scored.hit for scored in topic_hits[:limit_per_kind]],
         cases=[scored.hit for scored in case_hits[:limit_per_kind]],
+        skills=[scored.hit for scored in skill_hits[:limit_per_kind]],
         topic_count=len(topic_hits),
         case_count=len(case_hits),
+        skill_count=len(skill_hits),
     )
 
 
@@ -233,6 +250,40 @@ def _score_case_hit(case: CasePublic, query: str) -> _ScoredHit | None:
     )
 
 
+def _score_skill_hit(skill: SkillPublic, query: str) -> _ScoredHit | None:
+    best = _best_group_match(
+        query,
+        (
+            (skill.title, 900),
+            (skill.slug, 860),
+            (skill.description, 760),
+            (_match_joined(skill.trigger_phrases), 700),
+            (_match_joined(skill.files), 620),
+            (_match_joined(skill.symbols), 600),
+            (_match_joined(skill.errors), 600),
+            (_match_joined(skill.symptoms), 600),
+            (skill.instructions_md, 520),
+        ),
+    )
+    if best is None:
+        return None
+
+    score, excerpt = best
+    return _ScoredHit(
+        score=score,
+        hit=SearchHitPublic(
+            kind="skill",
+            id=skill.id,
+            title=skill.title,
+            subtitle=_skill_subtitle(skill),
+            excerpt=excerpt,
+            updated_at=skill.updated_at or skill.created_at,
+            route="/skills",
+            route_search=SearchRouteSearch(skillId=str(skill.id)),
+        ),
+    )
+
+
 def _best_group_match(
     query: str,
     weighted_values: Iterable[tuple[str | None, int]],
@@ -275,6 +326,11 @@ def _match_joined(values: Iterable[str]) -> str | None:
     if not filtered:
         return None
     return "\n".join(filtered)
+
+
+def _skill_subtitle(skill: SkillPublic) -> str:
+    source_type = skill.source_type.replace("_", " ").title()
+    return f"{source_type} skill"
 
 
 def _excerpt_for_value(value: str | None) -> str | None:
