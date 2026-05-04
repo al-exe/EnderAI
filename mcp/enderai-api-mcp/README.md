@@ -4,7 +4,8 @@ Hosted or local MCP server that proxies tool calls to an EnderAI backend.
 
 ## Tools
 
-- `enderai_begin_case`: first step for meaningful work; starts a guided Topic/Case workflow and auto-hydrates relevant prior context by default
+- `enderai_begin_case`: first step for meaningful work; starts a guided Topic/Case workflow, auto-hydrates relevant prior context by default, and syncs matching generated Skills to local markdown when available
+- `enderai_use_skill`: explicitly match generated EnderAI Skills for the active case or supplied request signals, then sync the matched Skill markdown locally
 - `enderai_update_case`: record material progress during active work
 - `enderai_finish_case`: close the active case with a terminal status
 - `enderai_session_info`: return session policy, auth model, active case/topic ids, and user summary when available
@@ -17,12 +18,15 @@ Hosted or local MCP server that proxies tool calls to an EnderAI backend.
 The intended lifecycle for meaningful work is:
 
 1. call `enderai_begin_case`
-2. let EnderAI auto-hydrate relevant prior context
-3. perform the work
-4. call `enderai_update_case` as findings or changes develop
-5. call `enderai_finish_case` at the end
+2. let EnderAI auto-hydrate relevant prior context and generated Skill matches
+3. read any returned `skill_hydration.local_skill_sync.local_skill_files`
+4. perform the work
+5. call `enderai_update_case` as findings or changes develop
+6. call `enderai_finish_case` at the end
 
 If the caller skips a step or tries to switch cases mid-session, the MCP returns a clear sequencing error instead of guessing.
+
+Generated Skill files are advisory workflow guidance. They are written under `ENDERAI_SKILLS_DIR` when set, otherwise under `enderai-skills` relative to the MCP process working directory. The caller should read only the returned file paths for the current task unless the user asks for broader Skill exploration.
 
 ## Lower-Level Requests
 
@@ -41,6 +45,7 @@ Guidance:
 - `auth_model`
 - active case/topic ids
 - authenticated user summary when available
+- local Skill sync directory and discovery reminder
 - readiness to start meaningful work
 
 ## Backward-Compatibility Path Rewrites
@@ -56,6 +61,7 @@ Guidance:
 
 - `ENDERAI_BASE_URL` (default: `https://enderai-backend.onrender.com`)
 - `ENDERAI_BEARER_TOKEN` (optional operator-side fallback bearer token)
+- `ENDERAI_SKILLS_DIR` (optional local directory for generated Skill markdown; default: `./enderai-skills`)
 - `ENDERAI_TIMEOUT_MS` (default: `30000`)
 - `MCP_BEARER_TOKEN` (optional operator-side protection for the MCP service itself)
 - `MCP_PATH` (default: `/mcp`)
@@ -139,6 +145,7 @@ export ENDERAI_MCP_TOKEN="REDACTED"
 If EnderAI tools are available:
 - Start meaningful user-initiated work with `enderai_begin_case`.
 - Let EnderAI auto-hydrate relevant prior context before work begins.
+- Read any `local_skill_files` returned by `skill_hydration` or `enderai_use_skill` before applying generated Skill guidance.
 - Use `enderai_update_case` as material progress develops.
 - Use `enderai_finish_case` when the work is complete.
 - Prefer the guided case tools over raw `enderai_request` calls.

@@ -1,10 +1,13 @@
 import http from "node:http";
 import { randomUUID, webcrypto } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createMcpServer } from "../src/mcpServer.js";
 
@@ -38,9 +41,20 @@ type Harness = {
   close: () => Promise<void>;
 };
 
+let skillsDir: string | undefined;
+
 beforeEach(() => {
   mockFetch.mockReset();
   process.env.ENDERAI_BASE_URL = "https://enderai-backend.onrender.com";
+  delete process.env.ENDERAI_BEARER_TOKEN;
+  skillsDir = mkdtempSync(path.join(os.tmpdir(), "enderai-skills-test-"));
+  process.env.ENDERAI_SKILLS_DIR = skillsDir;
+});
+
+afterEach(() => {
+  if (skillsDir) rmSync(skillsDir, { recursive: true, force: true });
+  skillsDir = undefined;
+  delete process.env.ENDERAI_SKILLS_DIR;
   delete process.env.ENDERAI_BEARER_TOKEN;
 });
 
@@ -80,6 +94,7 @@ describe("guided case workflow MCP tools", () => {
 
       const topicId = "11111111-1111-1111-1111-111111111111";
       const caseId = "22222222-2222-2222-2222-222222222222";
+      const skillId = "33333333-3333-3333-3333-333333333333";
 
       mockFetch
         .mockResolvedValueOnce(
@@ -181,6 +196,20 @@ describe("guided case workflow MCP tools", () => {
               confidence: "high",
             },
           }),
+        )
+        .mockResolvedValueOnce(
+          selectedSkillUseResponse({
+            skillId,
+            topicId,
+            caseId,
+            title: "Core Model Workflow Skill",
+            slug: "core-model-workflow-skill",
+            instructionsMd: "# Skill: Core Model\n\nUse this hydration checklist.",
+            matchedSignals: ["hydration gap"],
+            files: [
+              "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+            ],
+          }),
         );
 
       const begin = await harness.client.callTool({
@@ -201,6 +230,14 @@ describe("guided case workflow MCP tools", () => {
       expect(beginBody.hydration.hydration_status).toBe("attached");
       expect(beginBody.hydration.context_pack_attached).toBe(true);
       expect(beginBody.hydration.relevant_case_count).toBe(1);
+      expect(beginBody.skill_hydration.status).toBe("synced");
+      expect(beginBody.hydration.skill_hydration_status).toBe("synced");
+      expect(beginBody.hydration.local_skill_file_count).toBe(1);
+      const syncedSkill = beginBody.skill_hydration.local_skill_sync.local_skill_files[0];
+      expect(syncedSkill.path).toContain(skillsDir);
+      const syncedSkillText = readFileSync(syncedSkill.path, "utf8");
+      expect(syncedSkillText).toContain("# EnderAI Skill: Core Model Workflow Skill");
+      expect(syncedSkillText).toContain("# Skill: Core Model");
       expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/topics/");
       expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/topics/match");
       expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
@@ -214,9 +251,17 @@ describe("guided case workflow MCP tools", () => {
       expect(mockFetch.mock.calls[2][0].toString()).toContain("/api/v1/topics/");
       expect(mockFetch.mock.calls[3][0].toString()).toContain("/api/v1/context-packs/build");
       expect(mockFetch.mock.calls[4][0].toString()).toContain("/api/v1/cases/");
+      expect(mockFetch.mock.calls[5][0].toString()).toContain("/api/v1/skills/use");
       expect(JSON.parse(mockFetch.mock.calls[3][1].body)).toMatchObject({
         topic_id: topicId,
         request_summary: "Hydration gap",
+      });
+      expect(JSON.parse(mockFetch.mock.calls[5][1].body)).toMatchObject({
+        case_id: caseId,
+        request_summary: "Hydration gap",
+        files: [
+          "demo/full-stack-fastapi-template/backend/app/api/routes/cases.py",
+        ],
       });
 
       mockFetch
@@ -287,9 +332,9 @@ describe("guided case workflow MCP tools", () => {
       const updateBody = JSON.parse(summarizeToolText(update.content));
       expect(updateBody.case.summary_current).toBe("Captured first evidence");
       expect(updateBody.progress_event.message).toBe("Captured first evidence");
-      expect(mockFetch.mock.calls[5][0].toString()).toContain(`/api/v1/cases/${caseId}`);
       expect(mockFetch.mock.calls[6][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(mockFetch.mock.calls[7][0].toString()).toContain(
+      expect(mockFetch.mock.calls[7][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[8][0].toString()).toContain(
         `/api/v1/cases/${caseId}/events`,
       );
 
@@ -432,6 +477,9 @@ describe("guided case workflow MCP tools", () => {
             status: "running",
             summary_current: "Hydration gap",
           }),
+        )
+        .mockResolvedValueOnce(
+          noSkillUseResponse(),
         );
 
       await harness.client.callTool({
@@ -566,20 +614,8 @@ describe("guided case workflow MCP tools", () => {
               questions: [],
             },
           }),
-        );
-
-      await harness.client.callTool({
-        name: "enderai_begin_case",
-        arguments: {
-          topic_title: "Hosted MCP OAuth Rotation",
-          workflow_key: "hosted_mcp_oauth_rotation",
-          request_summary: "Hosted MCP returns invalid_grant after key rollover.",
-          files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
-          errors: ["invalid_grant"],
-        },
-      });
-
-      mockFetch
+        )
+        .mockResolvedValueOnce(noSkillUseResponse())
         .mockResolvedValueOnce(
           jsonResponse({
             id: caseId,
@@ -602,20 +638,30 @@ describe("guided case workflow MCP tools", () => {
           }),
         )
         .mockResolvedValueOnce(
-          jsonResponse({
-            selected_skill: {
-              id: skillId,
-              title: "Hosted MCP OAuth Rotation Workflow Skill",
-              instructions_md: "# Skill: Hosted MCP OAuth Rotation",
-            },
-            matched_skills: [],
-            instructions_md: "# Skill: Hosted MCP OAuth Rotation",
-            confidence: "high",
-            matched_signals: ["invalid_grant"],
-            provenance: { topic: { id: topicId } },
-            agent_usage_note: "Use the returned skill after ContextPack hydration.",
+          selectedSkillUseResponse({
+            skillId,
+            topicId,
+            caseId,
+            title: "Hosted MCP OAuth Rotation Workflow Skill",
+            slug: "hosted-mcp-oauth-rotation-workflow-skill",
+            instructionsMd: "# Skill: Hosted MCP OAuth Rotation",
+            matchedSignals: ["invalid_grant"],
+            files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+            symbols: ["refreshHostedSession"],
+            errors: ["invalid_grant"],
           }),
         );
+
+      await harness.client.callTool({
+        name: "enderai_begin_case",
+        arguments: {
+          topic_title: "Hosted MCP OAuth Rotation",
+          workflow_key: "hosted_mcp_oauth_rotation",
+          request_summary: "Hosted MCP returns invalid_grant after key rollover.",
+          files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
+          errors: ["invalid_grant"],
+        },
+      });
 
       const useSkill = await harness.client.callTool({
         name: "enderai_use_skill",
@@ -624,10 +670,17 @@ describe("guided case workflow MCP tools", () => {
       const useSkillBody = JSON.parse((useSkill.content as any)[0].text);
 
       expect(useSkillBody.skill_use.selected_skill.id).toBe(skillId);
+      expect(useSkillBody.local_skill_sync.local_skill_files).toHaveLength(1);
+      const localSkillFile = useSkillBody.local_skill_sync.local_skill_files[0].path;
+      expect(readFileSync(localSkillFile, "utf8")).toContain(
+        "# Skill: Hosted MCP OAuth Rotation",
+      );
       expect(useSkillBody.next.case_id).toBe(caseId);
-      expect(mockFetch.mock.calls[5][0].toString()).toContain(`/api/v1/cases/${caseId}`);
-      expect(mockFetch.mock.calls[6][0].toString()).toContain("/api/v1/skills/use");
-      expect(JSON.parse(mockFetch.mock.calls[6][1].body)).toMatchObject({
+      expect(useSkillBody.next.local_skills_dir).toBe(skillsDir);
+      expect(mockFetch.mock.calls[5][0].toString()).toContain("/api/v1/skills/use");
+      expect(mockFetch.mock.calls[6][0].toString()).toContain(`/api/v1/cases/${caseId}`);
+      expect(mockFetch.mock.calls[7][0].toString()).toContain("/api/v1/skills/use");
+      expect(JSON.parse(mockFetch.mock.calls[7][1].body)).toMatchObject({
         case_id: caseId,
         request_summary: "Hosted MCP returns invalid_grant after key rollover.",
         files: ["mcp/enderai-api-mcp/src/sessionAuth.ts"],
@@ -718,7 +771,8 @@ describe("guided case workflow MCP tools", () => {
               confidence: "medium",
             },
           }),
-        );
+        )
+        .mockResolvedValueOnce(noSkillUseResponse());
 
       const begin = await harness.client.callTool({
         name: "enderai_begin_case",
@@ -743,6 +797,7 @@ describe("guided case workflow MCP tools", () => {
       expect(JSON.parse(mockFetch.mock.calls[3][1].body)).toMatchObject({
         topic_id: topicId,
       });
+      expect(mockFetch.mock.calls[4][0].toString()).toContain("/api/v1/skills/use");
     } finally {
       await harness.close();
     }
@@ -837,7 +892,8 @@ describe("guided case workflow MCP tools", () => {
             status: "running",
             summary_current: "Recovered begin case",
           }),
-        );
+        )
+        .mockResolvedValueOnce(noSkillUseResponse());
 
       const begin = await harness.client.callTool({
         name: "enderai_begin_case",
@@ -958,6 +1014,8 @@ describe("guided case workflow MCP tools", () => {
         email: "frontend-test@example.com",
         full_name: "Frontend Test User",
       });
+      expect(infoBody.local_skills_dir).toBe(skillsDir);
+      expect(infoBody.skills_discovery).toContain("local_skill_files");
       expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/users/me");
       expect(mockFetch.mock.calls[0][1]?.headers).toMatchObject({
         authorization: "Bearer operator-bearer-token",
@@ -967,6 +1025,75 @@ describe("guided case workflow MCP tools", () => {
     }
   });
 });
+
+function noSkillUseResponse(): Response {
+  return jsonResponse({
+    selected_skill: null,
+    matched_skills: [],
+    instructions_md: null,
+    confidence: "low",
+    matched_signals: [],
+    provenance: {},
+    agent_usage_note:
+      "No generated EnderAI skill matched this request. Continue with ContextPack hydration.",
+  });
+}
+
+function selectedSkillUseResponse(params: {
+  skillId: string;
+  topicId: string;
+  caseId: string;
+  title: string;
+  slug: string;
+  instructionsMd: string;
+  matchedSignals: string[];
+  files?: string[];
+  symbols?: string[];
+  errors?: string[];
+  symptoms?: string[];
+}): Response {
+  const skill = {
+    id: params.skillId,
+    title: params.title,
+    slug: params.slug,
+    description: `Reusable workflow generated from ${params.title}.`,
+    status: "published",
+    source_type: "topic",
+    source_topic_id: params.topicId,
+    source_case_ids: [params.caseId],
+    owner_ids: ["test-owner"],
+    is_demo: false,
+    trigger_phrases: params.matchedSignals,
+    files: params.files ?? [],
+    symbols: params.symbols ?? [],
+    errors: params.errors ?? [],
+    symptoms: params.symptoms ?? [],
+    instructions_md: params.instructionsMd,
+    confidence: "high",
+    source_snapshot: { topic: { id: params.topicId }, cases: [params.caseId] },
+    usage_count: 0,
+    created_at: "2026-05-04T00:00:00.000Z",
+    updated_at: "2026-05-04T00:00:00.000Z",
+    last_used_at: null,
+  };
+  return jsonResponse({
+    selected_skill: skill,
+    matched_skills: [
+      {
+        skill,
+        score: 8.5,
+        confidence: "high",
+        matched_signals: params.matchedSignals,
+        reasoning: ["request signals matched generated skill"],
+      },
+    ],
+    instructions_md: params.instructionsMd,
+    confidence: "high",
+    matched_signals: params.matchedSignals,
+    provenance: { topic: { id: params.topicId }, cases: [params.caseId] },
+    agent_usage_note: "Use the returned skill after ContextPack hydration.",
+  });
+}
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
