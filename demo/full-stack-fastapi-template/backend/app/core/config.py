@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_PRICE_ID: str | None = None
+    STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_API_BASE_URL: str = "https://api.stripe.com"
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

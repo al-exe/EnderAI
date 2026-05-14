@@ -5,6 +5,7 @@ meta/
 .venv/
 __pycache__/
 *.pyc
+demo/full-stack-fastapi-template/.env
 
 # macOS
 .DS_Store

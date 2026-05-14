@@ -59,6 +59,29 @@ class User(UserBase, table=True):
         default=None,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+    stripe_customer_id: str | None = Field(
+        default=None,
+        index=True,
+        unique=True,
+        max_length=255,
+    )
+    stripe_subscription_id: str | None = Field(
+        default=None,
+        index=True,
+        unique=True,
+        max_length=255,
+    )
+    stripe_subscription_status: str | None = Field(
+        default=None,
+        index=True,
+        max_length=64,
+    )
+    stripe_subscription_current_period_end: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    stripe_subscription_cancel_at_period_end: bool = False
+    stripe_price_id: str | None = Field(default=None, max_length=255)
 
 
 class UserPublic(UserBase):
@@ -70,6 +93,19 @@ class UserPublic(UserBase):
 class UsersPublic(SQLModel):
     data: list[UserPublic]
     count: int
+
+
+class BillingStatusPublic(SQLModel):
+    has_customer: bool = False
+    subscription_status: str | None = None
+    subscription_current_period_end: datetime | None = None
+    subscription_cancel_at_period_end: bool = False
+    price_id: str | None = None
+    is_subscription_active: bool = False
+
+
+class BillingSessionPublic(SQLModel):
+    url: str
 
 
 class AgentCredentialBase(SQLModel):
