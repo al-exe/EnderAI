@@ -88,6 +88,10 @@ class UserPublic(UserBase):
     id: uuid.UUID
     created_at: datetime | None = None
     last_seen_at: datetime | None = None
+    stripe_subscription_status: str | None = None
+    stripe_subscription_current_period_end: datetime | None = None
+    stripe_subscription_cancel_at_period_end: bool = False
+    stripe_price_id: str | None = None
 
 
 class UsersPublic(SQLModel):

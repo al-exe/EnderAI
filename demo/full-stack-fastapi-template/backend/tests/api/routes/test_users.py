@@ -304,6 +304,10 @@ def test_retrieve_users(
     for item in all_users["data"]:
         assert "email" in item
         assert "last_seen_at" in item
+        assert "stripe_subscription_status" in item
+        assert "stripe_subscription_current_period_end" in item
+        assert "stripe_subscription_cancel_at_period_end" in item
+        assert "stripe_price_id" in item
 
 
 def test_update_user_me(
