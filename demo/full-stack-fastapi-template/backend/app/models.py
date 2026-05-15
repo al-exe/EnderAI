@@ -47,6 +47,7 @@ class UpdatePassword(SQLModel):
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     hashed_password: str
+    v2: bool = Field(default=False, nullable=False)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -86,6 +87,7 @@ class User(UserBase, table=True):
 
 class UserPublic(UserBase):
     id: uuid.UUID
+    v2: bool = False
     created_at: datetime | None = None
     last_seen_at: datetime | None = None
     stripe_subscription_status: str | None = None

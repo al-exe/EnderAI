@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from app import crud
 from app.core.config import settings
+from app.core.db import is_v2_enabled_identity
 from app.core.security import verify_password
 from app.models import CaseRecord, Skill, Topic, User, UserCreate
 from tests.utils.user import create_random_user, user_authentication_headers
@@ -21,6 +22,7 @@ def test_get_users_superuser_me(
     assert current_user["is_active"] is True
     assert current_user["is_superuser"]
     assert current_user["email"] == settings.FIRST_SUPERUSER
+    assert current_user["v2"] is is_v2_enabled_identity(settings.FIRST_SUPERUSER)
 
 
 def test_get_users_normal_user_me(
@@ -32,6 +34,7 @@ def test_get_users_normal_user_me(
     assert current_user["is_active"] is True
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
+    assert current_user["v2"] is False
 
 
 def test_user_last_seen_updates_on_authenticated_page_access(
@@ -97,6 +100,7 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
     assert user.is_active is False
+    assert user.v2 is False
     assert user.demo_seeded_at is not None
 
     demo_topics = [
