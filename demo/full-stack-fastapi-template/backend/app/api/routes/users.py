@@ -2,6 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from firebase_admin import exceptions as firebase_exceptions
 from sqlmodel import func, select
 
 from app import crud
@@ -12,6 +13,7 @@ from app.api.deps import (
     get_current_active_superuser,
     get_current_superuser,
 )
+from app.core import firebase_auth
 from app.core.config import settings
 from app.core.demo import ensure_demo_workspace
 from app.core.security import get_password_hash, verify_password
@@ -29,6 +31,27 @@ from app.models import (
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _link_or_create_firebase_user(user: User) -> None:
+    if not firebase_auth.firebase_auth_enabled():
+        return
+    try:
+        firebase_user = firebase_auth.ensure_user(
+            email=user.email,
+            display_name=user.full_name,
+        )
+    except firebase_auth.FirebaseAuthConfigurationError:
+        raise HTTPException(
+            status_code=500,
+            detail="Firebase authentication is not configured",
+        )
+    except firebase_exceptions.FirebaseError:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not create Firebase user",
+        )
+    user.firebase_uid = firebase_user.uid
 
 
 @router.get(
@@ -56,7 +79,12 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
         )
 
     user = crud.create_user(session=session, user_create=user_in)
-    if settings.emails_enabled and user_in.email:
+    _link_or_create_firebase_user(user)
+    if user.firebase_uid:
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    elif settings.emails_enabled and user_in.email and user_in.password:
         email_data = generate_new_account_email(
             email_to=user_in.email, username=user_in.email, password=user_in.password
         )
@@ -72,6 +100,12 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
 def update_user_me(
     *, session: SessionDep, user_in: UserUpdateMe, current_user: ActiveUser
 ) -> Any:
+    if (
+        current_user.firebase_uid
+        and user_in.email
+        and user_in.email != current_user.email
+    ):
+        raise HTTPException(status_code=400, detail="Email is managed by Firebase")
     if user_in.email:
         existing_user = crud.get_user_by_email(session=session, email=user_in.email)
         if existing_user and existing_user.id != current_user.id:
@@ -90,6 +124,10 @@ def update_user_me(
 def update_password_me(
     *, session: SessionDep, body: UpdatePassword, current_user: ActiveUser
 ) -> Any:
+    if current_user.firebase_uid:
+        raise HTTPException(status_code=400, detail="Password is managed by Firebase")
+    if not current_user.hashed_password:
+        raise HTTPException(status_code=400, detail="Password is managed by Firebase")
     verified, _ = verify_password(body.current_password, current_user.hashed_password)
     if not verified:
         raise HTTPException(status_code=400, detail="Incorrect password")
@@ -122,6 +160,11 @@ def delete_user_me(session: SessionDep, current_user: ActiveUser) -> Any:
 
 @router.post("/signup", response_model=UserPublic)
 def register_user(session: SessionDep, user_in: UserRegister) -> Any:
+    if firebase_auth.firebase_auth_enabled():
+        raise HTTPException(
+            status_code=400,
+            detail="Use Firebase authentication",
+        )
     user = crud.get_user_by_email(session=session, email=user_in.email)
     if user:
         raise HTTPException(
@@ -164,6 +207,10 @@ def update_user(*, session: SessionDep, user_id: uuid.UUID, user_in: UserUpdate)
             status_code=404,
             detail="The user with this id does not exist in the system",
         )
+    if db_user.firebase_uid and user_in.password:
+        raise HTTPException(status_code=400, detail="Password is managed by Firebase")
+    if db_user.firebase_uid and user_in.email and user_in.email != db_user.email:
+        raise HTTPException(status_code=400, detail="Email is managed by Firebase")
     if user_in.email:
         existing_user = crud.get_user_by_email(session=session, email=user_in.email)
         if existing_user and existing_user.id != user_id:
