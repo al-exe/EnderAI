@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     STRIPE_PRICE_ID: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_API_BASE_URL: str = "https://api.stripe.com"
+    FIREBASE_PROJECT_ID: str | None = None
+    FIREBASE_SERVICE_ACCOUNT_JSON: str | None = None
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

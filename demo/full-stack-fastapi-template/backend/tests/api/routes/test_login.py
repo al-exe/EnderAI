@@ -1,9 +1,13 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from firebase_admin import auth as firebase_admin_auth
 from pwdlib.hashers.bcrypt import BcryptHasher
 from sqlmodel import Session
 
+from app.api.deps import decode_token_payload
+from app.core import firebase_auth
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
 from app.crud import create_user
@@ -46,6 +50,110 @@ def test_use_access_token(
     assert "email" in result
 
 
+def test_exchange_firebase_token_creates_local_user(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    decoded_token = {
+        "uid": "firebase-new-user",
+        "email": email,
+        "email_verified": False,
+    }
+    with patch("app.core.firebase_auth.verify_id_token", return_value=decoded_token):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/firebase-token",
+            json={"id_token": "valid-firebase-token", "full_name": "Firebase User"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["access_token"]
+
+    user = db.get(User, decode_token_payload(r.json()["access_token"]).sub)
+    assert user is not None
+    assert user.email == email
+    assert user.full_name == "Firebase User"
+    assert user.firebase_uid == "firebase-new-user"
+    assert user.hashed_password is None
+    assert user.is_active is False
+    assert user.demo_seeded_at is not None
+
+
+def test_exchange_firebase_token_links_verified_existing_user(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    user = create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=random_lower_string()),
+    )
+    decoded_token = {
+        "uid": "firebase-existing-user",
+        "email": email,
+        "email_verified": True,
+    }
+
+    with patch("app.core.firebase_auth.verify_id_token", return_value=decoded_token):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/firebase-token",
+            json={"id_token": "valid-firebase-token"},
+        )
+
+    assert r.status_code == 200, r.text
+    db.refresh(user)
+    assert user.firebase_uid == "firebase-existing-user"
+
+
+def test_exchange_firebase_token_rejects_unverified_existing_user(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=random_lower_string()),
+    )
+    decoded_token = {
+        "uid": "firebase-unverified-existing-user",
+        "email": email,
+        "email_verified": False,
+    }
+
+    with patch("app.core.firebase_auth.verify_id_token", return_value=decoded_token):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/firebase-token",
+            json={"id_token": "valid-firebase-token"},
+        )
+
+    assert r.status_code == 403
+    assert r.json()["detail"].startswith("Verify your email")
+
+
+def test_exchange_firebase_token_rejects_invalid_token(client: TestClient) -> None:
+    with patch(
+        "app.core.firebase_auth.verify_id_token",
+        side_effect=firebase_auth.FirebaseTokenError("invalid"),
+    ):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/firebase-token",
+            json={"id_token": "invalid-firebase-token"},
+        )
+
+    assert r.status_code == 401
+
+
+def test_password_login_disabled_when_firebase_is_enabled(client: TestClient) -> None:
+    with patch("app.core.config.settings.FIREBASE_PROJECT_ID", "taskforce-fdbfb"):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/access-token",
+            data={
+                "username": settings.FIRST_SUPERUSER,
+                "password": settings.FIRST_SUPERUSER_PASSWORD,
+            },
+        )
+
+    assert r.status_code == 400
+    assert r.json()["detail"] == "Use Firebase authentication"
+
+
 def test_recovery_password(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
@@ -62,6 +170,33 @@ def test_recovery_password(
         assert r.json() == {
             "message": "If that email is registered, we sent a password recovery link"
         }
+
+
+def test_recovery_password_creates_firebase_user_for_legacy_user(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    user = create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=random_lower_string()),
+    )
+
+    with (
+        patch("app.core.config.settings.FIREBASE_PROJECT_ID", "taskforce-fdbfb"),
+        patch(
+            "app.core.firebase_auth.get_user_by_email",
+            side_effect=firebase_admin_auth.UserNotFoundError("missing"),
+        ),
+        patch(
+            "app.core.firebase_auth.create_user",
+            return_value=SimpleNamespace(uid="firebase-created-user"),
+        ),
+    ):
+        r = client.post(f"{settings.API_V1_STR}/password-recovery/{email}")
+
+    assert r.status_code == 200
+    db.refresh(user)
+    assert user.firebase_uid == "firebase-created-user"
 
 
 def test_recovery_password_user_not_exits(

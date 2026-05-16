@@ -20,7 +20,7 @@ class UserBase(SQLModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(min_length=8, max_length=128)
+    password: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class UserRegister(SQLModel):
@@ -46,7 +46,13 @@ class UpdatePassword(SQLModel):
 
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    hashed_password: str
+    hashed_password: str | None = None
+    firebase_uid: str | None = Field(
+        default=None,
+        index=True,
+        unique=True,
+        max_length=128,
+    )
     v2: bool = Field(default=False, nullable=False)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -719,6 +725,11 @@ class TokenPayload(SQLModel):
     token_kind: str | None = None
     agent_credential_id: uuid.UUID | None = None
     agent_credential_version: int | None = None
+
+
+class FirebaseTokenExchange(SQLModel):
+    id_token: str = Field(min_length=1)
+    full_name: str | None = Field(default=None, max_length=255)
 
 
 class NewPassword(SQLModel):
