@@ -711,6 +711,91 @@ class SkillUseResult(SQLModel):
     agent_usage_note: str
 
 
+class V2DocumentSegment(SQLModel):
+    text: str
+    evidence_anchor_id: str | None = None
+
+
+class V2DocumentParagraph(SQLModel):
+    segments: list[V2DocumentSegment] = Field(default_factory=list)
+
+
+class V2DocumentDetailsSection(SQLModel):
+    anchor_id: str
+    markdown: str
+
+
+class V2Document(SQLModel, table=True):
+    __tablename__ = "v2_document"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True, ondelete="CASCADE"
+    )
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="")
+    human_summary: str = Field(default="")
+    ai_generated_summary: str = Field(default="")
+    collaborators: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    main_body: list[dict[str, Any]] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    details_file_name: str = Field(default="")
+    details_markdown_sections: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
+    is_demo: bool = Field(default=False, index=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+
+
+class V2DocumentCreate(SQLModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    human_summary: str = ""
+    ai_generated_summary: str = ""
+    collaborators: list[str] = Field(default_factory=list)
+    main_body: list[V2DocumentParagraph] = Field(default_factory=list)
+    details_file_name: str = ""
+    details_markdown_sections: list[V2DocumentDetailsSection] = Field(
+        default_factory=list
+    )
+
+
+class V2DocumentUpdate(SQLModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    human_summary: str | None = None
+    ai_generated_summary: str | None = None
+    collaborators: list[str] | None = None
+    main_body: list[V2DocumentParagraph] | None = None
+    details_file_name: str | None = None
+    details_markdown_sections: list[V2DocumentDetailsSection] | None = None
+
+
+class V2DocumentPublic(SQLModel):
+    id: uuid.UUID
+    title: str
+    description: str
+    human_summary: str
+    ai_generated_summary: str
+    collaborators: list[str]
+    main_body: list[V2DocumentParagraph]
+    details_file_name: str
+    details_markdown_sections: list[V2DocumentDetailsSection]
+    is_demo: bool
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class V2DocumentsPublic(SQLModel):
+    data: list[V2DocumentPublic]
+    count: int
+
+
 class Message(SQLModel):
     message: str
 
