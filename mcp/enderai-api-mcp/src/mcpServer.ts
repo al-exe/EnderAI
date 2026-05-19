@@ -27,6 +27,7 @@ const DEFAULT_CONTEXT_PACK_CASE_LIMIT = 3;
 const DEFAULT_SKILL_LIMIT = 3;
 const DEFAULT_REUSE_WINDOW_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_THREAD_TITLE_MAX_CHARS = 255;
+const DEFAULT_DOCUMENT_TITLE_MAX_CHARS = 120;
 const POLICY_VERSION = "topic_case_v1";
 const WORKFLOW_MODEL = "topic_case_v1";
 const AUTH_MODEL = "single_token_hosted_mcp";
@@ -167,6 +168,98 @@ const FinishCaseArgsSchema = z
     next_steps: z.array(z.string()).optional(),
     closing_note: z.string().min(1).optional(),
     closing_data: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+const V2DocumentDetailsSectionInputSchema = z
+  .object({
+    anchor_id: z.string().min(1),
+    markdown: z.string().min(1),
+  })
+  .strict();
+
+const V2DocumentSummaryPointSchema = z
+  .object({
+    text: z.string().min(1),
+    evidence_anchor_id: z.string().min(1).optional(),
+  })
+  .strict();
+
+const BeginDocumentArgsSchema = z
+  .object({
+    document_id: z.string().uuid().optional(),
+    request_summary: z.string().min(1),
+    goal: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
+    title: z.string().min(1).optional(),
+    collaborators: z.array(z.string()).optional(),
+    files: z.array(z.string()).optional(),
+    symbols: z.array(z.string()).optional(),
+    errors: z.array(z.string()).optional(),
+    contexts: z.array(z.string()).optional(),
+    reuse_within_seconds: z.number().int().nonnegative().optional(),
+    force_new: z.boolean().optional(),
+    visibility: z.enum(["private", "organization"]).optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict();
+
+type BeginDocumentArgs = z.infer<typeof BeginDocumentArgsSchema>;
+
+const UpdateDocumentArgsSchema = z
+  .object({
+    document_id: z.string().uuid().optional(),
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    human_summary: z.string().optional(),
+    ai_generated_summary: z.string().optional(),
+    collaborators: z.array(z.string()).optional(),
+    summary_points: z.array(V2DocumentSummaryPointSchema).optional(),
+    details_sections: z.array(V2DocumentDetailsSectionInputSchema).optional(),
+    commands: z.array(CommandRecordSchema).optional(),
+    files: z.array(z.string()).optional(),
+    links: z.array(z.string()).optional(),
+    decisions: z.array(z.string()).optional(),
+    changes: z.array(ChangeRecordSchema).optional(),
+    open_questions: z.array(z.string()).optional(),
+    progress_note: z.string().min(1).optional(),
+    visibility: z.enum(["private", "organization"]).optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      [
+        value.title,
+        value.description,
+        value.human_summary,
+        value.ai_generated_summary,
+        value.collaborators,
+        value.summary_points,
+        value.details_sections,
+        value.commands,
+        value.files,
+        value.links,
+        value.decisions,
+        value.changes,
+        value.open_questions,
+        value.progress_note,
+        value.visibility,
+      ].some((item) => item !== undefined),
+    {
+      message: "Provide one or more document fields or progress_note.",
+    },
+  );
+
+const FinishDocumentArgsSchema = z
+  .object({
+    document_id: z.string().uuid().optional(),
+    outcome: z.string().optional(),
+    validation: z.array(z.string()).optional(),
+    follow_ups: z.array(z.string()).optional(),
+    status: z.enum(["done", "paused", "blocked", "superseded"]).default("done"),
+    closing_note: z.string().min(1).optional(),
+    demo: z.boolean().optional(),
   })
   .strict();
 
@@ -664,6 +757,418 @@ function selectReusableMatchedTopic(
   return undefined;
 }
 
+type V2DocumentSegment = {
+  text: string;
+  evidence_anchor_id?: string;
+};
+
+type V2DocumentParagraph = {
+  segments: V2DocumentSegment[];
+};
+
+type V2DocumentDetailsSection = {
+  anchor_id: string;
+  markdown: string;
+};
+
+type DocumentMatch = {
+  document: Record<string, any>;
+  score: number;
+  confidence: "high" | "medium" | "low";
+  reasons: string[];
+};
+
+function normalizeSearchTokens(values: Array<string | undefined>): Set<string> {
+  const tokens = new Set<string>();
+  for (const value of values) {
+    if (!value) continue;
+    for (const token of value.toLowerCase().match(/[a-z0-9][a-z0-9._/-]{2,}/g) ?? []) {
+      tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+function documentText(document: Record<string, any>): string {
+  const parts: string[] = [];
+  for (const key of ["title", "description", "human_summary", "ai_generated_summary"]) {
+    const value = document[key];
+    if (typeof value === "string") parts.push(value);
+  }
+  const mainBody = Array.isArray(document.main_body) ? document.main_body : [];
+  for (const paragraph of mainBody) {
+    const segments = Array.isArray(asRecord(paragraph).segments)
+      ? asRecord(paragraph).segments
+      : [];
+    for (const segment of segments) {
+      const text = asRecord(segment).text;
+      if (typeof text === "string") parts.push(text);
+    }
+  }
+  const details = Array.isArray(document.details_markdown_sections)
+    ? document.details_markdown_sections
+    : [];
+  for (const section of details) {
+    const record = asRecord(section);
+    if (typeof record.anchor_id === "string") parts.push(record.anchor_id);
+    if (typeof record.markdown === "string") parts.push(record.markdown);
+  }
+  return parts.join("\n");
+}
+
+function detailAnchorIds(document: Record<string, any>): Set<string> {
+  const anchors = new Set<string>();
+  const sections = Array.isArray(document.details_markdown_sections)
+    ? document.details_markdown_sections
+    : [];
+  for (const section of sections) {
+    const anchor = asRecord(section).anchor_id;
+    if (typeof anchor === "string" && anchor.trim()) anchors.add(anchor);
+  }
+  return anchors;
+}
+
+function slugifyAnchor(value: string): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "section";
+}
+
+function uniqueAnchor(base: string, existing: Set<string>): string {
+  const root = slugifyAnchor(base);
+  if (!existing.has(root)) {
+    existing.add(root);
+    return root;
+  }
+  let index = 2;
+  while (existing.has(`${root}-${index}`)) index += 1;
+  const anchor = `${root}-${index}`;
+  existing.add(anchor);
+  return anchor;
+}
+
+function buildSummaryParagraphs(
+  points: Array<{ text: string; evidence_anchor_id?: string }>,
+): V2DocumentParagraph[] {
+  return points
+    .map((point) => ({
+      segments: [
+        pruneUndefined({
+          text: point.text.trim(),
+          evidence_anchor_id: trimToUndefined(point.evidence_anchor_id),
+        }) as V2DocumentSegment,
+      ],
+    }))
+    .filter((paragraph) => paragraph.segments[0]?.text);
+}
+
+function markdownList(title: string, values: string[] | undefined): string | undefined {
+  const cleaned = dedupeNonEmptyStrings(values ?? []);
+  if (!cleaned || cleaned.length === 0) return undefined;
+  return [`## ${title}`, "", ...cleaned.map((value) => `- ${value}`)].join("\n");
+}
+
+function commandMarkdown(commands: z.infer<typeof CommandRecordSchema>[] | undefined): string | undefined {
+  if (!commands || commands.length === 0) return undefined;
+  return [
+    "## Commands",
+    "",
+    ...commands.map((command) => {
+      const lines = [`- \`${command.cmd}\``];
+      if (command.purpose) lines.push(`  - Purpose: ${command.purpose}`);
+      if (command.salient_result) lines.push(`  - Result: ${command.salient_result}`);
+      if (command.ts) lines.push(`  - Time: ${command.ts}`);
+      return lines.join("\n");
+    }),
+  ].join("\n");
+}
+
+function changesMarkdown(changes: z.infer<typeof ChangeRecordSchema>[] | undefined): string | undefined {
+  if (!changes || changes.length === 0) return undefined;
+  return [
+    "## Changes",
+    "",
+    ...changes.map((change) => {
+      const prefix = change.kind ? `${change.kind}: ` : "";
+      const lines = [`- ${prefix}${change.summary}`];
+      if (change.files && change.files.length > 0) lines.push(`  - Files: ${change.files.join(", ")}`);
+      if (change.refs && change.refs.length > 0) lines.push(`  - Refs: ${change.refs.join(", ")}`);
+      if (change.ts) lines.push(`  - Time: ${change.ts}`);
+      return lines.join("\n");
+    }),
+  ].join("\n");
+}
+
+function mergeDetailsSections(
+  current: unknown,
+  incoming: V2DocumentDetailsSection[],
+): V2DocumentDetailsSection[] {
+  const out: V2DocumentDetailsSection[] = [];
+  const indexByAnchor = new Map<string, number>();
+  const existing = Array.isArray(current) ? current : [];
+  for (const section of existing) {
+    const record = asRecord(section);
+    const anchor = typeof record.anchor_id === "string" ? trimToUndefined(record.anchor_id) : undefined;
+    const markdown = typeof record.markdown === "string" ? record.markdown : undefined;
+    if (!anchor || markdown === undefined) continue;
+    indexByAnchor.set(anchor, out.length);
+    out.push({ anchor_id: anchor, markdown });
+  }
+  for (const section of incoming) {
+    const anchor = trimToUndefined(section.anchor_id);
+    const markdown = trimToUndefined(section.markdown);
+    if (!anchor || !markdown) continue;
+    const existingIndex = indexByAnchor.get(anchor);
+    if (existingIndex === undefined) {
+      indexByAnchor.set(anchor, out.length);
+      out.push({ anchor_id: anchor, markdown });
+      continue;
+    }
+    out[existingIndex] = {
+      anchor_id: anchor,
+      markdown: out[existingIndex].markdown.includes(markdown)
+        ? out[existingIndex].markdown
+        : `${out[existingIndex].markdown.trim()}\n\n${markdown}`,
+    };
+  }
+  return out;
+}
+
+function buildDetailsFileName(title: string): string {
+  return `${slugifyAnchor(title).slice(0, 80)}.details.md`;
+}
+
+function buildInitialDetails(args: BeginDocumentArgs, title: string): V2DocumentDetailsSection[] {
+  const sections: V2DocumentDetailsSection[] = [
+    {
+      anchor_id: "request",
+      markdown: [
+        "## Request",
+        "",
+        args.request_summary.trim(),
+        trimToUndefined(args.goal) ? `\nGoal: ${trimToUndefined(args.goal)}` : "",
+        trimToUndefined(args.acceptance_criteria)
+          ? `\nAcceptance criteria: ${trimToUndefined(args.acceptance_criteria)}`
+          : "",
+      ].filter(Boolean).join("\n"),
+    },
+  ];
+  const contextMarkdown = [
+    markdownList("Files", args.files),
+    markdownList("Symbols", args.symbols),
+    markdownList("Errors", args.errors),
+    markdownList("Context", args.contexts),
+  ].filter((value): value is string => Boolean(value));
+  if (contextMarkdown.length > 0) {
+    sections.push({
+      anchor_id: "context",
+      markdown: contextMarkdown.join("\n\n"),
+    });
+  }
+  if (sections.length === 1) {
+    sections.push({
+      anchor_id: "current-work",
+      markdown: ["## Current Work", "", `Document created for ${title}.`].join("\n"),
+    });
+  }
+  return sections;
+}
+
+function buildInitialDocumentPayload(args: BeginDocumentArgs): Record<string, unknown> {
+  const title = trimToMaxLength(
+    trimToUndefined(args.title) ?? args.request_summary.trim(),
+    DEFAULT_DOCUMENT_TITLE_MAX_CHARS,
+  );
+  const details = buildInitialDetails(args, title);
+  return pruneUndefined({
+    title,
+    description: trimToUndefined(args.goal) ?? args.request_summary.trim(),
+    ai_generated_summary: args.request_summary.trim(),
+    collaborators: dedupeNonEmptyStrings(args.collaborators ?? []) ?? [],
+    main_body: buildSummaryParagraphs([
+      { text: args.request_summary.trim(), evidence_anchor_id: details[0].anchor_id },
+    ]),
+    details_file_name: buildDetailsFileName(title),
+    details_markdown_sections: details,
+    visibility: args.visibility,
+  });
+}
+
+function scoreDocumentCandidate(
+  document: Record<string, any>,
+  args: BeginDocumentArgs,
+  reuseWithinSeconds: number,
+): DocumentMatch {
+  const reasons: string[] = [];
+  let score = 0;
+  const title = typeof document.title === "string" ? document.title : "";
+  const requestTitle = trimToUndefined(args.title) ?? args.request_summary;
+  if (title.trim().toLowerCase() === requestTitle.trim().toLowerCase()) {
+    score += 10;
+    reasons.push("exact title match");
+  }
+
+  const docText = documentText(document).toLowerCase();
+  const requestTokens = normalizeSearchTokens([
+    args.request_summary,
+    args.goal,
+    args.acceptance_criteria,
+    ...(args.contexts ?? []),
+  ]);
+  const docTokens = normalizeSearchTokens([docText]);
+  let overlap = 0;
+  for (const token of requestTokens) {
+    if (docTokens.has(token)) overlap += 1;
+  }
+  if (overlap > 0) {
+    score += Math.min(overlap, 8);
+    reasons.push(`${overlap} request token overlap`);
+  }
+
+  for (const [label, values, weight] of [
+    ["file", args.files, 4],
+    ["symbol", args.symbols, 3],
+    ["error", args.errors, 5],
+    ["collaborator", args.collaborators, 2],
+  ] as const) {
+    for (const value of values ?? []) {
+      const normalized = value.trim().toLowerCase();
+      if (normalized && docText.includes(normalized)) {
+        score += weight;
+        reasons.push(`${label} match: ${value}`);
+      }
+    }
+  }
+
+  const updatedAt = typeof document.updated_at === "string" ? Date.parse(document.updated_at) : Number.NaN;
+  if (!Number.isNaN(updatedAt)) {
+    const withinWindow = Date.now() - updatedAt <= reuseWithinSeconds * 1000;
+    if (withinWindow) {
+      score += 2;
+      reasons.push("recently updated");
+    } else if (score < 8) {
+      score -= 3;
+      reasons.push("outside reuse window");
+    }
+  }
+
+  const confidence = score >= 12 ? "high" : score >= 7 ? "medium" : "low";
+  return { document, score, confidence, reasons };
+}
+
+function selectReusableDocument(
+  documents: unknown,
+  args: BeginDocumentArgs,
+  reuseWithinSeconds: number,
+): DocumentMatch | null {
+  const data: unknown[] = Array.isArray(asRecord(documents).data)
+    ? asRecord(documents).data
+    : [];
+  const candidates = data
+    .map((item: unknown) => scoreDocumentCandidate(asRecord(item), args, reuseWithinSeconds))
+    .filter((candidate: DocumentMatch) => typeof candidate.document.id === "string")
+    .sort((a: DocumentMatch, b: DocumentMatch) => b.score - a.score);
+  const best = candidates[0];
+  if (!best || confidenceRank(best.confidence) < confidenceRank("medium")) return null;
+  const second = candidates[1];
+  if (second && best.score - second.score < 3) return null;
+  return best;
+}
+
+function selfHealDocumentPatch(
+  document: Record<string, any>,
+  args: BeginDocumentArgs,
+): { patch: Record<string, unknown>; fields: string[] } {
+  const patch: Record<string, unknown> = {};
+  const fields: string[] = [];
+  const sections = Array.isArray(document.details_markdown_sections)
+    ? document.details_markdown_sections
+    : [];
+  const anchors = detailAnchorIds(document);
+
+  if (!trimToUndefined(typeof document.description === "string" ? document.description : undefined)) {
+    patch.description = trimToUndefined(args.goal) ?? args.request_summary.trim();
+    fields.push("description");
+  }
+  if (!trimToUndefined(typeof document.ai_generated_summary === "string" ? document.ai_generated_summary : undefined)) {
+    patch.ai_generated_summary = args.request_summary.trim();
+    fields.push("ai_generated_summary");
+  }
+  if (!Array.isArray(document.main_body) || document.main_body.length === 0) {
+    patch.main_body = buildSummaryParagraphs([
+      {
+        text: args.request_summary.trim(),
+        evidence_anchor_id: anchors.values().next().value ?? "request",
+      },
+    ]);
+    fields.push("main_body");
+  }
+  if (sections.length === 0) {
+    patch.details_markdown_sections = buildInitialDetails(
+      args,
+      typeof document.title === "string" ? document.title : args.request_summary,
+    );
+    fields.push("details_markdown_sections");
+  }
+  if (!trimToUndefined(typeof document.details_file_name === "string" ? document.details_file_name : undefined)) {
+    patch.details_file_name = buildDetailsFileName(
+      typeof document.title === "string" ? document.title : args.request_summary,
+    );
+    fields.push("details_file_name");
+  }
+  return { patch, fields };
+}
+
+function buildUpdateDetailsSections(
+  args: z.infer<typeof UpdateDocumentArgsSchema>,
+  existingAnchors: Set<string>,
+): V2DocumentDetailsSection[] {
+  const sections: V2DocumentDetailsSection[] = [
+    ...(args.details_sections ?? []).map((section) => ({
+      anchor_id: slugifyAnchor(section.anchor_id),
+      markdown: section.markdown,
+    })),
+  ];
+  const generated = [
+    args.progress_note ? ["## Progress", "", args.progress_note].join("\n") : undefined,
+    markdownList("Files", args.files),
+    markdownList("Links", args.links),
+    markdownList("Decisions", args.decisions),
+    commandMarkdown(args.commands),
+    changesMarkdown(args.changes),
+    markdownList("Open Questions", args.open_questions),
+  ].filter((value): value is string => Boolean(value));
+  if (generated.length > 0) {
+    sections.push({
+      anchor_id: uniqueAnchor(`progress-${new Date().toISOString().slice(0, 10)}`, existingAnchors),
+      markdown: generated.join("\n\n"),
+    });
+  }
+  return sections;
+}
+
+function buildFinishDetailsSections(
+  args: z.infer<typeof FinishDocumentArgsSchema>,
+  existingAnchors: Set<string>,
+): V2DocumentDetailsSection[] {
+  const blocks = [
+    args.outcome ? ["## Outcome", "", args.outcome].join("\n") : undefined,
+    markdownList("Validation", args.validation),
+    markdownList("Follow Ups", args.follow_ups),
+    args.closing_note ? ["## Closing Note", "", args.closing_note].join("\n") : undefined,
+    ["## Status", "", args.status].join("\n"),
+  ].filter((value): value is string => Boolean(value));
+  return [
+    {
+      anchor_id: uniqueAnchor("outcome", existingAnchors),
+      markdown: blocks.join("\n\n"),
+    },
+  ];
+}
+
 function extractErrorDetail(res: ResponseSummary): string {
   const data = res.data;
   if (typeof data === "string" && data.trim()) return data.trim();
@@ -697,6 +1202,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     threadId?: string;
     depth: number;
   } = { depth: 0 };
+  const documentState: {
+    documentId?: string;
+  } = {};
 
   function setActiveCaseContext(caseId?: string, topicId?: string): void {
     if (caseId) auditState.executionId = caseId;
@@ -706,6 +1214,32 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
   function clearActiveCaseContext(): void {
     delete auditState.executionId;
     delete auditState.threadId;
+  }
+
+  function setActiveDocumentContext(documentId?: string): void {
+    if (documentId) documentState.documentId = documentId;
+  }
+
+  function clearActiveDocumentContext(): void {
+    delete documentState.documentId;
+  }
+
+  async function resolveDocumentId(
+    explicitDocumentId: string | undefined,
+    toolName: string,
+  ): Promise<string> {
+    if (explicitDocumentId) {
+      if (documentState.documentId && documentState.documentId !== explicitDocumentId) {
+        throw new Error(
+          `${toolName} is currently attached to document ${documentState.documentId}. Finish that document or provide updates to the same document before switching to ${explicitDocumentId}.`,
+        );
+      }
+      return explicitDocumentId;
+    }
+    if (documentState.documentId) return documentState.documentId;
+    throw new Error(
+      `${toolName} requires an active document. Run enderai_begin_document first or provide document_id.`,
+    );
   }
 
   async function reconcileActiveCaseContext(params: {
@@ -1225,6 +1759,144 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 ...looseObjectJsonSchema,
                 description: "Optional structured payload for the closing event.",
               },
+            },
+          },
+        },
+        {
+          name: "enderai_begin_document",
+          description:
+            "Use this first for Taskforce V2 document-backed work. Finds and self-heals a related V2 document when confidence is high enough, otherwise creates a new document, then remembers the document id for enderai_update_document and enderai_finish_document.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              document_id: {
+                type: "string",
+                description: "Optional explicit V2 document id to reuse.",
+              },
+              request_summary: {
+                type: "string",
+                description: "Short statement of the work to document.",
+              },
+              goal: {
+                type: "string",
+                description: "Optional intended outcome.",
+              },
+              acceptance_criteria: {
+                type: "string",
+                description: "Optional success criteria.",
+              },
+              title: {
+                type: "string",
+                description: "Optional preferred document title.",
+              },
+              collaborators: stringArrayJsonSchema,
+              files: stringArrayJsonSchema,
+              symbols: stringArrayJsonSchema,
+              errors: stringArrayJsonSchema,
+              contexts: stringArrayJsonSchema,
+              reuse_within_seconds: {
+                type: "integer",
+                minimum: 0,
+                description: "Optional reuse recency window. Defaults to 30 days.",
+              },
+              force_new: {
+                type: "boolean",
+                description: "Create a new document even if a related document exists.",
+              },
+              visibility: {
+                type: "string",
+                enum: ["private", "organization"],
+                description: "Document visibility when a new document is created.",
+              },
+              demo: {
+                type: "boolean",
+                description: "Use demo-mode documents.",
+              },
+            },
+            required: ["request_summary"],
+          },
+        },
+        {
+          name: "enderai_update_document",
+          description:
+            "Use this during active Taskforce V2 document work to add evidence, commands, files, links, decisions, changes, open questions, and Summary claims backed by Details anchors.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              document_id: {
+                type: "string",
+                description:
+                  "Optional explicit V2 document id. If omitted, the active document from this MCP session is used.",
+              },
+              title: { type: "string" },
+              description: { type: "string" },
+              human_summary: {
+                type: "string",
+                description:
+                  "Optional explicit human summary edit. Omit to preserve human-authored summary.",
+              },
+              ai_generated_summary: { type: "string" },
+              collaborators: stringArrayJsonSchema,
+              summary_points: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    text: { type: "string" },
+                    evidence_anchor_id: { type: "string" },
+                  },
+                  required: ["text"],
+                },
+              },
+              details_sections: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    anchor_id: { type: "string" },
+                    markdown: { type: "string" },
+                  },
+                  required: ["anchor_id", "markdown"],
+                },
+              },
+              commands: { type: "array", items: commandRecordJsonSchema },
+              files: stringArrayJsonSchema,
+              links: stringArrayJsonSchema,
+              decisions: stringArrayJsonSchema,
+              changes: { type: "array", items: changeRecordJsonSchema },
+              open_questions: stringArrayJsonSchema,
+              progress_note: { type: "string" },
+              visibility: { type: "string", enum: ["private", "organization"] },
+              demo: { type: "boolean" },
+            },
+          },
+        },
+        {
+          name: "enderai_finish_document",
+          description:
+            "Use this when Taskforce V2 document work completes or pauses. Records final outcome, validation, follow-ups, status, and clears the active document context.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              document_id: {
+                type: "string",
+                description:
+                  "Optional explicit V2 document id. If omitted, the active document from this MCP session is used.",
+              },
+              outcome: { type: "string" },
+              validation: stringArrayJsonSchema,
+              follow_ups: stringArrayJsonSchema,
+              status: {
+                type: "string",
+                enum: ["done", "paused", "blocked", "superseded"],
+              },
+              closing_note: { type: "string" },
+              demo: { type: "boolean" },
             },
           },
         },
@@ -1792,6 +2464,260 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         }
       }
 
+      if (name === "enderai_begin_document") {
+        const args = BeginDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        if (documentState.documentId) {
+          return toolError(
+            `A document is already active in this MCP session (${documentState.documentId}). Run enderai_finish_document before beginning a new one.`,
+          );
+        }
+
+        const query = args.demo ? { demo: true } : undefined;
+        let document: Record<string, any> | null = null;
+        let reusedExisting = false;
+        let matchConfidence: "high" | "medium" | "low" | "explicit" = "low";
+        let matchReasons: string[] = [];
+        let selfHealedFields: string[] = [];
+
+        if (args.document_id) {
+          const documentRes = await enderaiFetch({
+            method: "GET",
+            path: `/api/v1/v2/documents/${args.document_id}`,
+            bearerToken,
+            query,
+          });
+          if (!documentRes.ok) {
+            throw new Error(
+              `enderai_begin_document failed to read the requested document: ${extractErrorDetail(documentRes)} (status ${documentRes.status}).`,
+            );
+          }
+          document = asRecord(documentRes.data);
+          reusedExisting = true;
+          matchConfidence = "explicit";
+          matchReasons = ["explicit document_id"];
+        }
+
+        if (!document && !args.force_new) {
+          const listRes = await enderaiFetch({
+            method: "GET",
+            path: "/api/v1/v2/documents/",
+            bearerToken,
+            query,
+          });
+          if (!listRes.ok) {
+            throw new Error(
+              `enderai_begin_document failed to list V2 documents: ${extractErrorDetail(listRes)} (status ${listRes.status}).`,
+            );
+          }
+          const match = selectReusableDocument(
+            listRes.data,
+            args,
+            args.reuse_within_seconds ?? DEFAULT_REUSE_WINDOW_SECONDS,
+          );
+          if (match) {
+            document = match.document;
+            reusedExisting = true;
+            matchConfidence = match.confidence;
+            matchReasons = match.reasons;
+          }
+        }
+
+        if (document) {
+          const documentId = typeof document.id === "string" ? document.id : undefined;
+          if (!documentId) throw new Error("V2 document response did not include an id.");
+          const selfHeal = selfHealDocumentPatch(document, args);
+          if (Object.keys(selfHeal.patch).length > 0) {
+            const patchRes = await enderaiFetch({
+              method: "PATCH",
+              path: `/api/v1/v2/documents/${documentId}`,
+              bearerToken,
+              query,
+              json: selfHeal.patch,
+            });
+            if (!patchRes.ok) {
+              throw new Error(
+                `enderai_begin_document failed to self-heal the document: ${extractErrorDetail(patchRes)} (status ${patchRes.status}).`,
+              );
+            }
+            document = asRecord(patchRes.data);
+            selfHealedFields = selfHeal.fields;
+          }
+          setActiveDocumentContext(documentId);
+          return toolJson({
+            policy_version: "taskforce_v2_documents_v1",
+            workflow_model: "taskforce_v2_document",
+            document,
+            reused_existing: reusedExisting,
+            match_confidence: matchConfidence,
+            match_reasons: matchReasons,
+            self_healed_fields: selfHealedFields,
+            next: {
+              update_tool: "enderai_update_document",
+              finish_tool: "enderai_finish_document",
+              document_id: documentId,
+            },
+            agent_usage_note:
+              "Keep Summary claims backed by Details evidence anchors and preserve human_summary unless explicitly asked to edit it.",
+          });
+        }
+
+        const createRes = await enderaiFetch({
+          method: "POST",
+          path: "/api/v1/v2/documents/",
+          bearerToken,
+          query,
+          json: buildInitialDocumentPayload(args),
+        });
+        if (!createRes.ok) {
+          throw new Error(
+            `enderai_begin_document failed to create a V2 document: ${extractErrorDetail(createRes)} (status ${createRes.status}).`,
+          );
+        }
+        const createdDocument = asRecord(createRes.data);
+        const createdDocumentId =
+          typeof createdDocument.id === "string" ? createdDocument.id : undefined;
+        if (!createdDocumentId) throw new Error("V2 document create response did not include an id.");
+        setActiveDocumentContext(createdDocumentId);
+        return toolJson({
+          policy_version: "taskforce_v2_documents_v1",
+          workflow_model: "taskforce_v2_document",
+          document: createdDocument,
+          reused_existing: false,
+          match_confidence: "low",
+          match_reasons: args.force_new ? ["force_new requested"] : [],
+          self_healed_fields: [],
+          next: {
+            update_tool: "enderai_update_document",
+            finish_tool: "enderai_finish_document",
+            document_id: createdDocumentId,
+          },
+          agent_usage_note:
+            "Keep Summary claims backed by Details evidence anchors and preserve human_summary unless explicitly asked to edit it.",
+        });
+      }
+
+      if (name === "enderai_update_document") {
+        const args = UpdateDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        const documentId = await resolveDocumentId(
+          args.document_id,
+          "enderai_update_document",
+        );
+        const query = args.demo ? { demo: true } : undefined;
+        const documentRes = await enderaiFetch({
+          method: "GET",
+          path: `/api/v1/v2/documents/${documentId}`,
+          bearerToken,
+          query,
+        });
+        if (!documentRes.ok) {
+          throw new Error(
+            `enderai_update_document failed to read the document: ${extractErrorDetail(documentRes)} (status ${documentRes.status}).`,
+          );
+        }
+        const document = asRecord(documentRes.data);
+        const anchors = detailAnchorIds(document);
+        const generatedSections = buildUpdateDetailsSections(args, anchors);
+        const patch = pruneUndefined({
+          title: trimToUndefined(args.title),
+          description: args.description,
+          human_summary: args.human_summary,
+          ai_generated_summary:
+            args.ai_generated_summary ?? trimToUndefined(args.progress_note),
+          collaborators: args.collaborators,
+          visibility: args.visibility,
+          main_body: args.summary_points
+            ? buildSummaryParagraphs(args.summary_points)
+            : undefined,
+          details_markdown_sections:
+            generatedSections.length > 0
+              ? mergeDetailsSections(document.details_markdown_sections, generatedSections)
+              : undefined,
+        });
+
+        const updateRes = await enderaiFetch({
+          method: "PATCH",
+          path: `/api/v1/v2/documents/${documentId}`,
+          bearerToken,
+          query,
+          json: patch,
+        });
+        if (!updateRes.ok) {
+          throw new Error(
+            `enderai_update_document failed: ${extractErrorDetail(updateRes)} (status ${updateRes.status}).`,
+          );
+        }
+        setActiveDocumentContext(documentId);
+        return toolJson({
+          document: updateRes.data,
+          changed_fields: Object.keys(patch),
+          next: {
+            update_tool: "enderai_update_document",
+            finish_tool: "enderai_finish_document",
+            document_id: documentId,
+          },
+        });
+      }
+
+      if (name === "enderai_finish_document") {
+        const args = FinishDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        const documentId = await resolveDocumentId(
+          args.document_id,
+          "enderai_finish_document",
+        );
+        const query = args.demo ? { demo: true } : undefined;
+        const documentRes = await enderaiFetch({
+          method: "GET",
+          path: `/api/v1/v2/documents/${documentId}`,
+          bearerToken,
+          query,
+        });
+        if (!documentRes.ok) {
+          throw new Error(
+            `enderai_finish_document failed to read the document: ${extractErrorDetail(documentRes)} (status ${documentRes.status}).`,
+          );
+        }
+        const document = asRecord(documentRes.data);
+        const anchors = detailAnchorIds(document);
+        const finishSections = buildFinishDetailsSections(args, anchors);
+        const summaryText =
+          trimToUndefined(args.outcome) ??
+          trimToUndefined(args.closing_note) ??
+          `Document ${args.status}.`;
+        const patch = {
+          ai_generated_summary: summaryText,
+          main_body: buildSummaryParagraphs([
+            { text: summaryText, evidence_anchor_id: finishSections[0].anchor_id },
+          ]),
+          details_markdown_sections: mergeDetailsSections(
+            document.details_markdown_sections,
+            finishSections,
+          ),
+        };
+        const finishRes = await enderaiFetch({
+          method: "PATCH",
+          path: `/api/v1/v2/documents/${documentId}`,
+          bearerToken,
+          query,
+          json: patch,
+        });
+        if (!finishRes.ok) {
+          throw new Error(
+            `enderai_finish_document failed: ${extractErrorDetail(finishRes)} (status ${finishRes.status}).`,
+          );
+        }
+        clearActiveDocumentContext();
+        return toolJson({
+          document: finishRes.data,
+          session_context_cleared: true,
+          next: {
+            begin_tool: "enderai_begin_document",
+          },
+        });
+      }
+
       if (name === "enderai_request") {
         const args = EnderaiRequestArgsSchema.parse(req.params.arguments ?? {});
         const { audit, ...reqArgs } = args;
@@ -1937,6 +2863,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           user,
           active_case_id: auditState.executionId ?? null,
           active_topic_id: auditState.threadId ?? null,
+          active_document_id: documentState.documentId ?? null,
           local_skills_dir: getLocalSkillsDirectory(),
           skills_discovery:
             "enderai_begin_case and enderai_use_skill sync matched EnderAI Skills as markdown files under local_skills_dir. Read the returned local_skill_files before applying skill guidance.",
@@ -1946,6 +2873,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             use_skill_tool: "enderai_use_skill",
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
+            begin_document_tool: "enderai_begin_document",
+            update_document_tool: "enderai_update_document",
+            finish_document_tool: "enderai_finish_document",
           },
         });
       }

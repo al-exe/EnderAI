@@ -19,6 +19,7 @@ from app.core.demo import ensure_demo_workspace
 from app.core.security import get_password_hash, verify_password
 from app.models import (
     Message,
+    Organization,
     UpdatePassword,
     User,
     UserCreate,
@@ -31,6 +32,20 @@ from app.models import (
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _validate_organization_id(
+    session: SessionDep, organization_id: uuid.UUID | None
+) -> None:
+    if organization_id is None:
+        return
+    if not session.get(Organization, organization_id):
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+
+def _validate_organization_role(organization_role: str) -> None:
+    if organization_role not in {"admin", "member"}:
+        raise HTTPException(status_code=422, detail="Invalid organization role")
 
 
 def _link_or_create_firebase_user(user: User) -> None:
@@ -77,6 +92,8 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
             status_code=400,
             detail="The user with this email already exists in the system.",
         )
+    _validate_organization_id(session, user_in.organization_id)
+    _validate_organization_role(user_in.organization_role)
 
     user = crud.create_user(session=session, user_create=user_in)
     _link_or_create_firebase_user(user)
@@ -217,6 +234,10 @@ def update_user(*, session: SessionDep, user_id: uuid.UUID, user_in: UserUpdate)
             raise HTTPException(
                 status_code=409, detail="User with this email already exists"
             )
+    if "organization_id" in user_in.model_fields_set:
+        _validate_organization_id(session, user_in.organization_id)
+    if "organization_role" in user_in.model_fields_set:
+        _validate_organization_role(user_in.organization_role)
 
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
     return db_user

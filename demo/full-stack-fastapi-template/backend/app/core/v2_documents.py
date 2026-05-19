@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import and_, or_
 from sqlmodel import Session, col, select
 
 from app.models import (
@@ -1890,6 +1891,29 @@ def list_v2_documents_for_owner(
     return list(session.exec(statement).all())
 
 
+def list_v2_documents_for_actor(
+    session: Session, actor: User, *, demo: bool
+) -> list[V2Document]:
+    if demo or actor.organization_id is None:
+        return list_v2_documents_for_owner(session, actor.id, demo=demo)
+
+    statement = (
+        select(V2Document)
+        .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
+        .where(
+            or_(
+                V2Document.owner_id == actor.id,
+                and_(
+                    V2Document.visibility == "organization",
+                    V2Document.organization_id == actor.organization_id,
+                ),
+            )
+        )
+        .order_by(col(V2Document.updated_at).desc(), col(V2Document.created_at).desc())
+    )
+    return list(session.exec(statement).all())
+
+
 def get_v2_document_for_owner(
     session: Session, owner_id: uuid.UUID, document_id: uuid.UUID
 ) -> V2Document | None:
@@ -1897,6 +1921,35 @@ def get_v2_document_for_owner(
         select(V2Document)
         .where(V2Document.id == document_id)
         .where(V2Document.owner_id == owner_id)
+    )
+    return session.exec(statement).first()
+
+
+def get_v2_document_for_actor(
+    session: Session, actor: User, document_id: uuid.UUID, *, demo: bool
+) -> V2Document | None:
+    if demo or actor.organization_id is None:
+        statement = (
+            select(V2Document)
+            .where(V2Document.id == document_id)
+            .where(V2Document.owner_id == actor.id)
+            .where(V2Document.is_demo.is_(demo))  # type: ignore[union-attr]
+        )
+        return session.exec(statement).first()
+
+    statement = (
+        select(V2Document)
+        .where(V2Document.id == document_id)
+        .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
+        .where(
+            or_(
+                V2Document.owner_id == actor.id,
+                and_(
+                    V2Document.visibility == "organization",
+                    V2Document.organization_id == actor.organization_id,
+                ),
+            )
+        )
     )
     return session.exec(statement).first()
 
@@ -1930,6 +1983,8 @@ def ensure_v2_documents_demo_seed(session: Session, user: User) -> bool:
     for seed in DEMO_SEED:
         document = V2Document(
             owner_id=user.id,
+            organization_id=None,
+            visibility="private",
             title=seed["title"],
             description=seed["description"],
             human_summary=seed["human_summary"],

@@ -70,12 +70,240 @@ describe("guided case workflow MCP tools", () => {
           "enderai_update_case",
           "enderai_use_skill",
           "enderai_finish_case",
+          "enderai_begin_document",
+          "enderai_update_document",
+          "enderai_finish_document",
           "enderai_request",
           "enderai_session_info",
           "enderai_openapi",
           "enderai_health_check",
         ]),
       );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("supports the Taskforce V2 document begin → update → finish workflow", async () => {
+    const harness = await createHarness();
+    try {
+      const beforeBegin = await harness.client.callTool({
+        name: "enderai_update_document",
+        arguments: { progress_note: "Should fail before begin" },
+      });
+      expect(summarizeToolText(beforeBegin.content)).toContain(
+        "Run enderai_begin_document first or provide document_id",
+      );
+
+      const documentId = "44444444-4444-4444-4444-444444444444";
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ data: [], count: 0 }))
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Taskforce MCP document lifecycle",
+              description: "Generate and maintain V2 documents from agent work.",
+              aiGeneratedSummary:
+                "Generate and maintain V2 documents from agent work.",
+              detailsSections: [
+                {
+                  anchor_id: "request",
+                  markdown:
+                    "## Request\n\nGenerate and maintain V2 documents from agent work.",
+                },
+              ],
+            }),
+            201,
+          ),
+        );
+
+      const begin = await harness.client.callTool({
+        name: "enderai_begin_document",
+        arguments: {
+          title: "Taskforce MCP document lifecycle",
+          request_summary: "Generate and maintain V2 documents from agent work.",
+          files: ["mcp/enderai-api-mcp/src/mcpServer.ts"],
+          visibility: "organization",
+        },
+      });
+      const beginBody = JSON.parse(summarizeToolText(begin.content));
+      expect(beginBody.document.id).toBe(documentId);
+      expect(beginBody.reused_existing).toBe(false);
+      expect(beginBody.next.update_tool).toBe("enderai_update_document");
+      expect(mockFetch.mock.calls[0][0].toString()).toContain("/api/v1/v2/documents/");
+      expect(mockFetch.mock.calls[1][0].toString()).toContain("/api/v1/v2/documents/");
+      expect(JSON.parse(mockFetch.mock.calls[1][1].body)).toMatchObject({
+        title: "Taskforce MCP document lifecycle",
+        visibility: "organization",
+      });
+
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Taskforce MCP document lifecycle",
+              detailsSections: [
+                {
+                  anchor_id: "request",
+                  markdown:
+                    "## Request\n\nGenerate and maintain V2 documents from agent work.",
+                },
+              ],
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Taskforce MCP document lifecycle",
+              aiGeneratedSummary: "Captured implementation evidence.",
+              detailsSections: [
+                {
+                  anchor_id: "request",
+                  markdown:
+                    "## Request\n\nGenerate and maintain V2 documents from agent work.",
+                },
+                {
+                  anchor_id: "progress-2026-05-18",
+                  markdown: "## Progress\n\nCaptured implementation evidence.",
+                },
+              ],
+            }),
+          ),
+        );
+
+      const update = await harness.client.callTool({
+        name: "enderai_update_document",
+        arguments: {
+          progress_note: "Captured implementation evidence.",
+          files: ["mcp/enderai-api-mcp/src/mcpServer.ts"],
+          summary_points: [
+            {
+              text: "MCP document lifecycle tools were added.",
+              evidence_anchor_id: "progress-2026-05-18",
+            },
+          ],
+        },
+      });
+      const updateBody = JSON.parse(summarizeToolText(update.content));
+      expect(updateBody.changed_fields).toContain("details_markdown_sections");
+      expect(updateBody.changed_fields).toContain("main_body");
+      expect(mockFetch.mock.calls[3][0].toString()).toContain(
+        `/api/v1/v2/documents/${documentId}`,
+      );
+      const updatePayload = JSON.parse(mockFetch.mock.calls[3][1].body);
+      expect(updatePayload.human_summary).toBeUndefined();
+      expect(updatePayload.details_markdown_sections.length).toBe(2);
+
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Taskforce MCP document lifecycle",
+              detailsSections: updatePayload.details_markdown_sections,
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Taskforce MCP document lifecycle",
+              aiGeneratedSummary: "Tools implemented and tested.",
+              detailsSections: [
+                ...updatePayload.details_markdown_sections,
+                {
+                  anchor_id: "outcome",
+                  markdown: "## Outcome\n\nTools implemented and tested.",
+                },
+              ],
+            }),
+          ),
+        );
+
+      const finish = await harness.client.callTool({
+        name: "enderai_finish_document",
+        arguments: {
+          outcome: "Tools implemented and tested.",
+          validation: ["npm run build"],
+          follow_ups: ["Open the PR for review."],
+        },
+      });
+      const finishBody = JSON.parse(summarizeToolText(finish.content));
+      expect(finishBody.session_context_cleared).toBe(true);
+
+      const afterFinish = await harness.client.callTool({
+        name: "enderai_update_document",
+        arguments: { progress_note: "Should fail after finish" },
+      });
+      expect(summarizeToolText(afterFinish.content)).toContain(
+        "Run enderai_begin_document first or provide document_id",
+      );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it("reuses and self-heals a matching Taskforce V2 document", async () => {
+    const harness = await createHarness();
+    try {
+      const documentId = "55555555-5555-5555-5555-555555555555";
+      mockFetch
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [
+              v2DocumentResponse({
+                id: documentId,
+                title: "Bridge cache refresh",
+                description: "",
+                aiGeneratedSummary: "",
+                detailsSections: [],
+              }),
+            ],
+            count: 1,
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(
+            v2DocumentResponse({
+              id: documentId,
+              title: "Bridge cache refresh",
+              description: "Investigate bridge cache refresh failures.",
+              aiGeneratedSummary: "Investigate bridge cache refresh failures.",
+              detailsSections: [
+                {
+                  anchor_id: "request",
+                  markdown: "## Request\n\nInvestigate bridge cache refresh failures.",
+                },
+              ],
+            }),
+          ),
+        );
+
+      const begin = await harness.client.callTool({
+        name: "enderai_begin_document",
+        arguments: {
+          request_summary: "Investigate bridge cache refresh failures.",
+          errors: ["bridge cache refresh"],
+        },
+      });
+      const beginBody = JSON.parse(summarizeToolText(begin.content));
+      expect(beginBody.document.id).toBe(documentId);
+      expect(beginBody.reused_existing).toBe(true);
+      expect(["medium", "high"]).toContain(beginBody.match_confidence);
+      expect(beginBody.self_healed_fields).toEqual(
+        expect.arrayContaining([
+          "description",
+          "ai_generated_summary",
+          "main_body",
+          "details_markdown_sections",
+        ]),
+      );
+      expect(mockFetch.mock.calls[1][1].method).toBe("PATCH");
     } finally {
       await harness.close();
     }
@@ -1093,6 +1321,45 @@ function selectedSkillUseResponse(params: {
     provenance: { topic: { id: params.topicId }, cases: [params.caseId] },
     agent_usage_note: "Use the returned skill after ContextPack hydration.",
   });
+}
+
+function v2DocumentResponse(params: {
+  id: string;
+  title: string;
+  description?: string;
+  aiGeneratedSummary?: string;
+  detailsSections?: Array<{ anchor_id: string; markdown: string }>;
+}) {
+  const detailsSections = params.detailsSections ?? [];
+  return {
+    id: params.id,
+    owner_id: "99999999-9999-9999-9999-999999999999",
+    organization_id: null,
+    visibility: "private",
+    title: params.title,
+    description: params.description ?? "Document description.",
+    human_summary: "",
+    ai_generated_summary: params.aiGeneratedSummary ?? "",
+    collaborators: [],
+    main_body:
+      detailsSections.length > 0
+        ? [
+            {
+              segments: [
+                {
+                  text: params.aiGeneratedSummary ?? params.description ?? params.title,
+                  evidence_anchor_id: detailsSections[0].anchor_id,
+                },
+              ],
+            },
+          ]
+        : [],
+    details_file_name: "taskforce-mcp.details.md",
+    details_markdown_sections: detailsSections,
+    is_demo: false,
+    created_at: "2026-05-18T00:00:00.000Z",
+    updated_at: "2026-05-18T00:00:00.000Z",
+  };
 }
 
 function jsonResponse(data: unknown, status = 200): Response {
