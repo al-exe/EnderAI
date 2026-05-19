@@ -34,6 +34,7 @@ export type BeginDocumentArgs = {
   document_id?: string;
   reuse_within_seconds?: number;
   force_new?: boolean;
+  visibility?: "private" | "organization";
   demo?: boolean;
 };
 
@@ -73,6 +74,7 @@ export type UpdateDocumentArgs = {
   changes?: Array<{ kind: string; summary: string; files?: string[] }>;
   open_questions?: string[];
   progress_note?: string;
+  visibility?: "private" | "organization";
   demo?: boolean;
 };
 
@@ -118,6 +120,7 @@ function normalizeRequest(args: BeginDocumentArgs): MatchRequest {
     reuse_within_seconds: args.reuse_within_seconds,
     force_new: args.force_new,
     document_id: args.document_id,
+    visibility: args.visibility,
     demo: args.demo,
   };
 }
@@ -285,6 +288,7 @@ export async function beginDocument(
         description: args.goal?.trim() || args.request_summary.trim().slice(0, 280),
         ai_generated_summary: `Agent-maintained summary. Active request: ${args.request_summary.trim()}`.slice(0, 600),
         collaborators: request.collaborators,
+        visibility: request.visibility,
         ...initialDocumentBody(args),
       },
       fetchArgs,
@@ -347,6 +351,7 @@ export async function beginDocument(
       description: args.goal?.trim() || args.request_summary.trim().slice(0, 280),
       ai_generated_summary: `Agent-maintained summary. Active request: ${args.request_summary.trim()}`.slice(0, 600),
       collaborators: request.collaborators,
+      visibility: request.visibility,
       ...initialDocumentBody(args),
     },
     fetchArgs,
@@ -485,6 +490,10 @@ export async function updateDocument(
       patch.collaborators = merged;
       patched.push("collaborators");
     }
+  }
+  if (args.visibility !== undefined && args.visibility !== doc.visibility) {
+    patch.visibility = args.visibility;
+    patched.push("visibility");
   }
 
   let body = doc.main_body;

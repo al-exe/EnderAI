@@ -12,11 +12,122 @@ def get_datetime_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class OrganizationBase(SQLModel):
+    name: str = Field(min_length=1, max_length=255, unique=True, index=True)
+
+
+class Organization(OrganizationBase, table=True):
+    __tablename__ = "organization"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class OrganizationCreate(OrganizationBase):
+    pass
+
+
+class OrganizationUpdate(SQLModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class OrganizationPublic(OrganizationBase):
+    id: uuid.UUID
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class OrganizationsPublic(SQLModel):
+    data: list[OrganizationPublic]
+    count: int
+
+
+class OrganizationInvitation(SQLModel, table=True):
+    __tablename__ = "organization_invitation"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    organization_id: uuid.UUID = Field(
+        foreign_key="organization.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    invited_email: EmailStr = Field(index=True, max_length=255)
+    invited_by_user_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    accepted_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    revoked_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class OrganizationInvitationCreate(SQLModel):
+    email: EmailStr = Field(max_length=255)
+
+
+class OrganizationInvitationPublic(SQLModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    invited_email: EmailStr
+    invited_by_user_id: uuid.UUID
+    created_at: datetime | None = None
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class OrganizationMemberPublic(SQLModel):
+    id: uuid.UUID
+    email: EmailStr
+    full_name: str | None = None
+    organization_role: Literal["admin", "member"]
+
+
+class OrganizationMemberUpdate(SQLModel):
+    organization_role: Literal["admin", "member"]
+
+
+class OrganizationMePublic(OrganizationPublic):
+    organization_role: Literal["admin", "member"]
+    members: list[OrganizationMemberPublic] = Field(default_factory=list)
+    invitations: list[OrganizationInvitationPublic] = Field(default_factory=list)
+
+
+class OrganizationInvitationsPublic(SQLModel):
+    data: list[OrganizationInvitationPublic]
+    count: int
+
+
 class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
     is_active: bool = False
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    organization_role: str = Field(default="admin", index=True, max_length=16)
 
 
 class UserCreate(UserBase):
@@ -732,6 +843,13 @@ class V2Document(SQLModel, table=True):
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, index=True, ondelete="CASCADE"
     )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    visibility: str = Field(default="private", index=True, max_length=16)
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="")
     human_summary: str = Field(default="")
@@ -763,6 +881,7 @@ class V2DocumentCreate(SQLModel):
     details_markdown_sections: list[V2DocumentDetailsSection] = Field(
         default_factory=list
     )
+    visibility: Literal["private", "organization"] = "private"
 
 
 class V2DocumentUpdate(SQLModel):
@@ -774,11 +893,15 @@ class V2DocumentUpdate(SQLModel):
     main_body: list[V2DocumentParagraph] | None = None
     details_file_name: str | None = None
     details_markdown_sections: list[V2DocumentDetailsSection] | None = None
+    visibility: Literal["private", "organization"] | None = None
 
 
 class V2DocumentPublic(SQLModel):
     id: uuid.UUID
     title: str
+    owner_id: uuid.UUID
+    organization_id: uuid.UUID | None
+    visibility: Literal["private", "organization"]
     description: str
     human_summary: str
     ai_generated_summary: str

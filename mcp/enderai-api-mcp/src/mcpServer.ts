@@ -191,6 +191,7 @@ const BeginDocumentArgsSchema = z
     document_id: z.string().uuid().optional(),
     reuse_within_seconds: z.number().int().nonnegative().optional(),
     force_new: z.boolean().optional(),
+    visibility: z.enum(["private", "organization"]).optional(),
     demo: z.boolean().optional(),
   })
   .strict();
@@ -243,6 +244,7 @@ const UpdateDocumentArgsSchema = z
     changes: z.array(DocumentChangeSchema).optional(),
     open_questions: z.array(z.string()).optional(),
     progress_note: z.string().optional(),
+    visibility: z.enum(["private", "organization"]).optional(),
     demo: z.boolean().optional(),
   })
   .strict();
@@ -1426,6 +1428,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 type: "boolean",
                 description: "Skip scoring and create a fresh document.",
               },
+              visibility: {
+                type: "string",
+                enum: ["private", "organization"],
+                description:
+                  "Visibility to use when creating a fresh document. Defaults to private.",
+              },
               demo: {
                 type: "boolean",
                 description: "Operate against demo documents.",
@@ -1522,6 +1530,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               },
               open_questions: { ...stringArrayJsonSchema, description: "Unresolved items." },
               progress_note: { type: "string", description: "Human-readable update." },
+              visibility: {
+                type: "string",
+                enum: ["private", "organization"],
+                description:
+                  "Optional visibility change. Only the document owner can change visibility.",
+              },
               demo: { type: "boolean" },
             },
           },

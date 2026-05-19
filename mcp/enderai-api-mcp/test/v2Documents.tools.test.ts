@@ -110,6 +110,7 @@ describe("beginDocument", () => {
         request_summary: "Investigate flaky frontend rendering",
         title: "Frontend rendering glitch",
         files: ["src/components/Foo.tsx"],
+        visibility: "organization",
       },
       { state },
     );
@@ -121,6 +122,7 @@ describe("beginDocument", () => {
     const calls = fetchCalls();
     expect(calls[0]).toMatchObject({ method: "GET", url: expect.stringContaining("/v2/documents/") });
     expect(calls[1]).toMatchObject({ method: "POST" });
+    expect(calls[1].body).toMatchObject({ visibility: "organization" });
   });
 
   it("reuses + self-heals a strong candidate", async () => {
@@ -225,12 +227,14 @@ describe("updateDocument", () => {
         progress_note: "Refreshed bridge cache",
         commands: [{ cmd: "./infra/network/bridge-refresh.sh", purpose: "refresh" }],
         collaborators: ["Nia Patel"],
+        visibility: "organization",
       },
       { state },
     );
     expect(result.patched_fields).toEqual(
       expect.arrayContaining([
         "collaborators",
+        "visibility",
         "details_markdown_sections (working log)",
       ]),
     );
@@ -238,6 +242,7 @@ describe("updateDocument", () => {
     expect(calls[1].method).toBe("PATCH");
     const body = calls[1].body as Record<string, unknown>;
     expect(body.collaborators).toEqual(["Alex Lee", "Nia Patel"]);
+    expect(body.visibility).toBe("organization");
     expect(Array.isArray(body.details_markdown_sections)).toBe(true);
   });
 

@@ -70,6 +70,9 @@ describe("guided case workflow MCP tools", () => {
           "enderai_update_case",
           "enderai_use_skill",
           "enderai_finish_case",
+          "enderai_begin_document",
+          "enderai_update_document",
+          "enderai_finish_document",
           "enderai_request",
           "enderai_session_info",
           "enderai_openapi",
@@ -1093,6 +1096,45 @@ function selectedSkillUseResponse(params: {
     provenance: { topic: { id: params.topicId }, cases: [params.caseId] },
     agent_usage_note: "Use the returned skill after ContextPack hydration.",
   });
+}
+
+function v2DocumentResponse(params: {
+  id: string;
+  title: string;
+  description?: string;
+  aiGeneratedSummary?: string;
+  detailsSections?: Array<{ anchor_id: string; markdown: string }>;
+}) {
+  const detailsSections = params.detailsSections ?? [];
+  return {
+    id: params.id,
+    owner_id: "99999999-9999-9999-9999-999999999999",
+    organization_id: null,
+    visibility: "private",
+    title: params.title,
+    description: params.description ?? "Document description.",
+    human_summary: "",
+    ai_generated_summary: params.aiGeneratedSummary ?? "",
+    collaborators: [],
+    main_body:
+      detailsSections.length > 0
+        ? [
+            {
+              segments: [
+                {
+                  text: params.aiGeneratedSummary ?? params.description ?? params.title,
+                  evidence_anchor_id: detailsSections[0].anchor_id,
+                },
+              ],
+            },
+          ]
+        : [],
+    details_file_name: "taskforce-mcp.details.md",
+    details_markdown_sections: detailsSections,
+    is_demo: false,
+    created_at: "2026-05-18T00:00:00.000Z",
+    updated_at: "2026-05-18T00:00:00.000Z",
+  };
 }
 
 function jsonResponse(data: unknown, status = 200): Response {

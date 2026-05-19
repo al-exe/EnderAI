@@ -8,8 +8,8 @@ from app.core.v2_documents import (
     apply_v2_document_update,
     build_v2_document_public,
     ensure_v2_documents_demo_seed,
-    get_v2_document_for_owner,
-    list_v2_documents_for_owner,
+    get_v2_document_for_actor,
+    list_v2_documents_for_actor,
 )
 from app.models import (
     V2Document,
@@ -41,7 +41,7 @@ def read_v2_documents(
     demo: bool = Query(default=False),
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
-    documents = list_v2_documents_for_owner(session, current_user.id, demo=demo)
+    documents = list_v2_documents_for_actor(session, current_user, demo=demo)
     return V2DocumentsPublic(
         data=[build_v2_document_public(document) for document in documents],
         count=len(documents),
@@ -57,9 +57,19 @@ def create_v2_document(
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
     payload = document_in.model_dump(mode="json")
+    visibility = payload.get("visibility", "private")
+    if visibility == "organization" and current_user.organization_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="User must belong to an organization to share a document",
+        )
     now = get_datetime_utc()
     document = V2Document(
         owner_id=current_user.id,
+        organization_id=(
+            current_user.organization_id if visibility == "organization" else None
+        ),
+        visibility=visibility,
         title=payload["title"].strip(),
         description=payload.get("description", ""),
         human_summary=payload.get("human_summary", ""),
@@ -86,7 +96,9 @@ def read_v2_document(
     demo: bool = Query(default=False),
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
-    document = get_v2_document_for_owner(session, current_user.id, document_id)
+    document = get_v2_document_for_actor(
+        session, current_user, document_id, demo=demo
+    )
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return build_v2_document_public(document)
@@ -101,9 +113,26 @@ def update_v2_document(
     demo: bool = Query(default=False),
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
-    document = get_v2_document_for_owner(session, current_user.id, document_id)
+    document = get_v2_document_for_actor(
+        session, current_user, document_id, demo=demo
+    )
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    if "visibility" in document_in.model_fields_set:
+        if document.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the document owner can change visibility",
+            )
+        if document_in.visibility == "organization":
+            if current_user.organization_id is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="User must belong to an organization to share a document",
+                )
+            document.organization_id = current_user.organization_id
+        else:
+            document.organization_id = None
     if not apply_v2_document_update(document, document_in):
         raise HTTPException(status_code=422, detail="No fields to update")
     session.add(document)

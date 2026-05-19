@@ -3,7 +3,12 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.security import get_password_hash, verify_password
-from app.models import User, UserCreate, UserUpdate
+from app.models import Organization, User, UserCreate, UserUpdate
+
+
+def _personal_organization_name(user: User) -> str:
+    label = user.full_name or user.email
+    return f"{label}'s Organization ({str(user.id)[:8]})"
 
 
 def create_user(
@@ -14,6 +19,14 @@ def create_user(
         extra_data["hashed_password"] = get_password_hash(user_create.password)
     db_obj = User.model_validate(user_create, update=extra_data)
     session.add(db_obj)
+    session.flush()
+    if db_obj.organization_id is None:
+        organization = Organization(name=_personal_organization_name(db_obj))
+        session.add(organization)
+        session.flush()
+        db_obj.organization_id = organization.id
+        db_obj.organization_role = "admin"
+        session.add(db_obj)
     if commit:
         session.commit()
         session.refresh(db_obj)

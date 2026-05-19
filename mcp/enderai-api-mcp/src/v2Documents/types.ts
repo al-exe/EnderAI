@@ -14,6 +14,9 @@ export type V2DocumentDetailsSection = {
 
 export type V2Document = {
   id: string;
+  owner_id?: string;
+  organization_id?: string | null;
+  visibility?: "private" | "organization";
   title: string;
   description: string;
   human_summary: string;
@@ -41,6 +44,7 @@ export type V2DocumentUpdate = Partial<{
   main_body: V2DocumentParagraph[];
   details_file_name: string;
   details_markdown_sections: V2DocumentDetailsSection[];
+  visibility: "private" | "organization";
 }>;
 
 /**
@@ -58,6 +62,7 @@ export type MatchRequest = {
   symbols: string[];
   errors: string[];
   contexts: string[];
+  visibility?: "private" | "organization";
   /** Optional explicit reuse window in seconds. Defaults to 30 days. */
   reuse_within_seconds?: number;
   /** When true, scoring should not be invoked; caller will create a fresh doc. */

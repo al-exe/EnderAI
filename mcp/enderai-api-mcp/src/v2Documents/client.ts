@@ -59,6 +59,7 @@ export type V2DocumentCreate = {
   main_body?: V2Document["main_body"];
   details_file_name?: string;
   details_markdown_sections?: V2Document["details_markdown_sections"];
+  visibility?: "private" | "organization";
 };
 
 export async function createV2Document(
