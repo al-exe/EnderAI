@@ -83,6 +83,22 @@ def _member_public(user: User) -> OrganizationMemberPublic:
     )
 
 
+def _invitation_public(
+    session: SessionDep, invitation: OrganizationInvitation
+) -> OrganizationInvitationPublic:
+    organization = session.get(Organization, invitation.organization_id)
+    return OrganizationInvitationPublic(
+        id=invitation.id,
+        organization_id=invitation.organization_id,
+        organization_name=organization.name if organization else None,
+        invited_email=invitation.invited_email,
+        invited_by_user_id=invitation.invited_by_user_id,
+        created_at=invitation.created_at,
+        accepted_at=invitation.accepted_at,
+        revoked_at=invitation.revoked_at,
+    )
+
+
 def _pending_invites_for_org(
     session: SessionDep, organization_id: uuid.UUID
 ) -> list[OrganizationInvitation]:
@@ -126,10 +142,7 @@ def read_my_organization(session: SessionDep, current_user: CurrentUser) -> Any:
         organization_role=current_user.organization_role,
         members=[_member_public(member) for member in members],
         invitations=[
-            OrganizationInvitationPublic.model_validate(
-                invitation, from_attributes=True
-            )
-            for invitation in invitations
+            _invitation_public(session, invitation) for invitation in invitations
         ],
     )
 
@@ -174,7 +187,7 @@ def create_organization_invitation(
     session.add(invitation)
     session.commit()
     session.refresh(invitation)
-    return invitation
+    return _invitation_public(session, invitation)
 
 
 @router.get(
@@ -194,10 +207,7 @@ def read_my_organization_invitations(
     ).all()
     return OrganizationInvitationsPublic(
         data=[
-            OrganizationInvitationPublic.model_validate(
-                invitation, from_attributes=True
-            )
-            for invitation in invitations
+            _invitation_public(session, invitation) for invitation in invitations
         ],
         count=len(invitations),
     )

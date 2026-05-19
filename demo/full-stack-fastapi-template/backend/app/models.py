@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import DateTime, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -87,6 +87,7 @@ class OrganizationInvitationCreate(SQLModel):
 class OrganizationInvitationPublic(SQLModel):
     id: uuid.UUID
     organization_id: uuid.UUID
+    organization_name: str | None = None
     invited_email: EmailStr
     invited_by_user_id: uuid.UUID
     created_at: datetime | None = None
@@ -836,6 +837,64 @@ class V2DocumentDetailsSection(SQLModel):
     markdown: str
 
 
+class V2DocumentFolder(SQLModel, table=True):
+    __tablename__ = "v2_document_folder"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True, ondelete="CASCADE"
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    name: str = Field(min_length=1, max_length=255, index=True)
+    visibility: str = Field(default="private", index=True, max_length=16)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+
+
+class V2DocumentShare(SQLModel, table=True):
+    __tablename__ = "v2_document_share"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "user_id",
+            name="uq_v2_document_share_document_user",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    document_id: uuid.UUID = Field(
+        foreign_key="v2_document.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True, ondelete="CASCADE"
+    )
+    permission: str = Field(default="editor", index=True, max_length=16)
+    created_by_user_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="user.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+
+
 class V2Document(SQLModel, table=True):
     __tablename__ = "v2_document"
 
@@ -846,6 +905,12 @@ class V2Document(SQLModel, table=True):
     organization_id: uuid.UUID | None = Field(
         default=None,
         foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    folder_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="v2_document_folder.id",
         index=True,
         ondelete="SET NULL",
     )
@@ -882,6 +947,7 @@ class V2DocumentCreate(SQLModel):
         default_factory=list
     )
     visibility: Literal["private", "organization"] = "private"
+    folder_id: uuid.UUID | None = None
 
 
 class V2DocumentUpdate(SQLModel):
@@ -894,6 +960,57 @@ class V2DocumentUpdate(SQLModel):
     details_file_name: str | None = None
     details_markdown_sections: list[V2DocumentDetailsSection] | None = None
     visibility: Literal["private", "organization"] | None = None
+    folder_id: uuid.UUID | None = None
+
+
+class V2DocumentFolderCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+    visibility: Literal["private", "organization"] = "private"
+
+
+class V2DocumentFolderUpdate(SQLModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    visibility: Literal["private", "organization"] | None = None
+
+
+class V2DocumentFolderPublic(SQLModel):
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    organization_id: uuid.UUID | None
+    name: str
+    visibility: Literal["private", "organization"]
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class V2DocumentFoldersPublic(SQLModel):
+    data: list[V2DocumentFolderPublic]
+    count: int
+
+
+class V2DocumentShareAssignment(SQLModel):
+    user_id: uuid.UUID
+    permission: Literal["viewer", "editor"] = "editor"
+
+
+class V2DocumentSharesUpdate(SQLModel):
+    shares: list[V2DocumentShareAssignment] = Field(default_factory=list)
+
+
+class V2DocumentSharePublic(SQLModel):
+    id: uuid.UUID
+    document_id: uuid.UUID
+    user_id: uuid.UUID
+    email: EmailStr
+    full_name: str | None = None
+    permission: Literal["viewer", "editor"]
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
+class V2DocumentSharesPublic(SQLModel):
+    data: list[V2DocumentSharePublic]
+    count: int
 
 
 class V2DocumentPublic(SQLModel):
@@ -901,11 +1018,15 @@ class V2DocumentPublic(SQLModel):
     title: str
     owner_id: uuid.UUID
     organization_id: uuid.UUID | None
+    folder_id: uuid.UUID | None
+    folder_name: str | None = None
     visibility: Literal["private", "organization"]
+    user_access: Literal["owner", "editor", "viewer"] = "owner"
     description: str
     human_summary: str
     ai_generated_summary: str
     collaborators: list[str]
+    shared_with: list[V2DocumentSharePublic] = Field(default_factory=list)
     main_body: list[V2DocumentParagraph]
     details_file_name: str
     details_markdown_sections: list[V2DocumentDetailsSection]
