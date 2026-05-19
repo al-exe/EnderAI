@@ -13,6 +13,13 @@ import {
   syncSkillUseResultToLocalFiles,
   type SkillSyncResult,
 } from "./skillSync.js";
+import {
+  beginDocument,
+  createActiveDocumentState,
+  finishDocument,
+  updateDocument,
+  type ActiveDocumentState,
+} from "./v2Documents/index.js";
 
 export type McpServerOptions = {
   // Optional backend bearer token provider used for all tool calls in this server instance.
@@ -167,6 +174,88 @@ const FinishCaseArgsSchema = z
     next_steps: z.array(z.string()).optional(),
     closing_note: z.string().min(1).optional(),
     closing_data: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+const BeginDocumentArgsSchema = z
+  .object({
+    request_summary: z.string().min(1),
+    goal: z.string().optional(),
+    acceptance_criteria: z.string().optional(),
+    title: z.string().min(1).optional(),
+    collaborators: z.array(z.string()).optional(),
+    files: z.array(z.string()).optional(),
+    symbols: z.array(z.string()).optional(),
+    errors: z.array(z.string()).optional(),
+    contexts: z.array(z.string()).optional(),
+    document_id: z.string().uuid().optional(),
+    reuse_within_seconds: z.number().int().nonnegative().optional(),
+    force_new: z.boolean().optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict();
+
+const DocumentDetailsSectionSchema = z
+  .object({
+    anchor_id: z.string().min(1),
+    markdown: z.string(),
+  })
+  .strict();
+
+const DocumentCommandSchema = z
+  .object({
+    cmd: z.string().min(1),
+    purpose: z.string().optional(),
+    salient_result: z.string().optional(),
+    ts: z.string().optional(),
+  })
+  .strict();
+
+const DocumentDecisionSchema = z
+  .object({
+    statement: z.string().min(1),
+    rationale: z.string().optional(),
+  })
+  .strict();
+
+const DocumentChangeSchema = z
+  .object({
+    kind: z.string().min(1),
+    summary: z.string().min(1),
+    files: z.array(z.string()).optional(),
+  })
+  .strict();
+
+const UpdateDocumentArgsSchema = z
+  .object({
+    document_id: z.string().uuid().optional(),
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    human_summary: z.string().optional(),
+    summary_points: z.array(z.string()).optional(),
+    ai_generated_summary: z.string().optional(),
+    collaborators: z.array(z.string()).optional(),
+    details_sections: z.array(DocumentDetailsSectionSchema).optional(),
+    commands: z.array(DocumentCommandSchema).optional(),
+    files: z.array(z.string()).optional(),
+    links: z.array(z.string()).optional(),
+    decisions: z.array(DocumentDecisionSchema).optional(),
+    changes: z.array(DocumentChangeSchema).optional(),
+    open_questions: z.array(z.string()).optional(),
+    progress_note: z.string().optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict();
+
+const FinishDocumentArgsSchema = z
+  .object({
+    document_id: z.string().uuid().optional(),
+    outcome: z.string().optional(),
+    validation: z.array(z.string()).optional(),
+    follow_ups: z.array(z.string()).optional(),
+    status: z.enum(["done", "paused", "blocked", "superseded"]).optional(),
+    closing_note: z.string().optional(),
+    demo: z.boolean().optional(),
   })
   .strict();
 
@@ -697,6 +786,8 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     threadId?: string;
     depth: number;
   } = { depth: 0 };
+
+  const activeDocumentState: ActiveDocumentState = createActiveDocumentState();
 
   function setActiveCaseContext(caseId?: string, topicId?: string): void {
     if (caseId) auditState.executionId = caseId;
@@ -1296,6 +1387,168 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
         },
         {
+          name: "enderai_begin_document",
+          description:
+            "Taskforce v2 document lifecycle: start of meaningful work. Lists current user's V2 documents, scores them against the request using a deterministic congruence engine (title/file/symbol/error/anchor/collaborator overlap, recency, intent phrases minus tenant/repo/error-family/terminal-state conflicts), and either reuses+self-heals the top match or creates a fresh document. Honors explicit document_id and force_new. Remembers the active document for this MCP session.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              request_summary: {
+                type: "string",
+                description: "Concise statement of the new work request or problem to investigate.",
+              },
+              goal: { type: "string", description: "Optional intended outcome." },
+              acceptance_criteria: {
+                type: "string",
+                description: "Optional success criteria.",
+              },
+              title: { type: "string", description: "Optional preferred document title." },
+              collaborators: { ...stringArrayJsonSchema, description: "Known collaborators." },
+              files: { ...stringArrayJsonSchema, description: "Files or directories in scope." },
+              symbols: { ...stringArrayJsonSchema, description: "Code symbols or product terms." },
+              errors: { ...stringArrayJsonSchema, description: "Error strings." },
+              contexts: {
+                ...stringArrayJsonSchema,
+                description: "Free-form context labels (tenant/customer/product hints).",
+              },
+              document_id: {
+                type: "string",
+                description: "Optional explicit document to reuse without scoring.",
+              },
+              reuse_within_seconds: {
+                type: "integer",
+                minimum: 0,
+                description:
+                  "Recency window (in seconds) for the recency scoring signal. Defaults to 30 days.",
+              },
+              force_new: {
+                type: "boolean",
+                description: "Skip scoring and create a fresh document.",
+              },
+              demo: {
+                type: "boolean",
+                description: "Operate against demo documents.",
+              },
+            },
+            required: ["request_summary"],
+          },
+        },
+        {
+          name: "enderai_update_document",
+          description:
+            "Append material progress to the active Taskforce v2 document and keep Summary claims backed by Details evidence anchors. Requires a prior enderai_begin_document call in this MCP session unless document_id is supplied. Use enderai_finish_document, not this tool, to finalize.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              document_id: { type: "string", description: "Optional explicit document id." },
+              title: { type: "string", description: "Corrected title." },
+              description: { type: "string", description: "Corrected description." },
+              human_summary: {
+                type: "string",
+                description:
+                  "Only set when explicitly asked to edit the human summary; otherwise leave untouched.",
+              },
+              summary_points: {
+                ...stringArrayJsonSchema,
+                description: "Concise claims to append to the Summary report.",
+              },
+              ai_generated_summary: {
+                type: "string",
+                description: "Agent-maintained executive summary.",
+              },
+              collaborators: {
+                ...stringArrayJsonSchema,
+                description: "Collaborators to merge into the document.",
+              },
+              details_sections: {
+                type: "array",
+                description:
+                  "Explicit Details sections to upsert by anchor_id (full replace on match).",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["anchor_id", "markdown"],
+                  properties: {
+                    anchor_id: { type: "string", minLength: 1 },
+                    markdown: { type: "string" },
+                  },
+                },
+              },
+              commands: {
+                type: "array",
+                description: "Commands that were run, with purpose and salient result.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["cmd"],
+                  properties: {
+                    cmd: { type: "string", minLength: 1 },
+                    purpose: { type: "string" },
+                    salient_result: { type: "string" },
+                    ts: { type: "string" },
+                  },
+                },
+              },
+              files: { ...stringArrayJsonSchema, description: "Inspected or changed files." },
+              links: { ...stringArrayJsonSchema, description: "Relevant links accessed." },
+              decisions: {
+                type: "array",
+                description: "Decisions taken with rationale.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["statement"],
+                  properties: {
+                    statement: { type: "string", minLength: 1 },
+                    rationale: { type: "string" },
+                  },
+                },
+              },
+              changes: {
+                type: "array",
+                description: "Code/config/docs/test/infra changes made.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["kind", "summary"],
+                  properties: {
+                    kind: { type: "string", minLength: 1 },
+                    summary: { type: "string", minLength: 1 },
+                    files: stringArrayJsonSchema,
+                  },
+                },
+              },
+              open_questions: { ...stringArrayJsonSchema, description: "Unresolved items." },
+              progress_note: { type: "string", description: "Human-readable update." },
+              demo: { type: "boolean" },
+            },
+          },
+        },
+        {
+          name: "enderai_finish_document",
+          description:
+            "Finalize the active Taskforce v2 document at completion or pause. Adds an Outcome section to Details (with status, outcome, validation, follow-ups) and links it from Summary. Clears the active-document pointer for this MCP session.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              document_id: { type: "string", description: "Optional explicit document id." },
+              outcome: { type: "string", description: "Final result." },
+              validation: { ...stringArrayJsonSchema, description: "Checks performed and results." },
+              follow_ups: { ...stringArrayJsonSchema, description: "Remaining work." },
+              status: {
+                type: "string",
+                enum: ["done", "paused", "blocked", "superseded"],
+                description: "Completion status (defaults to done).",
+              },
+              closing_note: { type: "string", description: "Optional final narrative." },
+              demo: { type: "boolean" },
+            },
+          },
+        },
+        {
           name: "enderai_session_info",
           description:
             "Return the current EnderAI MCP session policy, auth model, active case/topic ids, and authenticated user summary when available.",
@@ -1792,6 +2045,54 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         }
       }
 
+      if (name === "enderai_begin_document") {
+        const args = BeginDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await beginDocument(args, {
+            bearerToken,
+            state: activeDocumentState,
+          });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `enderai_begin_document failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "enderai_update_document") {
+        const args = UpdateDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await updateDocument(args, {
+            bearerToken,
+            state: activeDocumentState,
+          });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `enderai_update_document failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "enderai_finish_document") {
+        const args = FinishDocumentArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await finishDocument(args, {
+            bearerToken,
+            state: activeDocumentState,
+          });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `enderai_finish_document failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       if (name === "enderai_request") {
         const args = EnderaiRequestArgsSchema.parse(req.params.arguments ?? {});
         const { audit, ...reqArgs } = args;
@@ -1937,6 +2238,15 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           user,
           active_case_id: auditState.executionId ?? null,
           active_topic_id: auditState.threadId ?? null,
+          active_document: activeDocumentState.documentId
+            ? {
+                id: activeDocumentState.documentId,
+                title: activeDocumentState.title ?? null,
+                started_at: activeDocumentState.startedAt ?? null,
+                last_updated_at: activeDocumentState.lastUpdatedAt ?? null,
+                demo: activeDocumentState.demo ?? false,
+              }
+            : null,
           local_skills_dir: getLocalSkillsDirectory(),
           skills_discovery:
             "enderai_begin_case and enderai_use_skill sync matched EnderAI Skills as markdown files under local_skills_dir. Read the returned local_skill_files before applying skill guidance.",
@@ -1946,6 +2256,9 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
             use_skill_tool: "enderai_use_skill",
             update_tool: "enderai_update_case",
             finish_tool: "enderai_finish_case",
+            v2_begin_tool: "enderai_begin_document",
+            v2_update_tool: "enderai_update_document",
+            v2_finish_tool: "enderai_finish_document",
           },
         });
       }
