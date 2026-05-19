@@ -140,17 +140,29 @@ The main app shell should not surface any retired demo-template concepts.
 
 ## Hosted MCP Shape
 
-The hosted MCP service exposes:
+The hosted MCP service exposes two guided workflows:
+
+Taskforce V2 document workflow (preferred for V2-enabled users):
+
+- `enderai_begin_document`
+- `enderai_update_document`
+- `enderai_finish_document`
+
+Legacy V1 Topic/Case workflow (fallback when V2 is not enabled):
 
 - `enderai_begin_case`
 - `enderai_use_skill`
 - `enderai_update_case`
 - `enderai_finish_case`
+
+Cross-cutting:
+
+- `enderai_session_info` (returns the active V2 document handle and the active V1 case/topic ids)
 - `enderai_request`
 - `enderai_openapi`
 - `enderai_health_check`
 
-Its guided workflow is aligned to the same Topic / Case / ContextPack model as the backend and frontend. `enderai_begin_case` and `enderai_use_skill` also sync matched generated Skills to local markdown files so agents can read task-specific workflow guidance before acting.
+The V2 workflow is aligned to the per-user Taskforce V2 document model. `enderai_begin_document` runs deterministic congruence scoring against the user's documents and either reuses + self-heals a strong match or creates a fresh document. The V1 workflow is aligned to the Topic / Case / ContextPack model; `enderai_begin_case` and `enderai_use_skill` also sync matched generated Skills to local markdown files so agents can read task-specific workflow guidance before acting.
 
 ## Auth and Token Flow
 

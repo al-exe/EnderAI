@@ -7,8 +7,8 @@ This document describes the current EnderAI onboarding flow for hosted MCP clien
 The product now standardizes on:
 - one per-user MCP token
 - a hosted MCP endpoint
-- the `Topic / Case / ContextPack` workflow
-- automatic context hydration at the start of meaningful work
+- the Taskforce V2 document workflow for V2-enabled users, with the legacy V1 `Topic / Case / ContextPack` workflow as the fallback when V2 is not enabled
+- deterministic document matching with self-heal (V2) or automatic context hydration (V1) at the start of meaningful work
 
 ## Current Recommendation
 
@@ -43,7 +43,7 @@ The Connect Agent page should generate:
 - the hosted MCP URL
 - the one MCP token the user needs
 - client-agnostic setup for an MCP-capable AI client
-- a short workflow snippet telling the agent to start meaningful work with `enderai_begin_case`
+- a short workflow snippet telling the agent to start meaningful work with `enderai_begin_document` for V2-enabled users, or `enderai_begin_case` as the V1 fallback
 
 ## Generic Hosted MCP Client
 
@@ -101,7 +101,20 @@ Client flow:
 
 ## Agent Instruction Layer
 
-The setup page should also provide a short workflow reminder such as:
+For Taskforce V2-enabled users, the setup page should provide:
+
+```text
+If Taskforce V2 MCP tools are available:
+- When creating or rotating an EnderAI MCP credential during setup, tell the user to start from a fresh terminal before reconnecting the AI client so the updated shell environment is loaded.
+- Start meaningful user-initiated work with `enderai_begin_document`. It scores existing documents against the request, reuses + self-heals a strong match, or creates a fresh one.
+- Use `enderai_update_document` as material progress develops (commands, files, links, decisions, changes, open questions, progress notes). Pass `details_sections` with stable `anchor_id`s to upsert specific Details sections.
+- Back every Summary claim with `evidence_anchor_id` segments that point at a Details section. Do not edit `human_summary` unless the user explicitly asks.
+- Use `enderai_finish_document` when the work completes or pauses; it writes Outcome and clears the active document pointer.
+- Prefer Taskforce V2 document tools over the legacy V1 `enderai_begin_case` workflow and over raw `enderai_request` when both are available.
+- If Taskforce V2 document tools are unavailable, do not fabricate tool calls; tell the user they are unavailable and fall back only to tools the user explicitly approves.
+```
+
+For V1-only users, the legacy reminder still applies:
 
 ```text
 If EnderAI tools are available:
@@ -115,7 +128,17 @@ If EnderAI tools are available:
 
 ## Meaningful Work Lifecycle
 
-The canonical workflow is:
+For Taskforce V2-enabled users:
+
+1. user initiates meaningful work
+2. agent calls `enderai_begin_document` with `request_summary` plus optional title / goal / files / symbols / errors / contexts
+3. the tool either reuses an existing strong match (returning `self_healed_fields` describing any structural drift that was repaired) or creates a fresh document; `match_reasons` and `candidate_summaries` explain the decision
+4. active work begins
+5. agent calls `enderai_update_document` as the work develops (commands, files, links, decisions, changes, open questions, progress notes, explicit Details sections)
+6. agent keeps Summary claims backed by Details evidence anchors and leaves `human_summary` untouched unless asked
+7. agent calls `enderai_finish_document` at completion or pause
+
+For V1-only users, the legacy lifecycle still applies:
 
 1. user initiates meaningful work
 2. agent calls `enderai_begin_case`
