@@ -107,7 +107,7 @@ def test_generate_match_and_use_skill(
     assert refresh_res.json()["id"] == skill_id
 
 
-def test_inactive_user_can_read_and_use_demo_skills_but_cannot_generate(
+def test_signed_up_user_can_use_and_generate_demo_skills(
     client: TestClient,
     db: Session,
 ) -> None:
@@ -149,8 +149,7 @@ def test_inactive_user_can_read_and_use_demo_skills_but_cannot_generate(
         params={"demo": True},
         json={"topic_id": topic_id},
     )
-    assert generate_res.status_code == 403
-    assert generate_res.json() == {"detail": "Inactive users cannot write data"}
+    assert generate_res.status_code == 201, generate_res.text
 
     use_res = client.post(
         f"{settings.API_V1_STR}/skills/use",
@@ -164,4 +163,4 @@ def test_inactive_user_can_read_and_use_demo_skills_but_cannot_generate(
     db.expire_all()
     skill_model = db.get(Skill, uuid.UUID(skill_id))
     assert skill_model is not None
-    assert skill_model.usage_count == 0
+    assert skill_model.usage_count == 1

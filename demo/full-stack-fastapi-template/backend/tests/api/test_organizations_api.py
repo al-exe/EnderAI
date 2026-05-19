@@ -7,7 +7,7 @@ from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
 
-def _signup_and_activate(
+def _signup(
     client: TestClient, db: Session, *, full_name: str
 ) -> tuple[str, dict[str, str]]:
     email = random_email()
@@ -20,10 +20,6 @@ def _signup_and_activate(
 
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
-    user.is_active = True
-    db.add(user)
-    db.commit()
-    db.refresh(user)
 
     headers = user_authentication_headers(
         client=client, email=email, password=password
@@ -34,7 +30,7 @@ def _signup_and_activate(
 def test_signup_creates_personal_org_with_admin_role(
     client: TestClient, db: Session
 ) -> None:
-    email, headers = _signup_and_activate(client, db, full_name="Personal Org User")
+    email, headers = _signup(client, db, full_name="Personal Org User")
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
     assert user.organization_id is not None
@@ -51,10 +47,10 @@ def test_signup_creates_personal_org_with_admin_role(
 def test_org_admin_can_invite_and_member_accepts_as_regular_member(
     client: TestClient, db: Session
 ) -> None:
-    admin_email, admin_headers = _signup_and_activate(
+    admin_email, admin_headers = _signup(
         client, db, full_name="Org Admin"
     )
-    member_email, member_headers = _signup_and_activate(
+    member_email, member_headers = _signup(
         client, db, full_name="Org Member"
     )
     admin = crud.get_user_by_email(session=db, email=admin_email)
@@ -93,13 +89,47 @@ def test_org_admin_can_invite_and_member_accepts_as_regular_member(
     assert member.organization_role == "member"
 
 
+def test_invited_user_can_accept_organization_invitation(
+    client: TestClient, db: Session
+) -> None:
+    admin_email, admin_headers = _signup(
+        client, db, full_name="Invite Admin"
+    )
+    member_email, member_headers = _signup(
+        client, db, full_name="Invitee"
+    )
+    admin = crud.get_user_by_email(session=db, email=admin_email)
+    member = crud.get_user_by_email(session=db, email=member_email)
+    assert admin is not None
+    assert member is not None
+
+    invite = client.post(
+        "/api/v1/organizations/invitations",
+        headers=admin_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+
+    accepted = client.post(
+        f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["id"] == str(admin.organization_id)
+    assert accepted.json()["organization_role"] == "member"
+
+    db.refresh(member)
+    assert member.organization_id == admin.organization_id
+    assert member.organization_role == "member"
+
+
 def test_org_admin_can_promote_members_and_members_cannot_invite(
     client: TestClient, db: Session
 ) -> None:
-    admin_email, admin_headers = _signup_and_activate(
+    admin_email, admin_headers = _signup(
         client, db, full_name="Promoter"
     )
-    member_email, member_headers = _signup_and_activate(
+    member_email, member_headers = _signup(
         client, db, full_name="Promotee"
     )
     admin = crud.get_user_by_email(session=db, email=admin_email)

@@ -97,13 +97,13 @@ def test_mcp_agent_token_validates_and_can_call_backend(
     assert credential.last_used_at is not None
 
 
-def test_inactive_user_agent_tokens_can_read_but_not_write(
+def test_agent_tokens_can_read_and_write_after_legacy_active_flag_is_false(
     client: TestClient, normal_user_token_headers: dict[str, str], db: Session
 ) -> None:
     create_res = client.post(
         f"{settings.API_V1_STR}/agent-credentials/",
         headers=normal_user_token_headers,
-        json={"label": "Inactive user credential"},
+        json={"label": "Legacy inactive user credential"},
     )
     payload = create_res.json()
     mcp_token = payload["mcp_access_token"]
@@ -137,29 +137,25 @@ def test_inactive_user_agent_tokens_can_read_but_not_write(
     topic_res = client.post(
         f"{settings.API_V1_STR}/topics/",
         headers={"Authorization": f"Bearer {mcp_token}"},
-        json={"title": "Blocked inactive MCP write"},
+        json={"title": "Legacy inactive MCP write"},
     )
-    assert topic_res.status_code == 403
-    assert topic_res.json() == {"detail": "Inactive users cannot write data"}
+    assert topic_res.status_code == 201, topic_res.text
+    assert topic_res.json()["title"] == "Legacy inactive MCP write"
 
     create_res = client.post(
         f"{settings.API_V1_STR}/agent-credentials/",
         headers=normal_user_token_headers,
-        json={"label": "Blocked inactive credential"},
+        json={"label": "Second legacy inactive credential"},
     )
-    assert create_res.status_code == 403
-    assert create_res.json() == {"detail": "Inactive users cannot write data"}
+    assert create_res.status_code == 201, create_res.text
 
     db.expire_all()
     credential = db.get(AgentCredential, uuid.UUID(credential_id))
     assert credential is not None
-    assert credential.last_used_at is None
+    assert credential.last_used_at is not None
 
     user = db.get(User, uuid.UUID(user_id))
     assert user is not None
-    user.is_active = True
-    db.add(user)
-    db.commit()
 
 
 def test_regular_access_token_cannot_validate_as_mcp_token(

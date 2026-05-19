@@ -22,14 +22,10 @@ def build_context_pack_route(
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = (
-        claim_legacy_orphan_topics_for_owner(session, owner_id)
-        if current_user.is_active
-        else False
-    )
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
     if claimed:
         session.commit()
     try:

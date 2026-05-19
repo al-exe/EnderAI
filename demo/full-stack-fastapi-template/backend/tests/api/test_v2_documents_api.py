@@ -8,9 +8,7 @@ from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
 
-def _signup_and_activate(
-    client: TestClient, db: Session
-) -> tuple[str, dict[str, str]]:
+def _signup(client: TestClient) -> tuple[str, dict[str, str]]:
     email = random_email()
     password = random_lower_string()
 
@@ -28,20 +26,11 @@ def _signup_and_activate(
         client=client, email=email, password=password
     )
 
-    user = crud.get_user_by_email(session=db, email=email)
-    assert user is not None
-    if not user.is_active:
-        user.is_active = True
-        db.add(user)
-        db.commit()
-        db.refresh(user)
     return email, headers
 
 
-def test_v2_documents_list_seeds_demo_lazily(
-    client: TestClient, db: Session
-) -> None:
-    _, headers = _signup_and_activate(client, db)
+def test_v2_documents_list_seeds_demo_lazily(client: TestClient) -> None:
+    _, headers = _signup(client)
 
     # Without demo=true the user starts with zero documents.
     live = client.get("/api/v1/v2/documents/", headers=headers)
@@ -61,8 +50,8 @@ def test_v2_documents_list_seeds_demo_lazily(
     assert second.json()["count"] == len(DEMO_SEED)
 
 
-def test_v2_documents_create_update_get(client: TestClient, db: Session) -> None:
-    _, headers = _signup_and_activate(client, db)
+def test_v2_documents_create_update_get(client: TestClient) -> None:
+    _, headers = _signup(client)
 
     created = client.post(
         "/api/v1/v2/documents/",
@@ -105,9 +94,9 @@ def test_v2_documents_create_update_get(client: TestClient, db: Session) -> None
 
 
 def test_v2_document_folders_can_organize_documents(
-    client: TestClient, db: Session
+    client: TestClient,
 ) -> None:
-    _, headers = _signup_and_activate(client, db)
+    _, headers = _signup(client)
 
     folder = client.post(
         "/api/v1/v2/documents/folders/",
@@ -151,11 +140,9 @@ def test_v2_document_folders_can_organize_documents(
     assert renamed.json()["name"] == "Escalations"
 
 
-def test_v2_documents_are_scoped_to_owner(
-    client: TestClient, db: Session
-) -> None:
-    _, owner_headers = _signup_and_activate(client, db)
-    _, intruder_headers = _signup_and_activate(client, db)
+def test_v2_documents_are_scoped_to_owner(client: TestClient) -> None:
+    _, owner_headers = _signup(client)
+    _, intruder_headers = _signup(client)
 
     created = client.post(
         "/api/v1/v2/documents/",
@@ -182,8 +169,8 @@ def test_v2_documents_can_be_shared_with_one_organization(
     client: TestClient,
     db: Session,
 ) -> None:
-    owner_email, owner_headers = _signup_and_activate(client, db)
-    member_email, member_headers = _signup_and_activate(client, db)
+    owner_email, owner_headers = _signup(client)
+    member_email, member_headers = _signup(client)
 
     owner = crud.get_user_by_email(session=db, email=owner_email)
     member = crud.get_user_by_email(session=db, email=member_email)
@@ -268,8 +255,8 @@ def test_v2_document_can_be_shared_with_specific_org_member_as_editor(
     client: TestClient,
     db: Session,
 ) -> None:
-    owner_email, owner_headers = _signup_and_activate(client, db)
-    member_email, member_headers = _signup_and_activate(client, db)
+    owner_email, owner_headers = _signup(client)
+    member_email, member_headers = _signup(client)
 
     owner = crud.get_user_by_email(session=db, email=owner_email)
     member = crud.get_user_by_email(session=db, email=member_email)
@@ -338,8 +325,8 @@ def test_v2_document_viewer_share_is_read_only(
     client: TestClient,
     db: Session,
 ) -> None:
-    owner_email, owner_headers = _signup_and_activate(client, db)
-    member_email, member_headers = _signup_and_activate(client, db)
+    owner_email, owner_headers = _signup(client)
+    member_email, member_headers = _signup(client)
 
     owner = crud.get_user_by_email(session=db, email=owner_email)
     member = crud.get_user_by_email(session=db, email=member_email)
@@ -392,8 +379,8 @@ def test_v2_document_share_rejects_users_outside_owner_org(
     client: TestClient,
     db: Session,
 ) -> None:
-    _, owner_headers = _signup_and_activate(client, db)
-    outsider_email, _ = _signup_and_activate(client, db)
+    _, owner_headers = _signup(client)
+    outsider_email, _ = _signup(client)
     outsider = crud.get_user_by_email(session=db, email=outsider_email)
     assert outsider is not None
 
@@ -412,10 +399,8 @@ def test_v2_document_share_rejects_users_outside_owner_org(
     assert blocked.status_code == 422, blocked.text
 
 
-def test_v2_document_org_visibility_uses_current_user_org(
-    client: TestClient, db: Session
-) -> None:
-    _, headers = _signup_and_activate(client, db)
+def test_v2_document_org_visibility_uses_current_user_org(client: TestClient) -> None:
+    _, headers = _signup(client)
 
     created = client.post(
         "/api/v1/v2/documents/",

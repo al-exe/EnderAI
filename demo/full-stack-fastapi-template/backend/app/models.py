@@ -120,7 +120,6 @@ class OrganizationInvitationsPublic(SQLModel):
 
 class UserBase(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
-    is_active: bool = False
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
     organization_id: uuid.UUID | None = Field(
@@ -159,6 +158,7 @@ class UpdatePassword(SQLModel):
 
 class User(UserBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    is_active: bool = Field(default=True)
     hashed_password: str | None = None
     firebase_uid: str | None = Field(
         default=None,

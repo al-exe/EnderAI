@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import col, or_, select
 
-from app.api.deps import ActiveUser, CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.core.cases import (
     apply_case_update,
     build_case_event,
@@ -59,14 +59,10 @@ def _get_visible_case_and_topic(
     if case_record is None:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    claimed = (
-        claim_legacy_orphan_topics_for_owner(
-            session,
-            owner_id,
-            topic_id=case_record.topic_id,
-        )
-        if current_user.is_active
-        else False
+    claimed = claim_legacy_orphan_topics_for_owner(
+        session,
+        owner_id,
+        topic_id=case_record.topic_id,
     )
     if claimed:
         session.commit()
@@ -95,17 +91,13 @@ def read_cases(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = (
-        claim_legacy_orphan_topics_for_owner(
-            session,
-            owner_id,
-            topic_id=topic_id,
-        )
-        if current_user.is_active
-        else False
+    claimed = claim_legacy_orphan_topics_for_owner(
+        session,
+        owner_id,
+        topic_id=topic_id,
     )
     if claimed:
         session.commit()
@@ -158,7 +150,7 @@ def read_cases(
 @router.post("/", response_model=CasePublic, status_code=201)
 def create_case(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     case_in: CaseCreate,
     demo: bool = Query(default=False),
 ) -> Any:
@@ -253,7 +245,7 @@ def read_case(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -268,13 +260,13 @@ def read_case(
 @router.patch("/{case_id}", response_model=CasePublic)
 def update_case(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     case_id: uuid.UUID,
     case_in: CaseUpdate,
     demo: bool = Query(default=False),
 ) -> Any:
     owner_id = _owner_scope_id(current_user)
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -315,7 +307,7 @@ def read_case_memo(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -334,7 +326,7 @@ def read_case_hydration(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     case_record, topic = _get_visible_case_and_topic(
@@ -353,7 +345,7 @@ def read_case_events(
     case_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
     _get_visible_case_and_topic(session, current_user, case_id, demo=demo)
@@ -372,7 +364,7 @@ def read_case_events(
 @router.post("/{case_id}/events", response_model=CaseEventPublic, status_code=201)
 def create_case_event_route(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     case_id: uuid.UUID,
     event_in: CaseEventCreate,
     demo: bool = Query(default=False),

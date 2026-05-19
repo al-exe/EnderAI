@@ -5,10 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import func, select
 
 from app.api.deps import (
-    ActiveUser,
     CurrentUser,
     SessionDep,
-    get_current_active_superuser,
+    get_current_superuser,
 )
 from app.models import (
     Organization,
@@ -63,7 +62,7 @@ def _require_current_organization(
 
 
 def _require_current_org_admin(
-    session: SessionDep, current_user: ActiveUser
+    session: SessionDep, current_user: CurrentUser
 ) -> Organization:
     organization = _require_current_organization(session, current_user)
     if not current_user.is_superuser and current_user.organization_role != "admin":
@@ -156,7 +155,7 @@ def create_organization_invitation(
     *,
     session: SessionDep,
     invitation_in: OrganizationInvitationCreate,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
 ) -> Any:
     organization = _require_current_org_admin(session, current_user)
     invited_email = _normalized_email(invitation_in.email)
@@ -221,7 +220,7 @@ def accept_organization_invitation(
     *,
     session: SessionDep,
     invitation_id: uuid.UUID,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
 ) -> Any:
     invitation = session.get(OrganizationInvitation, invitation_id)
     if (
@@ -254,7 +253,7 @@ def update_organization_member(
     session: SessionDep,
     user_id: uuid.UUID,
     member_in: OrganizationMemberUpdate,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
 ) -> Any:
     organization = _require_current_org_admin(session, current_user)
     member = session.get(User, user_id)
@@ -280,7 +279,7 @@ def update_organization_member(
 
 @router.get(
     "/",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_model=OrganizationsPublic,
 )
 def read_organizations(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
@@ -295,7 +294,7 @@ def read_organizations(session: SessionDep, skip: int = 0, limit: int = 100) -> 
 
 @router.post(
     "/",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_model=OrganizationPublic,
     status_code=201,
 )
@@ -313,7 +312,7 @@ def create_organization(
 
 @router.get(
     "/{organization_id}",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_model=OrganizationPublic,
 )
 def read_organization(session: SessionDep, organization_id: uuid.UUID) -> Any:
@@ -322,7 +321,7 @@ def read_organization(session: SessionDep, organization_id: uuid.UUID) -> Any:
 
 @router.patch(
     "/{organization_id}",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_model=OrganizationPublic,
 )
 def update_organization(
