@@ -1254,11 +1254,26 @@ class MetricsEventPublic(SQLModel):
 
 
 class MetricsUsageRecorded(SQLModel):
-    """Envelope returned by POST /v2/documents/{id}/usage.
+    """Envelope returned by POST /v2/documents/{id}/usage and /reused.
 
-    Lists every event the call produced — typically one ``tokens.consumed``
-    plus zero or more ``tokens.saved.*`` rows, depending on which savings
-    sources fired.
+    Lists every event the call produced — typically one primary event
+    (``tokens.consumed`` or ``document.reused``) plus zero or more
+    ``tokens.saved.*`` rows, depending on which savings sources fired.
     """
 
     events: list[MetricsEventPublic]
+
+
+class TaskforceReusePayload(SQLModel):
+    """Reuse context posted by the MCP layer after enderai_begin_document
+    decides to reuse an existing document.
+
+    Mirrors the shape of the scoring engine's Decision. ``score`` and
+    ``band`` come from the chosen candidate's ``CongruenceScore``;
+    ``reasons`` is the same human-readable list the MCP shows the agent.
+    """
+
+    score: int | None = Field(default=None, ge=0, le=100)
+    band: Literal["high", "medium", "low", "explicit", "forced-new"] | None = None
+    reasons: list[str] = Field(default_factory=list)
+    usage: TaskforceUsagePayload | None = None

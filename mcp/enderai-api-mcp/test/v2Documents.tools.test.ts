@@ -301,3 +301,133 @@ describe("finishDocument", () => {
     expect(outcome?.markdown).toMatch(/Tenant bridge cache refreshed/);
   });
 });
+
+describe("metrics forwarding", () => {
+  it("posts /reused with score + band on a scored reuse", async () => {
+    const state = createActiveDocumentState();
+    const candidate = makeDoc({
+      description: "",
+      details_markdown_sections: [
+        {
+          anchor_id: "files",
+          markdown:
+            "Files: `infra/network/bridge-refresh.sh`, `ops/runbooks/bridge.md`. Bridge timeout under load.",
+        },
+      ],
+    });
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ data: [candidate], count: 1 }))
+      .mockResolvedValueOnce(jsonResponse(candidate))
+      .mockResolvedValueOnce(
+        jsonResponse({ ...candidate, description: "fix tenant bridge cache" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          events: [
+            {
+              id: "e1",
+              kind: "document.reused",
+              occurred_at: "2026-05-19T00:00:00Z",
+            },
+          ],
+        }),
+      );
+
+    const result = await beginDocument(
+      {
+        request_summary: "continuing the stale bridge routing investigation",
+        title: candidate.title,
+        goal: "fix tenant bridge cache",
+        files: ["infra/network/bridge-refresh.sh", "ops/runbooks/bridge.md"],
+        errors: ["timeout"],
+      },
+      { state },
+    );
+    expect(result.reused_existing).toBe(true);
+    const calls = fetchCalls();
+    const reusedCall = calls.find((c) => c.url.includes("/reused"));
+    expect(reusedCall).toBeDefined();
+    expect(reusedCall?.method).toBe("POST");
+    const body = reusedCall?.body as Record<string, unknown>;
+    expect(body.band).toBeDefined();
+    expect(Array.isArray(body.reasons)).toBe(true);
+    expect(result.metrics_events).toHaveLength(1);
+    expect(result.metrics_events[0].kind).toBe("document.reused");
+  });
+
+  it("posts /reused with band: explicit when document_id is honored", async () => {
+    const state = createActiveDocumentState();
+    const candidate = makeDoc();
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(candidate))
+      .mockResolvedValueOnce(jsonResponse({ events: [] }));
+
+    const result = await beginDocument(
+      { request_summary: "x", document_id: candidate.id },
+      { state },
+    );
+    expect(result.match_confidence).toBe("explicit");
+    const reusedCall = fetchCalls().find((c) => c.url.includes("/reused"));
+    expect(reusedCall).toBeDefined();
+    expect((reusedCall?.body as Record<string, unknown>).band).toBe("explicit");
+  });
+
+  it("forwards usage to /usage on updateDocument when provided", async () => {
+    const state = createActiveDocumentState();
+    const doc = makeDoc();
+    state.documentId = doc.id;
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse({ events: [{ id: "e1", kind: "tokens.consumed", occurred_at: "2026-05-19T00:00:00Z" }] }));
+
+    const result = await updateDocument(
+      {
+        progress_note: "checked logs",
+        usage: { model_id: "claude-opus-4-7", input_tokens: 1000, output_tokens: 200 },
+      },
+      { state },
+    );
+    expect(result.metrics_events).toHaveLength(1);
+    expect(result.metrics_events[0].kind).toBe("tokens.consumed");
+    const usageCall = fetchCalls().find((c) => c.url.includes("/usage"));
+    expect(usageCall?.method).toBe("POST");
+    expect((usageCall?.body as Record<string, unknown>).model_id).toBe("claude-opus-4-7");
+  });
+
+  it("does not fetch /usage on updateDocument when no usage is supplied", async () => {
+    const state = createActiveDocumentState();
+    const doc = makeDoc();
+    state.documentId = doc.id;
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(doc));
+
+    const result = await updateDocument(
+      { progress_note: "checked logs" },
+      { state },
+    );
+    expect(result.metrics_events).toEqual([]);
+    expect(fetchCalls().some((c) => c.url.includes("/usage"))).toBe(false);
+  });
+
+  it("does not surface metrics failure to the tool caller", async () => {
+    const state = createActiveDocumentState();
+    const doc = makeDoc();
+    state.documentId = doc.id;
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse(doc))
+      .mockResolvedValueOnce(jsonResponse({ detail: "metrics unavailable" }, 500));
+
+    const result = await updateDocument(
+      {
+        progress_note: "still failed",
+        usage: { model_id: "claude-opus-4-7", input_tokens: 10 },
+      },
+      { state },
+    );
+    expect(result.metrics_events).toEqual([]);
+    expect(result.document_id).toBe(doc.id);
+  });
+});

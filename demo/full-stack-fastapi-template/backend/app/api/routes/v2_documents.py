@@ -7,6 +7,7 @@ from sqlmodel import select
 from app.api.deps import ActiveUser, CurrentUser, SessionDep
 from app.core.metrics import (
     record_document_created,
+    record_document_reused,
     record_document_updated,
     record_usage,
 )
@@ -26,6 +27,7 @@ from app.core.v2_documents import (
 from app.models import (
     MetricsEventPublic,
     MetricsUsageRecorded,
+    TaskforceReusePayload,
     TaskforceUsagePayload,
     User,
     V2Document,
@@ -465,6 +467,10 @@ def record_v2_document_usage(
     session.commit()
     for event in events:
         session.refresh(event)
+    return _build_usage_response(events)
+
+
+def _build_usage_response(events: list) -> MetricsUsageRecorded:  # type: ignore[type-arg]
     return MetricsUsageRecorded(
         events=[
             MetricsEventPublic(
@@ -480,3 +486,46 @@ def record_v2_document_usage(
             for event in events
         ]
     )
+
+
+@router.post(
+    "/{document_id}/reused",
+    response_model=MetricsUsageRecorded,
+    status_code=202,
+)
+def record_v2_document_reused(
+    session: SessionDep,
+    current_user: ActiveUser,
+    document_id: uuid.UUID,
+    payload: TaskforceReusePayload,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Record a reuse decision made by the MCP scoring engine.
+
+    Emits a document.reused event with score/band/reasons, plus a paired
+    tokens.saved.reuse event sized at the doc's bootstrap_tokens estimate.
+    If the agent also supplied a per-turn usage payload, the same events
+    that POST /usage produces are appended."""
+
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not can_update_v2_document(session, document, current_user, demo=demo):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have edit access to this document",
+        )
+    events = record_document_reused(
+        session,
+        user=current_user,
+        document=document,
+        score=payload.score,
+        band=payload.band,
+        reasons=payload.reasons,
+        usage=payload.usage,
+        is_demo=demo,
+    )
+    session.commit()
+    for event in events:
+        session.refresh(event)
+    return _build_usage_response(events)
