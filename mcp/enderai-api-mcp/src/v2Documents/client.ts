@@ -90,3 +90,65 @@ export async function patchV2Document(
   });
   return asJson<V2Document>(res);
 }
+
+export type TaskforceUsage = {
+  model_id: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  view_consulted?: "summary" | "details" | "both";
+  occurred_at?: string;
+};
+
+export type MetricsEventPublic = {
+  id: string;
+  kind: string;
+  occurred_at: string;
+  model_id?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  cache_read_tokens?: number | null;
+  usd_amount?: string | null;
+};
+
+export type MetricsUsageRecorded = {
+  events: MetricsEventPublic[];
+};
+
+export async function postV2DocumentUsage(
+  documentId: string,
+  usage: TaskforceUsage,
+  args: ClientArgs = {},
+): Promise<MetricsUsageRecorded> {
+  const res = await enderaiFetch({
+    method: "POST",
+    path: `/api/v1/v2/documents/${documentId}/usage`,
+    query: demoQuery(args.demo),
+    bearerToken: args.bearerToken,
+    json: usage,
+  });
+  return asJson<MetricsUsageRecorded>(res);
+}
+
+export type V2DocumentReusePayload = {
+  score?: number | null;
+  band?: "high" | "medium" | "low" | "explicit" | "forced-new" | null;
+  reasons?: string[];
+  usage?: TaskforceUsage;
+};
+
+export async function postV2DocumentReused(
+  documentId: string,
+  payload: V2DocumentReusePayload,
+  args: ClientArgs = {},
+): Promise<MetricsUsageRecorded> {
+  const res = await enderaiFetch({
+    method: "POST",
+    path: `/api/v1/v2/documents/${documentId}/reused`,
+    query: demoQuery(args.demo),
+    bearerToken: args.bearerToken,
+    json: payload,
+  });
+  return asJson<MetricsUsageRecorded>(res);
+}

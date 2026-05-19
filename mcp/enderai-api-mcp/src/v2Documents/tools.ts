@@ -2,7 +2,11 @@ import {
   createV2Document,
   listV2Documents,
   patchV2Document,
+  postV2DocumentReused,
+  postV2DocumentUsage,
   readV2Document,
+  type MetricsEventPublic,
+  type TaskforceUsage,
 } from "./client.js";
 import { decide, scoreCongruence } from "./scoring/engine.js";
 import type { CongruenceScore, Decision, ScoredCandidate } from "./scoring/types.js";
@@ -36,6 +40,13 @@ export type BeginDocumentArgs = {
   force_new?: boolean;
   visibility?: "private" | "organization";
   demo?: boolean;
+  /**
+   * Optional per-turn token usage reported by the agent. When the
+   * scoring engine decides to reuse an existing document, this is
+   * forwarded to ``POST /v2/documents/{id}/reused`` so the backend can
+   * emit a ``document.reused`` event plus any ``tokens.saved.*`` rows.
+   */
+  usage?: TaskforceUsage;
 };
 
 export type BeginDocumentResult = {
@@ -56,6 +67,13 @@ export type BeginDocumentResult = {
   }>;
   self_healed_fields: string[];
   agent_usage_note: string;
+  /**
+   * Metrics events recorded by the backend in response to this call.
+   * Populated on reuse paths (``document.reused`` + ``tokens.saved.reuse``,
+   * plus optional ``tokens.consumed`` when ``usage`` was supplied) and on
+   * create paths when ``usage`` was supplied. Empty otherwise.
+   */
+  metrics_events: MetricsEventPublic[];
 };
 
 export type UpdateDocumentArgs = {
@@ -76,6 +94,11 @@ export type UpdateDocumentArgs = {
   progress_note?: string;
   visibility?: "private" | "organization";
   demo?: boolean;
+  /**
+   * Optional per-turn token usage. When present, recorded via
+   * ``POST /v2/documents/{id}/usage`` after the PATCH commits.
+   */
+  usage?: TaskforceUsage;
 };
 
 export type UpdateDocumentResult = {
@@ -84,6 +107,7 @@ export type UpdateDocumentResult = {
   document_url_path: string;
   patched_fields: string[];
   agent_usage_note: string;
+  metrics_events: MetricsEventPublic[];
 };
 
 export type FinishDocumentArgs = {
@@ -94,6 +118,11 @@ export type FinishDocumentArgs = {
   status?: "done" | "paused" | "blocked" | "superseded";
   closing_note?: string;
   demo?: boolean;
+  /**
+   * Optional per-turn token usage. When present, recorded via
+   * ``POST /v2/documents/{id}/usage`` after the finalization PATCH.
+   */
+  usage?: TaskforceUsage;
 };
 
 export type FinishDocumentResult = {
@@ -102,6 +131,7 @@ export type FinishDocumentResult = {
   document_url_path: string;
   status: string;
   agent_usage_note: string;
+  metrics_events: MetricsEventPublic[];
 };
 
 const DEFAULT_TITLE = "Untitled work";
@@ -246,6 +276,43 @@ export type ToolEnv = {
   state: ActiveDocumentState;
 };
 
+type FetchArgs = { bearerToken?: string; demo?: boolean };
+
+async function forwardUsage(
+  documentId: string,
+  usage: TaskforceUsage | undefined,
+  fetchArgs: FetchArgs,
+): Promise<MetricsEventPublic[]> {
+  if (!usage) return [];
+  try {
+    const recorded = await postV2DocumentUsage(documentId, usage, fetchArgs);
+    return recorded.events;
+  } catch {
+    // Don't fail the user-facing tool call because metrics recording
+    // failed; metrics is auxiliary. The caller still gets a successful
+    // result with an empty metrics_events array.
+    return [];
+  }
+}
+
+async function forwardReuse(
+  documentId: string,
+  payload: {
+    score?: number | null;
+    band?: "high" | "medium" | "low" | "explicit" | "forced-new" | null;
+    reasons?: string[];
+    usage?: TaskforceUsage;
+  },
+  fetchArgs: FetchArgs,
+): Promise<MetricsEventPublic[]> {
+  try {
+    const recorded = await postV2DocumentReused(documentId, payload, fetchArgs);
+    return recorded.events;
+  } catch {
+    return [];
+  }
+}
+
 export async function beginDocument(
   args: BeginDocumentArgs,
   env: ToolEnv,
@@ -267,16 +334,23 @@ export async function beginDocument(
       title: working.title,
       demo: args.demo,
     });
+    const explicitReasons = [`Reused document ${working.id} by explicit document_id`];
+    const metricsEvents = await forwardReuse(
+      working.id,
+      { band: "explicit", reasons: explicitReasons, usage: args.usage },
+      fetchArgs,
+    );
     return {
       document_id: working.id,
       document_url_path: documentUrlPath(working.id),
       title: working.title,
       reused_existing: true,
       match_confidence: "explicit",
-      match_reasons: [`Reused document ${working.id} by explicit document_id`],
+      match_reasons: explicitReasons,
       candidate_summaries: [],
       self_healed_fields: heal.appliedFixes,
       agent_usage_note: agentUsageNote("reuse", working.title),
+      metrics_events: metricsEvents,
     };
   }
 
@@ -298,6 +372,7 @@ export async function beginDocument(
       title: created.title,
       demo: args.demo,
     });
+    const metricsEvents = await forwardUsage(created.id, args.usage, fetchArgs);
     return {
       document_id: created.id,
       document_url_path: documentUrlPath(created.id),
@@ -308,6 +383,7 @@ export async function beginDocument(
       candidate_summaries: [],
       self_healed_fields: [],
       agent_usage_note: agentUsageNote("create", created.title),
+      metrics_events: metricsEvents,
     };
   }
 
@@ -330,6 +406,17 @@ export async function beginDocument(
       title: working.title,
       demo: args.demo,
     });
+    const reuseReasons = [decision.reason, ...reasonsFromScore(decision.score)];
+    const metricsEvents = await forwardReuse(
+      working.id,
+      {
+        score: decision.score.total,
+        band: decision.score.band,
+        reasons: reuseReasons,
+        usage: args.usage,
+      },
+      fetchArgs,
+    );
     return {
       document_id: working.id,
       document_url_path: documentUrlPath(working.id),
@@ -337,10 +424,11 @@ export async function beginDocument(
       reused_existing: true,
       match_confidence: decision.score.band,
       match_total: decision.score.total,
-      match_reasons: [decision.reason, ...reasonsFromScore(decision.score)],
+      match_reasons: reuseReasons,
       candidate_summaries: summarizeCandidates(decision.candidates),
       self_healed_fields: heal.appliedFixes,
       agent_usage_note: agentUsageNote("reuse", working.title),
+      metrics_events: metricsEvents,
     };
   }
 
@@ -363,6 +451,7 @@ export async function beginDocument(
   });
   const matchConfidence: BeginDocumentResult["match_confidence"] =
     decision.candidates.length === 0 ? "low" : decision.score?.band ?? "low";
+  const createMetricsEvents = await forwardUsage(created.id, args.usage, fetchArgs);
   return {
     document_id: created.id,
     document_url_path: documentUrlPath(created.id),
@@ -374,6 +463,7 @@ export async function beginDocument(
     candidate_summaries: summarizeCandidates(decision.candidates),
     self_healed_fields: [],
     agent_usage_note: agentUsageNote("create", created.title),
+    metrics_events: createMetricsEvents,
   };
 }
 
@@ -551,12 +641,14 @@ export async function updateDocument(
 
   const next = await patchV2Document(documentId, patch, fetchArgs);
   touchActiveDocument(env.state);
+  const metricsEvents = await forwardUsage(next.id, args.usage, fetchArgs);
   return {
     document_id: next.id,
     title: next.title,
     document_url_path: documentUrlPath(next.id),
     patched_fields: patched,
     agent_usage_note: agentUsageNote("update", next.title),
+    metrics_events: metricsEvents,
   };
 }
 
@@ -630,6 +722,7 @@ export async function finishDocument(
     },
     fetchArgs,
   );
+  const metricsEvents = await forwardUsage(next.id, args.usage, fetchArgs);
   clearActiveDocument(env.state);
   return {
     document_id: next.id,
@@ -637,6 +730,7 @@ export async function finishDocument(
     document_url_path: documentUrlPath(next.id),
     status: args.status ?? "done",
     agent_usage_note: `Finalized "${next.title}". Re-run enderai_begin_document for the next unit of work.`,
+    metrics_events: metricsEvents,
   };
 }
 
