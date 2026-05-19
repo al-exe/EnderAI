@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
+from app.api.deps import CurrentUser, SessionDep, get_current_superuser
 from app.core import firebase_auth, security
 from app.core.config import settings
 from app.core.db import is_v2_enabled_identity
@@ -91,7 +91,6 @@ def _exchange_firebase_identity_for_user(
         email=email,
         full_name=full_name,
         firebase_uid=firebase_uid,
-        is_active=False,
         is_superuser=False,
         v2=is_v2_enabled_identity(email),
     )
@@ -214,8 +213,6 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
     if not user:
         # Don't reveal that the user doesn't exist - use same error as invalid token
         raise HTTPException(status_code=400, detail="Invalid token")
-    elif not user.is_active:
-        raise HTTPException(status_code=403, detail="Inactive users cannot write data")
     user_in_update = UserUpdate(password=body.new_password)
     crud.update_user(
         session=session,
@@ -227,7 +224,7 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
 
 @router.post(
     "/password-recovery-html-content/{email}",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_class=HTMLResponse,
 )
 def recover_password_html_content(email: str, session: SessionDep) -> Any:

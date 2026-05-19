@@ -35,12 +35,12 @@ def test_not_authenticate_user(db: Session) -> None:
     assert user is None
 
 
-def test_create_user_defaults_to_inactive(db: Session) -> None:
+def test_create_user_defaults_to_active_legacy_flag(db: Session) -> None:
     email = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=email, password=password)
     user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is False
+    assert user.is_active is True
 
 
 def test_create_user_defaults_to_v2_disabled(db: Session) -> None:
@@ -56,14 +56,6 @@ def test_v2_enabled_identity_only_matches_alexlee4190() -> None:
     assert is_v2_enabled_identity("alexlee4190@example.com") is True
     assert is_v2_enabled_identity("notalexlee4190@example.com") is False
     assert is_v2_enabled_identity("alex@example.com") is False
-
-
-def test_check_if_user_is_active_inactive(db: Session) -> None:
-    email = random_email()
-    password = random_lower_string()
-    user_in = UserCreate(email=email, password=password, is_active=False)
-    user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is False
 
 
 def test_check_if_user_is_superuser(db: Session) -> None:
@@ -120,7 +112,7 @@ def test_authenticate_user_with_bcrypt_upgrades_to_argon2(db: Session) -> None:
     assert bcrypt_hash.startswith("$2")  # bcrypt hashes start with $2
 
     # Create user with bcrypt hash directly in the database
-    user = User(email=email, hashed_password=bcrypt_hash, is_active=True)
+    user = User(email=email, hashed_password=bcrypt_hash)
     db.add(user)
     db.commit()
     db.refresh(user)

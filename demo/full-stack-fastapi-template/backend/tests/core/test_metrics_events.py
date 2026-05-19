@@ -37,7 +37,6 @@ def _utc(year: int, month: int, day: int) -> datetime:
 def user(db: Session) -> Generator[User, None, None]:
     user = User(
         email=random_email(),
-        is_active=True,
         hashed_password=get_password_hash(random_lower_string()),
         v2=True,
     )

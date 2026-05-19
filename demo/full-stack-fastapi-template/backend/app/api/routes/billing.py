@@ -105,8 +105,6 @@ def _apply_subscription_payload(
         user.stripe_subscription_id = subscription_id
     if isinstance(subscription_status, str):
         user.stripe_subscription_status = subscription_status
-        if subscription_status in ACTIVE_SUBSCRIPTION_STATUSES:
-            user.is_active = True
     user.stripe_subscription_current_period_end = get_subscription_period_end(
         subscription
     )
@@ -181,8 +179,6 @@ def _handle_invoice_event(
     if not user:
         return
     user.stripe_subscription_status = status_value
-    if status_value in ACTIVE_SUBSCRIPTION_STATUSES:
-        user.is_active = True
     session.add(user)
 
 

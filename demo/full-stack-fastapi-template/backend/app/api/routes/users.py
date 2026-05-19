@@ -7,10 +7,8 @@ from sqlmodel import func, select
 
 from app import crud
 from app.api.deps import (
-    ActiveUser,
     CurrentUser,
     SessionDep,
-    get_current_active_superuser,
     get_current_superuser,
 )
 from app.core import firebase_auth
@@ -82,9 +80,7 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     return UsersPublic(data=users, count=count)
 
 
-@router.post(
-    "/", dependencies=[Depends(get_current_active_superuser)], response_model=UserPublic
-)
+@router.post("/", dependencies=[Depends(get_current_superuser)], response_model=UserPublic)
 def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
     user = crud.get_user_by_email(session=session, email=user_in.email)
     if user:
@@ -115,7 +111,7 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
 
 @router.patch("/me", response_model=UserPublic)
 def update_user_me(
-    *, session: SessionDep, user_in: UserUpdateMe, current_user: ActiveUser
+    *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
 ) -> Any:
     if (
         current_user.firebase_uid
@@ -139,7 +135,7 @@ def update_user_me(
 
 @router.patch("/me/password", response_model=Message)
 def update_password_me(
-    *, session: SessionDep, body: UpdatePassword, current_user: ActiveUser
+    *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
 ) -> Any:
     if current_user.firebase_uid:
         raise HTTPException(status_code=400, detail="Password is managed by Firebase")
@@ -165,7 +161,7 @@ def read_user_me(current_user: CurrentUser) -> Any:
 
 
 @router.delete("/me", response_model=Message)
-def delete_user_me(session: SessionDep, current_user: ActiveUser) -> Any:
+def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     if current_user.is_superuser:
         raise HTTPException(
             status_code=403, detail="Super users are not allowed to delete themselves"
@@ -214,7 +210,7 @@ def read_user_by_id(
 
 @router.patch(
     "/{user_id}",
-    dependencies=[Depends(get_current_active_superuser)],
+    dependencies=[Depends(get_current_superuser)],
     response_model=UserPublic,
 )
 def update_user(*, session: SessionDep, user_id: uuid.UUID, user_in: UserUpdate) -> Any:
@@ -243,7 +239,7 @@ def update_user(*, session: SessionDep, user_id: uuid.UUID, user_in: UserUpdate)
     return db_user
 
 
-@router.delete("/{user_id}", dependencies=[Depends(get_current_active_superuser)])
+@router.delete("/{user_id}", dependencies=[Depends(get_current_superuser)])
 def delete_user(
     session: SessionDep, current_user: CurrentUser, user_id: uuid.UUID
 ) -> Message:

@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
-from app.api.deps import ActiveUser, CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.core.metrics import (
     record_document_created,
     record_document_reused,
@@ -52,11 +52,7 @@ router = APIRouter(prefix="/v2/documents", tags=["v2-documents"])
 def _maybe_seed_demo(
     session: SessionDep, current_user: CurrentUser, demo: bool
 ) -> None:
-    if (
-        demo
-        and current_user.is_active
-        and ensure_v2_documents_demo_seed(session, current_user)
-    ):
+    if demo and ensure_v2_documents_demo_seed(session, current_user):
         session.commit()
 
 
@@ -77,7 +73,7 @@ def _validate_folder_access(
     return folder
 
 
-def _require_document_owner(document: V2Document, current_user: ActiveUser) -> None:
+def _require_document_owner(document: V2Document, current_user: CurrentUser) -> None:
     if document.owner_id != current_user.id:
         raise HTTPException(
             status_code=403,
@@ -120,7 +116,7 @@ def read_v2_document_folders(
 @router.post("/folders/", response_model=V2DocumentFolderPublic, status_code=201)
 def create_v2_document_folder(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     folder_in: V2DocumentFolderCreate,
 ) -> Any:
     visibility = folder_in.visibility
@@ -149,7 +145,7 @@ def create_v2_document_folder(
 @router.patch("/folders/{folder_id}", response_model=V2DocumentFolderPublic)
 def update_v2_document_folder(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     folder_id: uuid.UUID,
     folder_in: V2DocumentFolderUpdate,
 ) -> Any:
@@ -189,7 +185,7 @@ def update_v2_document_folder(
 @router.delete("/folders/{folder_id}", status_code=204)
 def delete_v2_document_folder(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     folder_id: uuid.UUID,
 ) -> None:
     folder = get_v2_document_folder_for_actor(
@@ -216,7 +212,7 @@ def delete_v2_document_folder(
 @router.post("/", response_model=V2DocumentPublic, status_code=201)
 def create_v2_document(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     document_in: V2DocumentCreate,
     demo: bool = Query(default=False),
 ) -> Any:
@@ -305,7 +301,7 @@ def read_v2_document_shares(
 @router.put("/{document_id}/shares/", response_model=V2DocumentSharesPublic)
 def replace_v2_document_shares(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     document_id: uuid.UUID,
     shares_in: V2DocumentSharesUpdate,
 ) -> Any:
@@ -326,11 +322,10 @@ def replace_v2_document_shares(
             target is None
             or target.id == current_user.id
             or target.organization_id != current_user.organization_id
-            or not target.is_active
         ):
             raise HTTPException(
                 status_code=422,
-                detail="Documents can only be shared with active organization members",
+                detail="Documents can only be shared with organization members",
             )
         next_permissions[target.id] = assignment.permission
 
@@ -370,7 +365,7 @@ def replace_v2_document_shares(
 @router.patch("/{document_id}", response_model=V2DocumentPublic)
 def update_v2_document(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     document_id: uuid.UUID,
     document_in: V2DocumentUpdate,
     demo: bool = Query(default=False),
@@ -438,7 +433,7 @@ def update_v2_document(
 )
 def record_v2_document_usage(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     document_id: uuid.UUID,
     usage: TaskforceUsagePayload,
     demo: bool = Query(default=False),
@@ -495,7 +490,7 @@ def _build_usage_response(events: list) -> MetricsUsageRecorded:  # type: ignore
 )
 def record_v2_document_reused(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     document_id: uuid.UUID,
     payload: TaskforceReusePayload,
     demo: bool = Query(default=False),

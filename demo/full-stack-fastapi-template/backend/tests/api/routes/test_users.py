@@ -19,7 +19,6 @@ def test_get_users_superuser_me(
     r = client.get(f"{settings.API_V1_STR}/users/me", headers=superuser_token_headers)
     current_user = r.json()
     assert current_user
-    assert current_user["is_active"] is True
     assert current_user["is_superuser"]
     assert current_user["email"] == settings.FIRST_SUPERUSER
     assert current_user["v2"] is is_v2_enabled_identity(settings.FIRST_SUPERUSER)
@@ -31,7 +30,6 @@ def test_get_users_normal_user_me(
     r = client.get(f"{settings.API_V1_STR}/users/me", headers=normal_user_token_headers)
     current_user = r.json()
     assert current_user
-    assert current_user["is_active"] is True
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
     assert current_user["v2"] is False
@@ -99,7 +97,6 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     db.expire_all()
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
-    assert user.is_active is False
     assert user.v2 is False
     assert user.demo_seeded_at is not None
 
@@ -123,7 +120,7 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     assert len(demo_skills) >= 1
 
 
-def test_signup_user_can_read_but_cannot_write_until_activated(
+def test_signup_user_can_read_and_write(
     client: TestClient, db: Session
 ) -> None:
     email = random_email()
@@ -134,7 +131,6 @@ def test_signup_user_can_read_but_cannot_write_until_activated(
         json={"email": email, "password": password, "full_name": "Pending User"},
     )
     assert signup_res.status_code == 200, signup_res.text
-    assert signup_res.json()["is_active"] is False
 
     login_res = client.post(
         f"{settings.API_V1_STR}/login/access-token",
@@ -150,22 +146,22 @@ def test_signup_user_can_read_but_cannot_write_until_activated(
     update_res = client.patch(
         f"{settings.API_V1_STR}/users/me",
         headers=headers,
-        json={"full_name": "Blocked Update"},
+        json={"full_name": "Updated User"},
     )
-    assert update_res.status_code == 403
-    assert update_res.json() == {"detail": "Inactive users cannot write data"}
+    assert update_res.status_code == 200, update_res.text
+    assert update_res.json()["full_name"] == "Updated User"
 
     topic_res = client.post(
         f"{settings.API_V1_STR}/topics/",
         headers=headers,
-        json={"title": "Blocked pending user topic"},
+        json={"title": "Signed up user topic"},
     )
-    assert topic_res.status_code == 403
-    assert topic_res.json() == {"detail": "Inactive users cannot write data"}
+    assert topic_res.status_code == 201, topic_res.text
+    assert topic_res.json()["title"] == "Signed up user topic"
 
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
-    assert user.full_name == "Pending User"
+    assert user.full_name == "Updated User"
 
 
 def test_get_existing_user_as_superuser(
@@ -536,7 +532,7 @@ def test_update_user_email_exists(
 def test_delete_user_me(client: TestClient, db: Session) -> None:
     username = random_email()
     password = random_lower_string()
-    user_in = UserCreate(email=username, password=password, is_active=True)
+    user_in = UserCreate(email=username, password=password)
     user = crud.create_user(session=db, user_create=user_in)
     user_id = user.id
 

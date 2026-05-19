@@ -90,7 +90,7 @@ def test_subscription_webhook_updates_billing_state(
         session=db,
         user_create=UserCreate(email=random_email(), password=random_lower_string()),
     )
-    user.stripe_customer_id = "cus_test"
+    user.stripe_customer_id = "cus_subscription_test"
     db.add(user)
     db.commit()
 
@@ -100,7 +100,7 @@ def test_subscription_webhook_updates_billing_state(
             "data": {
                 "object": {
                     "id": "sub_test",
-                    "customer": "cus_test",
+                    "customer": "cus_subscription_test",
                     "status": "active",
                     "cancel_at_period_end": False,
                     "current_period_end": 1_800_000_000,
@@ -125,7 +125,6 @@ def test_subscription_webhook_updates_billing_state(
 
     assert response.status_code == 200, response.text
     db.refresh(user)
-    assert user.is_active is True
     assert user.stripe_subscription_id == "sub_test"
     assert user.stripe_subscription_status == "active"
     assert user.stripe_price_id == "price_test"

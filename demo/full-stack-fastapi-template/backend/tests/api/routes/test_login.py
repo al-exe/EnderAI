@@ -74,7 +74,6 @@ def test_exchange_firebase_token_creates_local_user(
     assert user.full_name == "Firebase User"
     assert user.firebase_uid == "firebase-new-user"
     assert user.hashed_password is None
-    assert user.is_active is False
     assert user.demo_seeded_at is not None
 
 
@@ -160,6 +159,7 @@ def test_recovery_password(
     with (
         patch("app.core.config.settings.SMTP_HOST", "smtp.example.com"),
         patch("app.core.config.settings.SMTP_USER", "admin@example.com"),
+        patch("app.core.config.settings.EMAILS_FROM_EMAIL", "admin@example.com"),
     ):
         email = "test@example.com"
         r = client.post(
@@ -223,7 +223,6 @@ def test_reset_password(client: TestClient, db: Session) -> None:
         email=email,
         full_name="Test User",
         password=password,
-        is_active=True,
         is_superuser=False,
     )
     user = create_user(session=db, user_create=user_create)
@@ -273,7 +272,7 @@ def test_login_with_bcrypt_password_upgrades_to_argon2(
     bcrypt_hash = bcrypt_hasher.hash(password)
     assert bcrypt_hash.startswith("$2")  # bcrypt hashes start with $2
 
-    user = User(email=email, hashed_password=bcrypt_hash, is_active=True)
+    user = User(email=email, hashed_password=bcrypt_hash)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -307,7 +306,7 @@ def test_login_with_argon2_password_keeps_hash(client: TestClient, db: Session) 
     assert argon2_hash.startswith("$argon2")
 
     # Create user with argon2 hash
-    user = User(email=email, hashed_password=argon2_hash, is_active=True)
+    user = User(email=email, hashed_password=argon2_hash)
     db.add(user)
     db.commit()
     db.refresh(user)

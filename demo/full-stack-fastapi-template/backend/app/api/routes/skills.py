@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.api.deps import ActiveUser, CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep
 from app.core.demo import ensure_demo_workspace
 from app.core.skills import (
     build_skill_public,
@@ -42,14 +42,10 @@ def _prepare_read_scope(
     demo: bool,
 ) -> uuid.UUID:
     owner_id = _owner_scope_id(current_user)
-    if current_user.is_active and demo and ensure_demo_workspace(session, current_user):
+    if demo and ensure_demo_workspace(session, current_user):
         session.commit()
         session.refresh(current_user)
-    claimed = (
-        claim_legacy_orphan_topics_for_owner(session, owner_id)
-        if current_user.is_active
-        else False
-    )
+    claimed = claim_legacy_orphan_topics_for_owner(session, owner_id)
     if claimed:
         session.commit()
     return owner_id
@@ -93,7 +89,7 @@ def read_skills(
 @router.post("/generate", response_model=SkillPublic, status_code=201)
 def generate_skill(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     request: SkillGenerateRequest,
     demo: bool = Query(default=False),
 ) -> Any:
@@ -150,7 +146,7 @@ def use_skill(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    if current_user.is_active and result.selected_skill is not None:
+    if result.selected_skill is not None:
         record_skill_usage(session, result.selected_skill.id, owner_id=owner_id)
         session.commit()
         refreshed = read_skill_model(
@@ -181,7 +177,7 @@ def read_skill(
 @router.post("/{skill_id}/refresh", response_model=SkillPublic)
 def refresh_skill(
     session: SessionDep,
-    current_user: ActiveUser,
+    current_user: CurrentUser,
     skill_id: uuid.UUID,
     demo: bool = Query(default=False),
 ) -> Any:
