@@ -43,6 +43,7 @@ def test_signup_creates_personal_org_with_admin_role(
     organization = client.get("/api/v1/organizations/me", headers=headers)
     assert organization.status_code == 200, organization.text
     assert organization.json()["id"] == str(user.organization_id)
+    assert organization.json()["invitations"] == []
     assert organization.json()["organization_role"] == "admin"
     assert [member["email"] for member in organization.json()["members"]] == [email]
 
@@ -75,6 +76,9 @@ def test_org_admin_can_invite_and_member_accepts_as_regular_member(
     assert pending.status_code == 200, pending.text
     assert pending.json()["count"] == 1
     assert pending.json()["data"][0]["id"] == invite.json()["id"]
+    assert pending.json()["data"][0]["organization_name"].startswith(
+        "Org Admin's Organization"
+    )
 
     accepted = client.post(
         f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",

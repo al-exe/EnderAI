@@ -104,6 +104,53 @@ def test_v2_documents_create_update_get(client: TestClient, db: Session) -> None
     assert empty_update.status_code == 422, empty_update.text
 
 
+def test_v2_document_folders_can_organize_documents(
+    client: TestClient, db: Session
+) -> None:
+    _, headers = _signup_and_activate(client, db)
+
+    folder = client.post(
+        "/api/v1/v2/documents/folders/",
+        headers=headers,
+        json={"name": "Customer incidents"},
+    )
+    assert folder.status_code == 201, folder.text
+    folder_id = folder.json()["id"]
+    assert folder.json()["visibility"] == "private"
+
+    folders = client.get("/api/v1/v2/documents/folders/", headers=headers)
+    assert folders.status_code == 200, folders.text
+    assert folders.json()["count"] == 1
+    assert folders.json()["data"][0]["name"] == "Customer incidents"
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=headers,
+        json={"title": "Filed document", "folder_id": folder_id},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    assert created.json()["folder_id"] == folder_id
+    assert created.json()["folder_name"] == "Customer incidents"
+
+    moved = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=headers,
+        json={"folder_id": None},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["folder_id"] is None
+    assert moved.json()["folder_name"] is None
+
+    renamed = client.patch(
+        f"/api/v1/v2/documents/folders/{folder_id}",
+        headers=headers,
+        json={"name": "Escalations"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Escalations"
+
+
 def test_v2_documents_are_scoped_to_owner(
     client: TestClient, db: Session
 ) -> None:
@@ -215,6 +262,154 @@ def test_v2_documents_can_be_shared_with_one_organization(
         json={"visibility": "private"},
     )
     assert visibility_patch.status_code == 403, visibility_patch.text
+
+
+def test_v2_document_can_be_shared_with_specific_org_member_as_editor(
+    client: TestClient,
+    db: Session,
+) -> None:
+    owner_email, owner_headers = _signup_and_activate(client, db)
+    member_email, member_headers = _signup_and_activate(client, db)
+
+    owner = crud.get_user_by_email(session=db, email=owner_email)
+    member = crud.get_user_by_email(session=db, email=member_email)
+    assert owner is not None
+    assert member is not None
+
+    invite = client.post(
+        "/api/v1/organizations/invitations",
+        headers=owner_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    db.refresh(member)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=owner_headers,
+        json={"title": "Member-specific draft"},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    assert created.json()["visibility"] == "private"
+
+    hidden = client.get(
+        f"/api/v1/v2/documents/{document_id}", headers=member_headers
+    )
+    assert hidden.status_code == 404, hidden.text
+
+    shares = client.put(
+        f"/api/v1/v2/documents/{document_id}/shares/",
+        headers=owner_headers,
+        json={"shares": [{"user_id": str(member.id), "permission": "editor"}]},
+    )
+    assert shares.status_code == 200, shares.text
+    assert shares.json()["count"] == 1
+    assert shares.json()["data"][0]["email"] == member_email
+    assert shares.json()["data"][0]["permission"] == "editor"
+
+    listed = client.get("/api/v1/v2/documents/", headers=member_headers)
+    assert listed.status_code == 200, listed.text
+    assert {doc["id"] for doc in listed.json()["data"]} == {document_id}
+    assert listed.json()["data"][0]["user_access"] == "editor"
+
+    member_patch = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=member_headers,
+        json={"human_summary": "Edited by an assigned member."},
+    )
+    assert member_patch.status_code == 200, member_patch.text
+    assert member_patch.json()["human_summary"] == "Edited by an assigned member."
+
+    member_visibility_patch = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=member_headers,
+        json={"visibility": "organization"},
+    )
+    assert member_visibility_patch.status_code == 403, member_visibility_patch.text
+
+
+def test_v2_document_viewer_share_is_read_only(
+    client: TestClient,
+    db: Session,
+) -> None:
+    owner_email, owner_headers = _signup_and_activate(client, db)
+    member_email, member_headers = _signup_and_activate(client, db)
+
+    owner = crud.get_user_by_email(session=db, email=owner_email)
+    member = crud.get_user_by_email(session=db, email=member_email)
+    assert owner is not None
+    assert member is not None
+
+    invite = client.post(
+        "/api/v1/organizations/invitations",
+        headers=owner_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    db.refresh(member)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=owner_headers,
+        json={"title": "Read-only member document"},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+
+    shares = client.put(
+        f"/api/v1/v2/documents/{document_id}/shares/",
+        headers=owner_headers,
+        json={"shares": [{"user_id": str(member.id), "permission": "viewer"}]},
+    )
+    assert shares.status_code == 200, shares.text
+
+    fetched = client.get(
+        f"/api/v1/v2/documents/{document_id}", headers=member_headers
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["user_access"] == "viewer"
+
+    blocked_patch = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=member_headers,
+        json={"human_summary": "Should not save."},
+    )
+    assert blocked_patch.status_code == 403, blocked_patch.text
+
+
+def test_v2_document_share_rejects_users_outside_owner_org(
+    client: TestClient,
+    db: Session,
+) -> None:
+    _, owner_headers = _signup_and_activate(client, db)
+    outsider_email, _ = _signup_and_activate(client, db)
+    outsider = crud.get_user_by_email(session=db, email=outsider_email)
+    assert outsider is not None
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=owner_headers,
+        json={"title": "Internal-only document"},
+    )
+    assert created.status_code == 201, created.text
+
+    blocked = client.put(
+        f"/api/v1/v2/documents/{created.json()['id']}/shares/",
+        headers=owner_headers,
+        json={"shares": [{"user_id": str(outsider.id), "permission": "editor"}]},
+    )
+    assert blocked.status_code == 422, blocked.text
 
 
 def test_v2_document_org_visibility_uses_current_user_org(

@@ -10,7 +10,11 @@ from sqlmodel import Session, col, select
 from app.models import (
     User,
     V2Document,
+    V2DocumentFolder,
+    V2DocumentFolderPublic,
     V2DocumentPublic,
+    V2DocumentShare,
+    V2DocumentSharePublic,
     V2DocumentUpdate,
     get_datetime_utc,
 )
@@ -1875,8 +1879,95 @@ DEMO_SEED: list[dict[str, Any]] = [
 ]
 
 
-def build_v2_document_public(document: V2Document) -> V2DocumentPublic:
-    return V2DocumentPublic.model_validate(document, from_attributes=True)
+def _share_public(session: Session, share: V2DocumentShare) -> V2DocumentSharePublic:
+    user = session.get(User, share.user_id)
+    return V2DocumentSharePublic(
+        id=share.id,
+        document_id=share.document_id,
+        user_id=share.user_id,
+        email=user.email if user else "unknown@example.com",
+        full_name=user.full_name if user else None,
+        permission=share.permission,  # type: ignore[arg-type]
+        created_at=share.created_at,
+        updated_at=share.updated_at,
+    )
+
+
+def list_v2_document_shares_public(
+    session: Session, document_id: uuid.UUID
+) -> list[V2DocumentSharePublic]:
+    shares = session.exec(
+        select(V2DocumentShare)
+        .where(V2DocumentShare.document_id == document_id)
+        .order_by(col(V2DocumentShare.updated_at).desc())
+    ).all()
+    return [_share_public(session, share) for share in shares]
+
+
+def resolve_v2_document_access(
+    session: Session, document: V2Document, actor: User, *, demo: bool
+) -> str | None:
+    if document.owner_id == actor.id:
+        return "owner"
+    if demo:
+        return None
+    if (
+        document.visibility == "organization"
+        and actor.organization_id is not None
+        and document.organization_id == actor.organization_id
+    ):
+        return "editor"
+    share = session.exec(
+        select(V2DocumentShare)
+        .where(V2DocumentShare.document_id == document.id)
+        .where(V2DocumentShare.user_id == actor.id)
+    ).first()
+    if share:
+        return share.permission
+    return None
+
+
+def can_update_v2_document(
+    session: Session, document: V2Document, actor: User, *, demo: bool
+) -> bool:
+    return resolve_v2_document_access(session, document, actor, demo=demo) in {
+        "owner",
+        "editor",
+    }
+
+
+def build_v2_document_public(
+    document: V2Document,
+    *,
+    session: Session | None = None,
+    actor: User | None = None,
+    demo: bool = False,
+) -> V2DocumentPublic:
+    folder_name: str | None = None
+    shared_with: list[V2DocumentSharePublic] = []
+    user_access = "owner"
+    if session is not None:
+        if document.folder_id is not None:
+            folder = session.get(V2DocumentFolder, document.folder_id)
+            folder_name = folder.name if folder else None
+        shared_with = list_v2_document_shares_public(session, document.id)
+        if actor is not None:
+            user_access = (
+                resolve_v2_document_access(session, document, actor, demo=demo)
+                or "viewer"
+            )
+
+    payload = document.model_dump()
+    payload["folder_name"] = folder_name
+    payload["shared_with"] = shared_with
+    payload["user_access"] = user_access
+    return V2DocumentPublic.model_validate(payload)
+
+
+def build_v2_document_folder_public(
+    folder: V2DocumentFolder,
+) -> V2DocumentFolderPublic:
+    return V2DocumentFolderPublic.model_validate(folder, from_attributes=True)
 
 
 def list_v2_documents_for_owner(
@@ -1895,14 +1986,36 @@ def list_v2_documents_for_actor(
     session: Session, actor: User, *, demo: bool
 ) -> list[V2Document]:
     if demo or actor.organization_id is None:
-        return list_v2_documents_for_owner(session, actor.id, demo=demo)
+        if demo:
+            return list_v2_documents_for_owner(session, actor.id, demo=demo)
+        shared_document_ids = select(V2DocumentShare.document_id).where(
+            V2DocumentShare.user_id == actor.id
+        )
+        statement = (
+            select(V2Document)
+            .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
+            .where(
+                or_(
+                    V2Document.owner_id == actor.id,
+                    col(V2Document.id).in_(shared_document_ids),
+                )
+            )
+            .order_by(
+                col(V2Document.updated_at).desc(), col(V2Document.created_at).desc()
+            )
+        )
+        return list(session.exec(statement).all())
 
+    shared_document_ids = select(V2DocumentShare.document_id).where(
+        V2DocumentShare.user_id == actor.id
+    )
     statement = (
         select(V2Document)
         .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
         .where(
             or_(
                 V2Document.owner_id == actor.id,
+                col(V2Document.id).in_(shared_document_ids),
                 and_(
                     V2Document.visibility == "organization",
                     V2Document.organization_id == actor.organization_id,
@@ -1929,14 +2042,33 @@ def get_v2_document_for_actor(
     session: Session, actor: User, document_id: uuid.UUID, *, demo: bool
 ) -> V2Document | None:
     if demo or actor.organization_id is None:
+        if demo:
+            statement = (
+                select(V2Document)
+                .where(V2Document.id == document_id)
+                .where(V2Document.owner_id == actor.id)
+                .where(V2Document.is_demo.is_(demo))  # type: ignore[union-attr]
+            )
+            return session.exec(statement).first()
+        shared_document_ids = select(V2DocumentShare.document_id).where(
+            V2DocumentShare.user_id == actor.id
+        )
         statement = (
             select(V2Document)
             .where(V2Document.id == document_id)
-            .where(V2Document.owner_id == actor.id)
-            .where(V2Document.is_demo.is_(demo))  # type: ignore[union-attr]
+            .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
+            .where(
+                or_(
+                    V2Document.owner_id == actor.id,
+                    col(V2Document.id).in_(shared_document_ids),
+                )
+            )
         )
         return session.exec(statement).first()
 
+    shared_document_ids = select(V2DocumentShare.document_id).where(
+        V2DocumentShare.user_id == actor.id
+    )
     statement = (
         select(V2Document)
         .where(V2Document.id == document_id)
@@ -1944,6 +2076,7 @@ def get_v2_document_for_actor(
         .where(
             or_(
                 V2Document.owner_id == actor.id,
+                col(V2Document.id).in_(shared_document_ids),
                 and_(
                     V2Document.visibility == "organization",
                     V2Document.organization_id == actor.organization_id,
@@ -1951,6 +2084,55 @@ def get_v2_document_for_actor(
             )
         )
     )
+    return session.exec(statement).first()
+
+
+def list_v2_document_folders_for_actor(
+    session: Session, actor: User, *, demo: bool
+) -> list[V2DocumentFolder]:
+    if demo:
+        return []
+    if actor.organization_id is None:
+        statement = (
+            select(V2DocumentFolder)
+            .where(V2DocumentFolder.owner_id == actor.id)
+            .order_by(col(V2DocumentFolder.name).asc())
+        )
+        return list(session.exec(statement).all())
+    statement = (
+        select(V2DocumentFolder)
+        .where(
+            or_(
+                V2DocumentFolder.owner_id == actor.id,
+                and_(
+                    V2DocumentFolder.visibility == "organization",
+                    V2DocumentFolder.organization_id == actor.organization_id,
+                ),
+            )
+        )
+        .order_by(col(V2DocumentFolder.name).asc())
+    )
+    return list(session.exec(statement).all())
+
+
+def get_v2_document_folder_for_actor(
+    session: Session, actor: User, folder_id: uuid.UUID, *, demo: bool
+) -> V2DocumentFolder | None:
+    if demo:
+        return None
+    statement = select(V2DocumentFolder).where(V2DocumentFolder.id == folder_id)
+    if actor.organization_id is None:
+        statement = statement.where(V2DocumentFolder.owner_id == actor.id)
+    else:
+        statement = statement.where(
+            or_(
+                V2DocumentFolder.owner_id == actor.id,
+                and_(
+                    V2DocumentFolder.visibility == "organization",
+                    V2DocumentFolder.organization_id == actor.organization_id,
+                ),
+            )
+        )
     return session.exec(statement).first()
 
 
