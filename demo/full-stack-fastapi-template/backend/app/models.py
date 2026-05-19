@@ -927,6 +927,8 @@ class V2Document(SQLModel, table=True):
         default_factory=list,
         sa_type=JSONB,  # type: ignore[arg-type]
     )
+    summary_tokens: int = Field(default=0, nullable=False)
+    details_tokens: int = Field(default=0, nullable=False)
     is_demo: bool = Field(default=False, index=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
@@ -949,6 +951,9 @@ class V2DocumentCreate(SQLModel):
     )
     visibility: Literal["private", "organization"] = "private"
     folder_id: uuid.UUID | None = None
+    # Optional usage payload — when present, the create handler records a
+    # paired tokens.consumed (and any tokens.saved.*) metrics events.
+    usage: "TaskforceUsagePayload | None" = None
 
 
 class V2DocumentUpdate(SQLModel):
@@ -962,6 +967,8 @@ class V2DocumentUpdate(SQLModel):
     details_markdown_sections: list[V2DocumentDetailsSection] | None = None
     visibility: Literal["private", "organization"] | None = None
     folder_id: uuid.UUID | None = None
+    # Optional usage payload — same semantics as V2DocumentCreate.usage.
+    usage: "TaskforceUsagePayload | None" = None
 
 
 class V2DocumentFolderCreate(SQLModel):
@@ -1201,3 +1208,57 @@ class MetricsDailyRollup(SQLModel, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
+
+
+# Event kinds emitted into metrics_event.kind. Kept as module-level constants
+# rather than a StrEnum so the values are stable in jsonb payloads and easy
+# to grep.
+METRICS_EVENT_DOCUMENT_CREATED = "document.created"
+METRICS_EVENT_DOCUMENT_UPDATED = "document.updated"
+METRICS_EVENT_DOCUMENT_REUSED = "document.reused"
+METRICS_EVENT_DOCUMENT_FINISHED = "document.finished"
+METRICS_EVENT_TOKENS_CONSUMED = "tokens.consumed"
+METRICS_EVENT_TOKENS_SAVED_CACHE = "tokens.saved.cache"
+METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY = "tokens.saved.summary_only"
+METRICS_EVENT_TOKENS_SAVED_REUSE = "tokens.saved.reuse"
+
+
+class TaskforceUsagePayload(SQLModel):
+    """Per-turn token usage reported by the agent.
+
+    Mirrors the shape returned by the Anthropic SDK's ``message.usage``.
+    All token counts default to 0 so partial reports (e.g. cache only) are
+    expressible without filling every field.
+    """
+
+    model_id: str = Field(min_length=1, max_length=128)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    cache_read_input_tokens: int = Field(default=0, ge=0)
+    cache_creation_input_tokens: int = Field(default=0, ge=0)
+    view_consulted: Literal["summary", "details", "both"] | None = None
+    occurred_at: datetime | None = None
+
+
+class MetricsEventPublic(SQLModel):
+    """Response shape returned by the /usage endpoint."""
+
+    id: uuid.UUID
+    kind: str
+    occurred_at: datetime
+    model_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    usd_amount: Decimal | None = None
+
+
+class MetricsUsageRecorded(SQLModel):
+    """Envelope returned by POST /v2/documents/{id}/usage.
+
+    Lists every event the call produced — typically one ``tokens.consumed``
+    plus zero or more ``tokens.saved.*`` rows, depending on which savings
+    sources fired.
+    """
+
+    events: list[MetricsEventPublic]

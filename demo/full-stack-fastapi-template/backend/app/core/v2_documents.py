@@ -2139,12 +2139,35 @@ def get_v2_document_folder_for_actor(
 def apply_v2_document_update(document: V2Document, update: V2DocumentUpdate) -> bool:
     """Apply non-null fields of update to document. Returns True if anything changed."""
     payload = update.model_dump(mode="json", exclude_unset=True)
+    # ``usage`` is metrics metadata, not document state; the caller records it
+    # separately. Strip it before the setattr sweep.
+    payload.pop("usage", None)
     if not payload:
         return False
     for field, value in payload.items():
         setattr(document, field, value)
+    refresh_v2_document_token_counts(document)
     document.updated_at = get_datetime_utc()
     return True
+
+
+def refresh_v2_document_token_counts(document: V2Document) -> None:
+    """Recompute summary_tokens / details_tokens from the doc's current state.
+
+    Idempotent and cheap (char-based heuristic). Called after mutation so
+    the metrics engine's reuse-savings estimator (plan §2.2 source 3) has
+    fresh inputs without an extra scan.
+    """
+
+    from app.core.metrics import (
+        count_details_sections_tokens,
+        count_paragraph_tokens,
+    )
+
+    document.summary_tokens = count_paragraph_tokens(document.main_body)
+    document.details_tokens = count_details_sections_tokens(
+        document.details_markdown_sections
+    )
 
 
 def ensure_v2_documents_demo_seed(session: Session, user: User) -> bool:
