@@ -5,6 +5,11 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select
 
 from app.api.deps import ActiveUser, CurrentUser, SessionDep
+from app.core.metrics import (
+    record_document_created,
+    record_document_updated,
+    record_usage,
+)
 from app.core.v2_documents import (
     apply_v2_document_update,
     build_v2_document_folder_public,
@@ -16,8 +21,12 @@ from app.core.v2_documents import (
     list_v2_document_folders_for_actor,
     list_v2_document_shares_public,
     list_v2_documents_for_actor,
+    refresh_v2_document_token_counts,
 )
 from app.models import (
+    MetricsEventPublic,
+    MetricsUsageRecorded,
+    TaskforceUsagePayload,
     User,
     V2Document,
     V2DocumentCreate,
@@ -240,7 +249,16 @@ def create_v2_document(
         created_at=now,
         updated_at=now,
     )
+    refresh_v2_document_token_counts(document)
     session.add(document)
+    session.flush()
+    record_document_created(
+        session,
+        user=current_user,
+        document=document,
+        usage=document_in.usage,
+        is_demo=demo,
+    )
     session.commit()
     session.refresh(document)
     return build_v2_document_public(
@@ -256,9 +274,7 @@ def read_v2_document(
     demo: bool = Query(default=False),
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
-    document = get_v2_document_for_actor(
-        session, current_user, document_id, demo=demo
-    )
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return build_v2_document_public(
@@ -272,9 +288,7 @@ def read_v2_document_shares(
     current_user: CurrentUser,
     document_id: uuid.UUID,
 ) -> Any:
-    document = get_v2_document_for_actor(
-        session, current_user, document_id, demo=False
-    )
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=False)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     if document.owner_id != current_user.id:
@@ -293,9 +307,7 @@ def replace_v2_document_shares(
     document_id: uuid.UUID,
     shares_in: V2DocumentSharesUpdate,
 ) -> Any:
-    document = get_v2_document_for_actor(
-        session, current_user, document_id, demo=False
-    )
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=False)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     _require_document_owner(document, current_user)
@@ -362,9 +374,7 @@ def update_v2_document(
     demo: bool = Query(default=False),
 ) -> Any:
     _maybe_seed_demo(session, current_user, demo)
-    document = get_v2_document_for_actor(
-        session, current_user, document_id, demo=demo
-    )
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
     if not can_update_v2_document(session, document, current_user, demo=demo):
@@ -387,10 +397,86 @@ def update_v2_document(
         _require_document_owner(document, current_user)
         _validate_folder_access(session, current_user, document_in.folder_id, demo=demo)
     if not apply_v2_document_update(document, document_in):
+        if document_in.usage is not None:
+            # Allow callers to PATCH purely to record usage. We still need the
+            # primary document.updated event so the read path sees activity.
+            record_document_updated(
+                session,
+                user=current_user,
+                document=document,
+                usage=document_in.usage,
+                is_demo=demo,
+            )
+            session.commit()
+            session.refresh(document)
+            return build_v2_document_public(
+                document, session=session, actor=current_user, demo=demo
+            )
         raise HTTPException(status_code=422, detail="No fields to update")
     session.add(document)
+    session.flush()
+    record_document_updated(
+        session,
+        user=current_user,
+        document=document,
+        usage=document_in.usage,
+        is_demo=demo,
+    )
     session.commit()
     session.refresh(document)
     return build_v2_document_public(
         document, session=session, actor=current_user, demo=demo
+    )
+
+
+@router.post(
+    "/{document_id}/usage",
+    response_model=MetricsUsageRecorded,
+    status_code=202,
+)
+def record_v2_document_usage(
+    session: SessionDep,
+    current_user: ActiveUser,
+    document_id: uuid.UUID,
+    usage: TaskforceUsagePayload,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Record a Taskforce usage event without mutating the document body.
+
+    Useful for the MCP layer to fire after every agent turn. Emits a
+    tokens.consumed event plus any tokens.saved.* events the savings
+    sources fired."""
+
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not can_update_v2_document(session, document, current_user, demo=demo):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have edit access to this document",
+        )
+    events = record_usage(
+        session,
+        user=current_user,
+        document=document,
+        usage=usage,
+        is_demo=demo,
+    )
+    session.commit()
+    for event in events:
+        session.refresh(event)
+    return MetricsUsageRecorded(
+        events=[
+            MetricsEventPublic(
+                id=event.id,
+                kind=event.kind,
+                occurred_at=event.occurred_at,
+                model_id=event.model_id,
+                input_tokens=event.input_tokens,
+                output_tokens=event.output_tokens,
+                cache_read_tokens=event.cache_read_tokens,
+                usd_amount=event.usd_amount,
+            )
+            for event in events
+        ]
     )
