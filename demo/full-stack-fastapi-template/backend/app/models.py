@@ -1,9 +1,10 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime, UniqueConstraint
+from sqlalchemy import DateTime, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -1064,3 +1065,139 @@ class FirebaseTokenExchange(SQLModel):
 class NewPassword(SQLModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+
+# ----- Taskforce Metrics ----------------------------------------------------
+#
+# Append-only event log + read-side daily rollup + versioned model-pricing
+# catalog. See docs/taskforce-metrics-engine-plan.md for the full design.
+# Phase 1 ships only the tables, seed catalog, and pricing-lookup helper —
+# no endpoints, no emitters, no rollup job yet.
+
+
+class ModelPricing(SQLModel, table=True):
+    """Versioned pricing snapshot. Every metrics_event with a USD figure FKs
+    here so historical dollar values stay reproducible across price changes."""
+
+    __tablename__ = "model_pricing"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_id",
+            "effective_from",
+            name="uq_model_pricing_model_effective_from",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    provider: str = Field(min_length=1, max_length=64, index=True)
+    model_id: str = Field(min_length=1, max_length=128, index=True)
+    effective_from: datetime = Field(
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    effective_to: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    currency: str = Field(default="USD", min_length=3, max_length=8)
+    input_per_mtok: Decimal = Field(sa_type=Numeric(10, 4))  # type: ignore
+    output_per_mtok: Decimal = Field(sa_type=Numeric(10, 4))  # type: ignore
+    cache_read_per_mtok: Decimal | None = Field(
+        default=None,
+        sa_type=Numeric(10, 4),  # type: ignore
+    )
+    cache_write_5m_per_mtok: Decimal | None = Field(
+        default=None,
+        sa_type=Numeric(10, 4),  # type: ignore
+    )
+    cache_write_1h_per_mtok: Decimal | None = Field(
+        default=None,
+        sa_type=Numeric(10, 4),  # type: ignore
+    )
+    batch_discount: Decimal | None = Field(
+        default=None,
+        sa_type=Numeric(4, 3),  # type: ignore
+    )
+    source_url: str | None = Field(default=None, max_length=512)
+    recorded_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class MetricsEvent(SQLModel, table=True):
+    """Append-only Taskforce metrics event. Per-kind extras live in `payload`."""
+
+    __tablename__ = "metrics_event"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    occurred_at: datetime = Field(
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, index=True, ondelete="CASCADE"
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    document_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="v2_document.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    kind: str = Field(min_length=1, max_length=64, index=True)
+    model_id: str | None = Field(default=None, max_length=128)
+    pricing_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="model_pricing.id",
+        ondelete="SET NULL",
+    )
+    input_tokens: int | None = Field(default=None)
+    output_tokens: int | None = Field(default=None)
+    cache_read_tokens: int | None = Field(default=None)
+    cache_write_tokens: int | None = Field(default=None)
+    usd_amount: Decimal | None = Field(
+        default=None,
+        sa_type=Numeric(12, 6),  # type: ignore
+    )
+    is_demo: bool = Field(default=False, nullable=False, index=True)
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class MetricsDailyRollup(SQLModel, table=True):
+    """Daily rollup, keyed (day, user, is_demo, metric_name). Read path."""
+
+    __tablename__ = "metrics_daily_rollup"
+
+    day: date = Field(primary_key=True)
+    user_id: uuid.UUID = Field(
+        primary_key=True,
+        foreign_key="user.id",
+        ondelete="CASCADE",
+    )
+    is_demo: bool = Field(primary_key=True, default=False)
+    metric_name: str = Field(primary_key=True, min_length=1, max_length=64)
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    value_num: Decimal = Field(sa_type=Numeric(20, 6))  # type: ignore
+    value_count: int = Field(default=0)
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
