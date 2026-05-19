@@ -1277,3 +1277,58 @@ class TaskforceReusePayload(SQLModel):
     band: Literal["high", "medium", "low", "explicit", "forced-new"] | None = None
     reasons: list[str] = Field(default_factory=list)
     usage: TaskforceUsagePayload | None = None
+
+
+# ----- Metrics read-side public shapes -------------------------------------
+
+
+class MetricPresentationPublic(SQLModel):
+    format: Literal["compact-int", "usd", "ratio", "count"] = "compact-int"
+    trend: bool = True
+    icon: str | None = None
+
+
+class MetricDefinitionPublic(SQLModel):
+    name: str
+    display_name: str
+    unit: Literal["tokens", "usd", "count", "ratio"]
+    description: str
+    presentation: MetricPresentationPublic
+
+
+class MetricDefinitionsResponse(SQLModel):
+    data: list[MetricDefinitionPublic]
+
+
+class MetricSeriesPoint(SQLModel):
+    day: date
+    value: Decimal
+
+
+class MetricBreakdownEntry(SQLModel):
+    key: str
+    label: str
+    tokens: int = 0
+    usd: Decimal = Decimal(0)
+
+
+class MetricValuePublic(SQLModel):
+    """Per-metric envelope in the metrics response."""
+
+    total: Decimal
+    delta_vs_prev_window: Decimal | None = None
+    series: list[MetricSeriesPoint] = Field(default_factory=list)
+    breakdown_by_source: list[MetricBreakdownEntry] | None = None
+    top_models: list[MetricBreakdownEntry] | None = None
+
+
+class MetricsResponse(SQLModel):
+    window: Literal["7d", "30d", "all"]
+    from_: datetime | None = Field(default=None, alias="from")
+    to: datetime
+    scope: Literal["personal", "organization"] = "personal"
+    is_demo: bool = False
+    metrics: dict[str, MetricValuePublic] = Field(default_factory=dict)
+
+    class Config:
+        populate_by_name = True
