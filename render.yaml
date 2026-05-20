@@ -1,0 +1,144 @@
+# EnderAI Render Blueprint.
+#
+# This file is the source of truth for both Render services. After
+# committing changes here, click "Sync" on the Blueprint page in the
+# Render dashboard (or run "Manual Deploy" on the specific service)
+# for the new config to take effect. Subsequent merges to `main` then
+# trigger autoDeploy for the matched service.
+#
+# Why we have this:
+#   - The MCP service's auto-deploy was silently failing after PR #48
+#     because the dashboard-only config didn't watch mcp/. With a
+#     blueprint we get explicit rootDir + autoDeploy + buildCommand,
+#     so future MCP changes propagate without dashboard babysitting.
+#   - The API service needs pgvector + the new search dependencies
+#     installed at build time. The Dockerfile already pulls from
+#     uv.lock, so as long as render.yaml points to it, deploys stay
+#     reproducible.
+#
+# Secrets (POSTGRES_PASSWORD, STRIPE_SECRET_KEY, OPENAI_API_KEY, ...)
+# stay in the Render dashboard. They're declared with `sync: false`
+# below so the blueprint doesn't overwrite them on sync.
+
+services:
+  # -----------------------------------------------------------------
+  # Backend API (FastAPI, Python, Docker)
+  # -----------------------------------------------------------------
+  - type: web
+    name: enderai-backend
+    runtime: docker
+    rootDir: demo/full-stack-fastapi-template/backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: standard
+    region: oregon
+    healthCheckPath: /api/v1/utils/health-check/
+    autoDeploy: true
+    envVars:
+      # Non-secret config — safe to keep in the blueprint.
+      - key: PROJECT_NAME
+        value: EnderAI
+      - key: ENVIRONMENT
+        value: production
+      - key: BACKEND_CORS_ORIGINS
+        value: https://enderai.xyz,https://www.enderai.xyz
+      - key: FRONTEND_HOST
+        value: https://www.enderai.xyz
+      - key: STRIPE_API_BASE_URL
+        value: https://api.stripe.com
+      - key: SEARCH_EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: SEARCH_ANSWER_MODEL
+        value: claude-sonnet-4-6
+      - key: SEARCH_INDEX_SWEEP_INTERVAL_SECONDS
+        value: "30"
+      - key: SEARCH_INDEX_BATCH_SIZE
+        value: "50"
+      # Secrets — set via the dashboard, blueprint never overwrites.
+      - key: SECRET_KEY
+        sync: false
+      - key: POSTGRES_SERVER
+        sync: false
+      - key: POSTGRES_PORT
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_DB
+        sync: false
+      - key: FIRST_SUPERUSER
+        sync: false
+      - key: FIRST_SUPERUSER_PASSWORD
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: EMAILS_FROM_EMAIL
+        sync: false
+      # Stripe billing.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: STRIPE_PRICE_ID_PRO
+        sync: false
+      - key: STRIPE_PRICE_ID_MAX
+        sync: false
+      # Firebase auth.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # Managed LLM + BYOK encryption.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BYOK_ENCRYPTION_KEY
+        sync: false
+
+  # -----------------------------------------------------------------
+  # MCP server (Node, TypeScript)
+  # -----------------------------------------------------------------
+  - type: web
+    name: enderai-mcp
+    runtime: node
+    rootDir: mcp/enderai-api-mcp
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:http
+    plan: starter
+    region: oregon
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: MCP_PATH
+        value: /mcp
+      # Points the MCP at the API service. Use the public URL because
+      # the MCP currently authenticates via the user's MCP token and
+      # the backend exposes /api/v1/v2/* endpoints we re-call.
+      - key: ENDERAI_BASE_URL
+        value: https://enderai-backend.onrender.com
+      # Render injects PORT automatically — the MCP's httpServer.ts
+      # already reads process.env.PORT (defaults to 8080), so no
+      # override needed here.
+
+# -------------------------------------------------------------------
+# Notes on the V2 Search migration's pgvector dependency:
+#
+#   The alembic migration a1b2c3d4e5f6 runs `CREATE EXTENSION IF NOT
+#   EXISTS vector;` against the prod database. The Postgres role used
+#   by the API service needs CREATE privilege for this to succeed.
+#   On Render Postgres the default role already has CREATE, but if
+#   alembic fails on the next deploy with "extension … must be
+#   installed by superuser," ask Render support to flip the bit (or
+#   create the extension manually from the Render web shell).
+# -------------------------------------------------------------------
