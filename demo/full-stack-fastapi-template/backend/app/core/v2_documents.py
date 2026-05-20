@@ -2143,7 +2143,8 @@ def get_v2_document_folder_for_actor(
 
 def apply_v2_document_update(document: V2Document, update: V2DocumentUpdate) -> bool:
     """Apply non-null fields of update to document. Returns True if anything changed."""
-    payload = update.model_dump(mode="json", exclude_unset=True)
+    fields_set = update.model_fields_set
+    payload = update.model_dump(exclude_unset=True)
     # ``usage`` is metrics metadata, not document state; the caller records it
     # separately. Strip it before the setattr sweep.
     payload.pop("usage", None)
@@ -2152,7 +2153,9 @@ def apply_v2_document_update(document: V2Document, update: V2DocumentUpdate) -> 
     for field, value in payload.items():
         setattr(document, field, value)
     refresh_v2_document_token_counts(document)
-    document.updated_at = get_datetime_utc()
+    # If the caller explicitly set updated_at, trust it; otherwise stamp now.
+    if "updated_at" not in fields_set:
+        document.updated_at = get_datetime_utc()
     return True
 
 
