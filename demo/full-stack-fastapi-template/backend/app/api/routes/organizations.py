@@ -33,7 +33,9 @@ def _normalized_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _get_organization_or_404(session: SessionDep, organization_id: uuid.UUID) -> Organization:
+def _get_organization_or_404(
+    session: SessionDep, organization_id: uuid.UUID
+) -> Organization:
     organization = session.get(Organization, organization_id)
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
@@ -128,9 +130,7 @@ def _count_admins(session: SessionDep, organization_id: uuid.UUID) -> int:
 def read_my_organization(session: SessionDep, current_user: CurrentUser) -> Any:
     organization = _require_current_organization(session, current_user)
     members = session.exec(
-        select(User)
-        .where(User.organization_id == organization.id)
-        .order_by(User.email)
+        select(User).where(User.organization_id == organization.id).order_by(User.email)
     ).all()
     invitations = _pending_invites_for_org(session, organization.id)
     return OrganizationMePublic(
@@ -144,6 +144,29 @@ def read_my_organization(session: SessionDep, current_user: CurrentUser) -> Any:
             _invitation_public(session, invitation) for invitation in invitations
         ],
     )
+
+
+@router.patch(
+    "/me",
+    response_model=OrganizationMePublic,
+)
+def update_my_organization(
+    *,
+    session: SessionDep,
+    organization_in: OrganizationUpdate,
+    current_user: CurrentUser,
+) -> Any:
+    organization = _require_current_org_admin(session, current_user)
+    update = organization_in.model_dump(exclude_unset=True)
+    if "name" in update:
+        name = update["name"].strip()
+        _ensure_unique_name(session, name, organization_id=organization.id)
+        organization.name = name
+    organization.updated_at = get_datetime_utc()
+    session.add(organization)
+    session.commit()
+    session.refresh(organization)
+    return read_my_organization(session, current_user)
 
 
 @router.post(
@@ -205,9 +228,7 @@ def read_my_organization_invitations(
         .order_by(OrganizationInvitation.created_at.desc())
     ).all()
     return OrganizationInvitationsPublic(
-        data=[
-            _invitation_public(session, invitation) for invitation in invitations
-        ],
+        data=[_invitation_public(session, invitation) for invitation in invitations],
         count=len(invitations),
     )
 
@@ -275,6 +296,39 @@ def update_organization_member(
     session.commit()
     session.refresh(member)
     return _member_public(member)
+
+
+@router.delete("/members/{user_id}", status_code=204)
+def remove_organization_member(
+    *,
+    session: SessionDep,
+    user_id: uuid.UUID,
+    current_user: CurrentUser,
+) -> None:
+    organization = _require_current_org_admin(session, current_user)
+    member = session.get(User, user_id)
+    if not member or member.organization_id != organization.id:
+        raise HTTPException(status_code=404, detail="Organization member not found")
+
+    if member.id == current_user.id:
+        raise HTTPException(
+            status_code=422,
+            detail="Organization admins cannot remove themselves",
+        )
+
+    if (
+        member.organization_role == "admin"
+        and _count_admins(session, organization.id) <= 1
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Organization must have at least one admin",
+        )
+
+    member.organization_id = None
+    member.organization_role = "admin"
+    session.add(member)
+    session.commit()
 
 
 @router.get(
