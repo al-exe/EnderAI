@@ -1463,7 +1463,13 @@ class ByokCredential(SQLModel, table=True):
     user_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE", index=True
     )
-    provider: Literal["anthropic", "openai"] = Field(max_length=32, nullable=False)
+    # SQLModel can't infer a SQL column type from a typing.Literal on a
+    # table=True model — sqlmodel/main.py:695 calls issubclass(type_, Enum)
+    # which raises TypeError on a Literal. Store as plain str here and
+    # let the Pydantic Literal validations on ByokCredentialCreate /
+    # ByokCredentialPublic enforce the "anthropic"|"openai" constraint
+    # at the API boundary.
+    provider: str = Field(max_length=32, nullable=False)
     encrypted_api_key: bytes = Field(sa_type=LargeBinary, nullable=False)  # type: ignore[arg-type]
     key_fingerprint: str = Field(max_length=16, nullable=False)
     created_at: datetime = Field(
