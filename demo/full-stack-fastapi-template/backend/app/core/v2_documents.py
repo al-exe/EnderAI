@@ -10,6 +10,7 @@ from sqlmodel import Session, col, select
 from app.models import (
     User,
     V2Document,
+    V2DocumentFavorite,
     V2DocumentFolder,
     V2DocumentFolderPublic,
     V2DocumentPublic,
@@ -1946,6 +1947,7 @@ def build_v2_document_public(
     folder_name: str | None = None
     shared_with: list[V2DocumentSharePublic] = []
     user_access = "owner"
+    favorite: V2DocumentFavorite | None = None
     if session is not None:
         if document.folder_id is not None:
             folder = session.get(V2DocumentFolder, document.folder_id)
@@ -1956,11 +1958,17 @@ def build_v2_document_public(
                 resolve_v2_document_access(session, document, actor, demo=demo)
                 or "viewer"
             )
+            favorite = session.exec(
+                select(V2DocumentFavorite)
+                .where(V2DocumentFavorite.document_id == document.id)
+                .where(V2DocumentFavorite.user_id == actor.id)
+            ).first()
 
     payload = document.model_dump()
     payload["folder_name"] = folder_name
     payload["shared_with"] = shared_with
     payload["user_access"] = user_access
+    payload["is_favorite"] = favorite is not None if actor is not None else False
     return V2DocumentPublic.model_validate(payload)
 
 
