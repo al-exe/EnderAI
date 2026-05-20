@@ -12,7 +12,7 @@ Other features that need tier-aware gating should compose against
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Literal
 
 from app.core.config import settings
@@ -21,7 +21,11 @@ from app.models import ByokCredential, User
 ACTIVE_SUBSCRIPTION_STATUSES: set[str] = {"active", "trialing"}
 
 
-class Tier(StrEnum):
+# Use the (str, Enum) mixin rather than enum.StrEnum — StrEnum landed
+# in Python 3.11 and prod runs 3.10 (see backend/Dockerfile FROM line).
+# Behavior is equivalent for our purposes: ``Tier.FREE.value == "free"``
+# and ``Tier.FREE == "free"`` both hold.
+class Tier(str, Enum):
     FREE = "free"
     PRO = "pro"
     MAX = "max"
