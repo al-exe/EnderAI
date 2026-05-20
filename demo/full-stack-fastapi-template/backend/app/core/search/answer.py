@@ -18,8 +18,12 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Literal
 
-from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
+# anthropic + openai are deliberately NOT imported at module level — both
+# pull large dependency graphs (and openai drags numpy in transitively
+# via tiktoken on some paths). Search is a tier-gated feature most
+# requests won't touch, so we lazy-import inside the stream functions
+# below. This kept boot RSS under the 512MB Render starter ceiling
+# when the feature shipped.
 
 from app.core.config import settings
 from app.core.search.byok import decrypt_api_key
@@ -74,6 +78,8 @@ async def _stream_claude(
     billed_to: Literal["managed", "byok:anthropic"],
     model_id: str,
 ) -> AsyncIterator[AnswerEvent]:
+    from anthropic import AsyncAnthropic  # lazy — see module header
+
     client = AsyncAnthropic(api_key=api_key)
     async with client.messages.stream(
         model=model_id,
@@ -106,6 +112,8 @@ async def _stream_openai(
     user_prompt: str,
     model_id: str = "gpt-4o-mini",
 ) -> AsyncIterator[AnswerEvent]:
+    from openai import AsyncOpenAI  # lazy — see module header
+
     client = AsyncOpenAI(api_key=api_key)
     stream = await client.chat.completions.create(
         model=model_id,
