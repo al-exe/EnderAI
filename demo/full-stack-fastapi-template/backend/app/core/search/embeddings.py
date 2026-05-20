@@ -15,10 +15,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Iterable
-
-from openai import AsyncOpenAI
+from typing import TYPE_CHECKING
 
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    # Heavy SDK — kept under TYPE_CHECKING so importing this module at
+    # FastAPI startup doesn't pull in the entire openai dependency
+    # graph. The real import happens inside ``_client()`` on first use.
+    from openai import AsyncOpenAI
 
 log = logging.getLogger(__name__)
 
@@ -30,12 +35,15 @@ class EmbeddingsUnavailableError(RuntimeError):
     indexer catches it and skips the sweep iteration."""
 
 
-def _client() -> AsyncOpenAI:
+def _client() -> "AsyncOpenAI":
     if not settings.OPENAI_API_KEY:
         raise EmbeddingsUnavailableError(
             "OPENAI_API_KEY is not configured; embedding generation is disabled."
         )
-    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    # Imported lazily — see TYPE_CHECKING block above for why.
+    from openai import AsyncOpenAI as _AsyncOpenAI
+
+    return _AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 async def embed_batch(texts: Iterable[str]) -> list[list[float]]:
