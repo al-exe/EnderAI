@@ -140,6 +140,109 @@ def test_v2_document_folders_can_organize_documents(
     assert renamed.json()["name"] == "Escalations"
 
 
+def test_v2_document_folders_can_be_nested(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    parent = client.post(
+        "/api/v1/v2/documents/folders/",
+        headers=headers,
+        json={"name": "Customers"},
+    )
+    assert parent.status_code == 201, parent.text
+    parent_id = parent.json()["id"]
+    assert parent.json()["parent_folder_id"] is None
+
+    child = client.post(
+        "/api/v1/v2/documents/folders/",
+        headers=headers,
+        json={"name": "Acme", "parent_folder_id": parent_id},
+    )
+    assert child.status_code == 201, child.text
+    child_id = child.json()["id"]
+    assert child.json()["parent_folder_id"] == parent_id
+
+    root_move = client.patch(
+        f"/api/v1/v2/documents/folders/{child_id}",
+        headers=headers,
+        json={"parent_folder_id": None},
+    )
+    assert root_move.status_code == 200, root_move.text
+    assert root_move.json()["parent_folder_id"] is None
+
+    nested_move = client.patch(
+        f"/api/v1/v2/documents/folders/{child_id}",
+        headers=headers,
+        json={"parent_folder_id": parent_id},
+    )
+    assert nested_move.status_code == 200, nested_move.text
+    assert nested_move.json()["parent_folder_id"] == parent_id
+
+
+def test_v2_document_folders_reject_parent_cycles(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    parent = client.post(
+        "/api/v1/v2/documents/folders/",
+        headers=headers,
+        json={"name": "Parent"},
+    )
+    assert parent.status_code == 201, parent.text
+    parent_id = parent.json()["id"]
+
+    child = client.post(
+        "/api/v1/v2/documents/folders/",
+        headers=headers,
+        json={"name": "Child", "parent_folder_id": parent_id},
+    )
+    assert child.status_code == 201, child.text
+    child_id = child.json()["id"]
+
+    self_parent = client.patch(
+        f"/api/v1/v2/documents/folders/{parent_id}",
+        headers=headers,
+        json={"parent_folder_id": parent_id},
+    )
+    assert self_parent.status_code == 422, self_parent.text
+
+    descendant_parent = client.patch(
+        f"/api/v1/v2/documents/folders/{parent_id}",
+        headers=headers,
+        json={"parent_folder_id": child_id},
+    )
+    assert descendant_parent.status_code == 422, descendant_parent.text
+
+
+def test_v2_documents_can_be_favorited(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=headers,
+        json={"title": "Favorite me"},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    assert created.json()["is_favorite"] is False
+
+    favorited = client.put(
+        f"/api/v1/v2/documents/{document_id}/favorite",
+        headers=headers,
+    )
+    assert favorited.status_code == 200, favorited.text
+    assert favorited.json()["is_favorite"] is True
+
+    documents = client.get("/api/v1/v2/documents/", headers=headers)
+    assert documents.status_code == 200, documents.text
+    assert documents.json()["data"][0]["is_favorite"] is True
+
+    unfavorited = client.delete(
+        f"/api/v1/v2/documents/{document_id}/favorite",
+        headers=headers,
+    )
+    assert unfavorited.status_code == 200, unfavorited.text
+    assert unfavorited.json()["is_favorite"] is False
+
+
 def test_v2_documents_are_scoped_to_owner(client: TestClient) -> None:
     _, owner_headers = _signup(client)
     _, intruder_headers = _signup(client)

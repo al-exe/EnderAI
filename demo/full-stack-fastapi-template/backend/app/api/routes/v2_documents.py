@@ -32,6 +32,7 @@ from app.models import (
     User,
     V2Document,
     V2DocumentCreate,
+    V2DocumentFavorite,
     V2DocumentFolder,
     V2DocumentFolderCreate,
     V2DocumentFolderPublic,
@@ -71,6 +72,46 @@ def _validate_folder_access(
     if folder is None:
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
+
+
+def _validate_parent_folder(
+    session: SessionDep,
+    current_user: CurrentUser,
+    parent_folder_id: uuid.UUID | None,
+    *,
+    folder_id: uuid.UUID | None = None,
+) -> V2DocumentFolder | None:
+    if parent_folder_id is None:
+        return None
+    if folder_id is not None and parent_folder_id == folder_id:
+        raise HTTPException(status_code=422, detail="Folder cannot contain itself")
+
+    parent = get_v2_document_folder_for_actor(
+        session, current_user, parent_folder_id, demo=False
+    )
+    if parent is None:
+        raise HTTPException(status_code=422, detail="Parent folder not found")
+
+    seen_folder_ids: set[uuid.UUID] = set()
+    current_parent = parent
+    while current_parent.parent_folder_id is not None:
+        ancestor_id = current_parent.parent_folder_id
+        if ancestor_id in seen_folder_ids:
+            raise HTTPException(status_code=422, detail="Folder hierarchy has a cycle")
+        if folder_id is not None and ancestor_id == folder_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Folder cannot be moved under one of its descendants",
+            )
+        seen_folder_ids.add(ancestor_id)
+        ancestor = get_v2_document_folder_for_actor(
+            session, current_user, ancestor_id, demo=False
+        )
+        if ancestor is None:
+            break
+        current_parent = ancestor
+
+    return parent
 
 
 def _require_document_owner(document: V2Document, current_user: CurrentUser) -> None:
@@ -125,12 +166,16 @@ def create_v2_document_folder(
             status_code=422,
             detail="User must belong to an organization to share a folder",
         )
+    parent_folder = _validate_parent_folder(
+        session, current_user, folder_in.parent_folder_id
+    )
     now = get_datetime_utc()
     folder = V2DocumentFolder(
         owner_id=current_user.id,
         organization_id=(
             current_user.organization_id if visibility == "organization" else None
         ),
+        parent_folder_id=parent_folder.id if parent_folder else None,
         name=folder_in.name.strip(),
         visibility=visibility,
         created_at=now,
@@ -175,6 +220,14 @@ def update_v2_document_folder(
         folder.organization_id = (
             current_user.organization_id if visibility == "organization" else None
         )
+    if "parent_folder_id" in payload:
+        parent_folder = _validate_parent_folder(
+            session,
+            current_user,
+            folder_in.parent_folder_id,
+            folder_id=folder.id,
+        )
+        folder.parent_folder_id = parent_folder.id if parent_folder else None
     folder.updated_at = get_datetime_utc()
     session.add(folder)
     session.commit()
@@ -205,6 +258,13 @@ def delete_v2_document_folder(
         document.folder_id = None
         document.updated_at = get_datetime_utc()
         session.add(document)
+    child_folders = session.exec(
+        select(V2DocumentFolder).where(V2DocumentFolder.parent_folder_id == folder.id)
+    ).all()
+    for child_folder in child_folders:
+        child_folder.parent_folder_id = None
+        child_folder.updated_at = get_datetime_utc()
+        session.add(child_folder)
     session.delete(folder)
     session.commit()
 
@@ -360,6 +420,63 @@ def replace_v2_document_shares(
     session.commit()
     shares = list_v2_document_shares_public(session, document.id)
     return V2DocumentSharesPublic(data=shares, count=len(shares))
+
+
+@router.put("/{document_id}/favorite", response_model=V2DocumentPublic)
+def favorite_v2_document(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    _maybe_seed_demo(session, current_user, demo)
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    favorite = session.exec(
+        select(V2DocumentFavorite)
+        .where(V2DocumentFavorite.document_id == document.id)
+        .where(V2DocumentFavorite.user_id == current_user.id)
+    ).first()
+    if favorite is None:
+        favorite = V2DocumentFavorite(
+            document_id=document.id,
+            user_id=current_user.id,
+            created_at=get_datetime_utc(),
+        )
+        session.add(favorite)
+        session.commit()
+
+    return build_v2_document_public(
+        document, session=session, actor=current_user, demo=demo
+    )
+
+
+@router.delete("/{document_id}/favorite", response_model=V2DocumentPublic)
+def unfavorite_v2_document(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    _maybe_seed_demo(session, current_user, demo)
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    favorite = session.exec(
+        select(V2DocumentFavorite)
+        .where(V2DocumentFavorite.document_id == document.id)
+        .where(V2DocumentFavorite.user_id == current_user.id)
+    ).first()
+    if favorite is not None:
+        session.delete(favorite)
+        session.commit()
+
+    return build_v2_document_public(
+        document, session=session, actor=current_user, demo=demo
+    )
 
 
 @router.patch("/{document_id}", response_model=V2DocumentPublic)

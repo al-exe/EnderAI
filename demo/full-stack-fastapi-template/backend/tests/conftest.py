@@ -20,6 +20,7 @@ from app.models import (
     Topic,
     User,
     V2Document,
+    V2DocumentFavorite,
     V2DocumentFolder,
     V2DocumentShare,
 )
@@ -45,6 +46,7 @@ def db() -> Generator[Session, None, None]:
         session.execute(delete(Skill))
         session.execute(delete(CaseRecord))
         session.execute(delete(Topic))
+        session.execute(delete(V2DocumentFavorite))
         session.execute(delete(V2DocumentShare))
         session.execute(delete(V2Document))
         session.execute(delete(V2DocumentFolder))
