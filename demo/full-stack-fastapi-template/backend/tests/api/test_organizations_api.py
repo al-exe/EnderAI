@@ -21,9 +21,7 @@ def _signup(
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
 
-    headers = user_authentication_headers(
-        client=client, email=email, password=password
-    )
+    headers = user_authentication_headers(client=client, email=email, password=password)
     return email, headers
 
 
@@ -44,15 +42,61 @@ def test_signup_creates_personal_org_with_admin_role(
     assert [member["email"] for member in organization.json()["members"]] == [email]
 
 
+def test_org_admin_can_update_own_organization_name(
+    client: TestClient, db: Session
+) -> None:
+    admin_email, admin_headers = _signup(client, db, full_name="Rename Admin")
+    member_email, member_headers = _signup(client, db, full_name="Rename Member")
+    member_org = client.get("/api/v1/organizations/me", headers=member_headers)
+    assert member_org.status_code == 200, member_org.text
+
+    renamed = client.patch(
+        "/api/v1/organizations/me",
+        headers=admin_headers,
+        json={"name": "Renamed Organization"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "Renamed Organization"
+
+    duplicate = client.patch(
+        "/api/v1/organizations/me",
+        headers=admin_headers,
+        json={"name": member_org.json()["name"]},
+    )
+    assert duplicate.status_code == 409, duplicate.text
+
+    member_rename = client.patch(
+        "/api/v1/organizations/me",
+        headers=member_headers,
+        json={"name": "Blocked Rename"},
+    )
+    assert member_rename.status_code == 200, member_rename.text
+
+    invite = client.post(
+        "/api/v1/organizations/invitations",
+        headers=admin_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    blocked = client.patch(
+        "/api/v1/organizations/me",
+        headers=member_headers,
+        json={"name": "Member Rename"},
+    )
+    assert blocked.status_code == 403, blocked.text
+
+
 def test_org_admin_can_invite_and_member_accepts_as_regular_member(
     client: TestClient, db: Session
 ) -> None:
-    admin_email, admin_headers = _signup(
-        client, db, full_name="Org Admin"
-    )
-    member_email, member_headers = _signup(
-        client, db, full_name="Org Member"
-    )
+    admin_email, admin_headers = _signup(client, db, full_name="Org Admin")
+    member_email, member_headers = _signup(client, db, full_name="Org Member")
     admin = crud.get_user_by_email(session=db, email=admin_email)
     member = crud.get_user_by_email(session=db, email=member_email)
     assert admin is not None
@@ -92,12 +136,8 @@ def test_org_admin_can_invite_and_member_accepts_as_regular_member(
 def test_invited_user_can_accept_organization_invitation(
     client: TestClient, db: Session
 ) -> None:
-    admin_email, admin_headers = _signup(
-        client, db, full_name="Invite Admin"
-    )
-    member_email, member_headers = _signup(
-        client, db, full_name="Invitee"
-    )
+    admin_email, admin_headers = _signup(client, db, full_name="Invite Admin")
+    member_email, member_headers = _signup(client, db, full_name="Invitee")
     admin = crud.get_user_by_email(session=db, email=admin_email)
     member = crud.get_user_by_email(session=db, email=member_email)
     assert admin is not None
@@ -126,12 +166,8 @@ def test_invited_user_can_accept_organization_invitation(
 def test_org_admin_can_promote_members_and_members_cannot_invite(
     client: TestClient, db: Session
 ) -> None:
-    admin_email, admin_headers = _signup(
-        client, db, full_name="Promoter"
-    )
-    member_email, member_headers = _signup(
-        client, db, full_name="Promotee"
-    )
+    admin_email, admin_headers = _signup(client, db, full_name="Promoter")
+    member_email, member_headers = _signup(client, db, full_name="Promotee")
     admin = crud.get_user_by_email(session=db, email=admin_email)
     member = crud.get_user_by_email(session=db, email=member_email)
     assert admin is not None
@@ -170,3 +206,50 @@ def test_org_admin_can_promote_members_and_members_cannot_invite(
         json={"email": random_email()},
     )
     assert allowed_invite.status_code == 201, allowed_invite.text
+
+
+def test_org_admin_can_remove_member(client: TestClient, db: Session) -> None:
+    admin_email, admin_headers = _signup(client, db, full_name="Removal Admin")
+    member_email, member_headers = _signup(client, db, full_name="Removed Member")
+    admin = crud.get_user_by_email(session=db, email=admin_email)
+    member = crud.get_user_by_email(session=db, email=member_email)
+    assert admin is not None
+    assert member is not None
+
+    invite = client.post(
+        "/api/v1/organizations/invitations",
+        headers=admin_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+    accepted = client.post(
+        f"/api/v1/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    removed = client.delete(
+        f"/api/v1/organizations/members/{member.id}",
+        headers=admin_headers,
+    )
+    assert removed.status_code == 204, removed.text
+
+    db.refresh(member)
+    assert member.organization_id is None
+    assert member.organization_role == "admin"
+
+    organization = client.get("/api/v1/organizations/me", headers=admin_headers)
+    assert organization.status_code == 200, organization.text
+    assert [user["email"] for user in organization.json()["members"]] == [admin_email]
+
+
+def test_org_admin_cannot_remove_self(client: TestClient, db: Session) -> None:
+    admin_email, admin_headers = _signup(client, db, full_name="Self Admin")
+    admin = crud.get_user_by_email(session=db, email=admin_email)
+    assert admin is not None
+
+    removed = client.delete(
+        f"/api/v1/organizations/members/{admin.id}",
+        headers=admin_headers,
+    )
+    assert removed.status_code == 422, removed.text
