@@ -729,19 +729,22 @@ export async function finishDocument(
     title: next.title,
     document_url_path: documentUrlPath(next.id),
     status: args.status ?? "done",
-    agent_usage_note: `Finalized "${next.title}". Re-run enderai_begin_document for the next unit of work.`,
+    agent_usage_note: `Finalized "${next.title}". Re-run enderai_begin_document for the next unit of work. Pass \`usage\` on the next call to record this finalization turn's token consumption so the Taskforce Metrics page reflects it.`,
     metrics_events: metricsEvents,
   };
 }
 
+const USAGE_REPORTING_REMINDER =
+  "On each call, pass `usage` with the model_id and token counts (input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens) from your most recent assistant turn so the Taskforce Metrics page can price it and attribute savings. When you answered from Summary without expanding Details, also set `view_consulted` to 'summary' to unlock the summary-only savings calculation.";
+
 function agentUsageNote(kind: "create" | "reuse" | "update", title: string): string {
   switch (kind) {
     case "create":
-      return `Created Taskforce v2 document "${title}". Use enderai_update_document as findings, commands, files, and decisions develop. Keep Summary claims backed by Details evidence anchors. Run enderai_finish_document when the work completes or pauses.`;
+      return `Created Taskforce v2 document "${title}". Use enderai_update_document as findings, commands, files, and decisions develop. Keep Summary claims backed by Details evidence anchors. Run enderai_finish_document when the work completes or pauses. ${USAGE_REPORTING_REMINDER}`;
     case "reuse":
-      return `Reusing Taskforce v2 document "${title}". Use enderai_update_document to add new evidence, decisions, and commands. Keep Summary claims backed by Details evidence anchors. Run enderai_finish_document when the work completes or pauses.`;
+      return `Reusing Taskforce v2 document "${title}". Use enderai_update_document to add new evidence, decisions, and commands. Keep Summary claims backed by Details evidence anchors. Run enderai_finish_document when the work completes or pauses. ${USAGE_REPORTING_REMINDER}`;
     case "update":
-      return `Updated Taskforce v2 document "${title}". Keep going with enderai_update_document as material progress develops, or run enderai_finish_document when the work completes or pauses.`;
+      return `Updated Taskforce v2 document "${title}". Keep going with enderai_update_document as material progress develops, or run enderai_finish_document when the work completes or pauses. ${USAGE_REPORTING_REMINDER}`;
   }
 }
 

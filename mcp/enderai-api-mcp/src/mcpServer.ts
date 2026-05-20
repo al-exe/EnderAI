@@ -351,6 +351,52 @@ const changeRecordJsonSchema = {
   required: ["summary"],
 };
 
+const taskforceUsageJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  description:
+    "Per-turn token usage from the agent's most recent assistant turn. When supplied, the backend prices it against the model's pricing snapshot, records a tokens.consumed event, and computes attributable savings (cache reads always; summary-only reads when view_consulted is set to 'summary'; reuse-on-begin when this call reused an existing document). Omit when the turn has no meaningful token usage to report.",
+  properties: {
+    model_id: {
+      type: "string",
+      description:
+        "Anthropic model id used for the turn (e.g. 'claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'). Required when usage is supplied.",
+    },
+    input_tokens: {
+      type: "integer",
+      minimum: 0,
+      description: "Base input tokens billed this turn (excludes cache reads and cache creation).",
+    },
+    output_tokens: {
+      type: "integer",
+      minimum: 0,
+      description: "Output tokens generated this turn.",
+    },
+    cache_read_input_tokens: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Tokens served from the prompt cache this turn. Drives the cache savings calculation.",
+    },
+    cache_creation_input_tokens: {
+      type: "integer",
+      minimum: 0,
+      description: "Tokens written to the prompt cache this turn.",
+    },
+    view_consulted: {
+      type: "string",
+      enum: ["summary", "details", "both"],
+      description:
+        "Which view of the active document the agent consulted before this turn. Set to 'summary' when you answered from Summary alone without expanding Details — that unlocks the summary-only savings calculation.",
+    },
+    occurred_at: {
+      type: "string",
+      description: "Optional ISO timestamp. Defaults to the server clock.",
+    },
+  },
+  required: ["model_id"],
+};
+
 function shouldRedactKey(key: string): boolean {
   const normalized = key.trim().toLowerCase();
   if (!normalized) return false;
@@ -1391,7 +1437,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_begin_document",
           description:
-            "Taskforce v2 document lifecycle: start of meaningful work. Lists current user's V2 documents, scores them against the request using a deterministic congruence engine (title/file/symbol/error/anchor/collaborator overlap, recency, intent phrases minus tenant/repo/error-family/terminal-state conflicts), and either reuses+self-heals the top match or creates a fresh document. Honors explicit document_id and force_new. Remembers the active document for this MCP session.",
+            "Taskforce v2 document lifecycle: start of meaningful work. Lists current user's V2 documents, scores them against the request using a deterministic congruence engine (title/file/symbol/error/anchor/collaborator overlap, recency, intent phrases minus tenant/repo/error-family/terminal-state conflicts), and either reuses+self-heals the top match or creates a fresh document. Honors explicit document_id and force_new. Remembers the active document for this MCP session. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (cache, summary-only, reuse-on-begin) that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1438,6 +1484,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 type: "boolean",
                 description: "Operate against demo documents.",
               },
+              usage: taskforceUsageJsonSchema,
             },
             required: ["request_summary"],
           },
@@ -1445,7 +1492,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_update_document",
           description:
-            "Append material progress to the active Taskforce v2 document and keep Summary claims backed by Details evidence anchors. Requires a prior enderai_begin_document call in this MCP session unless document_id is supplied. Use enderai_finish_document, not this tool, to finalize.",
+            "Append material progress to the active Taskforce v2 document and keep Summary claims backed by Details evidence anchors. Requires a prior enderai_begin_document call in this MCP session unless document_id is supplied. Use enderai_finish_document, not this tool, to finalize. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (including the summary-only savings when view_consulted == 'summary') that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1537,13 +1584,14 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                   "Optional visibility change. Only the document owner can change visibility.",
               },
               demo: { type: "boolean" },
+              usage: taskforceUsageJsonSchema,
             },
           },
         },
         {
           name: "enderai_finish_document",
           description:
-            "Finalize the active Taskforce v2 document at completion or pause. Adds an Outcome section to Details (with status, outcome, validation, follow-ups) and links it from Summary. Clears the active-document pointer for this MCP session.",
+            "Finalize the active Taskforce v2 document at completion or pause. Adds an Outcome section to Details (with status, outcome, validation, follow-ups) and links it from Summary. Clears the active-document pointer for this MCP session. Pass `usage` to report the finalization turn's token consumption — the backend prices it and computes attributable savings that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1559,6 +1607,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               },
               closing_note: { type: "string", description: "Optional final narrative." },
               demo: { type: "boolean" },
+              usage: taskforceUsageJsonSchema,
             },
           },
         },
