@@ -177,6 +177,18 @@ const FinishCaseArgsSchema = z
   })
   .strict();
 
+const TaskforceUsageSchema = z
+  .object({
+    model_id: z.string().min(1),
+    input_tokens: z.number().int().nonnegative().optional(),
+    output_tokens: z.number().int().nonnegative().optional(),
+    cache_read_input_tokens: z.number().int().nonnegative().optional(),
+    cache_creation_input_tokens: z.number().int().nonnegative().optional(),
+    view_consulted: z.enum(["summary", "details", "both"]).optional(),
+    occurred_at: z.string().optional(),
+  })
+  .strict();
+
 const BeginDocumentArgsSchema = z
   .object({
     request_summary: z.string().min(1),
@@ -193,6 +205,7 @@ const BeginDocumentArgsSchema = z
     force_new: z.boolean().optional(),
     visibility: z.enum(["private", "organization"]).optional(),
     demo: z.boolean().optional(),
+    usage: TaskforceUsageSchema.optional(),
   })
   .strict();
 
@@ -246,6 +259,7 @@ const UpdateDocumentArgsSchema = z
     progress_note: z.string().optional(),
     visibility: z.enum(["private", "organization"]).optional(),
     demo: z.boolean().optional(),
+    usage: TaskforceUsageSchema.optional(),
   })
   .strict();
 
@@ -258,6 +272,7 @@ const FinishDocumentArgsSchema = z
     status: z.enum(["done", "paused", "blocked", "superseded"]).optional(),
     closing_note: z.string().optional(),
     demo: z.boolean().optional(),
+    usage: TaskforceUsageSchema.optional(),
   })
   .strict();
 
