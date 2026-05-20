@@ -210,6 +210,54 @@ def record_usage(
     )
 
 
+def record_search_usage(
+    session: Session,
+    *,
+    user: User,
+    usage: TaskforceUsagePayload,
+    document: V2Document | None = None,
+    is_demo: bool = False,
+    billed_to: str = "managed",
+) -> MetricsEvent:
+    """Emit a single ``tokens.consumed`` event for a Search call.
+
+    Unlike ``record_usage``, this is *not* document-scoped — Search
+    queries may reference zero or many docs. When the answer cited a
+    top-ranked document, pass it as ``document`` so per-document
+    metrics still attribute correctly; otherwise leave it None and the
+    event simply rolls into the user-level totals.
+
+    ``billed_to`` is recorded on the payload for downstream cost
+    accounting ("managed" vs "byok:anthropic" vs "byok:openai")."""
+
+    occurred_at = usage.occurred_at or _now()
+    pricing, usd = _price_usage(session, usage, occurred_at)
+    cache_write_tokens = (
+        usage.cache_creation_input_tokens
+        if usage.cache_creation_input_tokens > 0
+        else None
+    )
+    event = _build_event(
+        kind=METRICS_EVENT_TOKENS_CONSUMED,
+        user=user,
+        document=document,
+        occurred_at=occurred_at,
+        is_demo=is_demo,
+        model_id=usage.model_id,
+        pricing=pricing,
+        input_tokens=usage.input_tokens or None,
+        output_tokens=usage.output_tokens or None,
+        cache_read_tokens=usage.cache_read_input_tokens or None,
+        cache_write_tokens=cache_write_tokens,
+        # BYOK calls don't cost us anything; the payload tags the call
+        # source so the metrics read API can split spend by route.
+        usd_amount=(usd if (usd > 0 and billed_to == "managed") else None),
+        payload={"source": "search", "billed_to": billed_to},
+    )
+    session.add(event)
+    return event
+
+
 def record_document_created(
     session: Session,
     *,

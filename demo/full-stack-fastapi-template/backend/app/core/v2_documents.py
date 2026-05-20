@@ -2046,51 +2046,48 @@ def get_v2_document_for_owner(
     return session.exec(statement).first()
 
 
-def get_v2_document_for_actor(
-    session: Session, actor: User, document_id: uuid.UUID, *, demo: bool
-) -> V2Document | None:
-    if demo or actor.organization_id is None:
-        if demo:
-            statement = (
-                select(V2Document)
-                .where(V2Document.id == document_id)
-                .where(V2Document.owner_id == actor.id)
-                .where(V2Document.is_demo.is_(demo))  # type: ignore[union-attr]
-            )
-            return session.exec(statement).first()
-        shared_document_ids = select(V2DocumentShare.document_id).where(
-            V2DocumentShare.user_id == actor.id
+def build_v2_document_acl_filter(actor: User, *, demo: bool) -> Any:
+    """SQLAlchemy filter expression for "documents this actor may read".
+
+    Mirrors the historical 3-way OR (owner / explicit share / org-visible)
+    plus the demo isolation rule. Centralized here so the V2 read path
+    and the new Search retrieval (app/core/search/retrieval.py) stay in
+    lockstep — any change to who-can-see-what flows through this one
+    function instead of being duplicated across query sites.
+    """
+
+    if demo:
+        return and_(
+            V2Document.is_demo.is_(True),  # type: ignore[union-attr]
+            V2Document.owner_id == actor.id,
         )
-        statement = (
-            select(V2Document)
-            .where(V2Document.id == document_id)
-            .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
-            .where(
-                or_(
-                    V2Document.owner_id == actor.id,
-                    col(V2Document.id).in_(shared_document_ids),
-                )
-            )
-        )
-        return session.exec(statement).first()
 
     shared_document_ids = select(V2DocumentShare.document_id).where(
         V2DocumentShare.user_id == actor.id
     )
+    base = and_(
+        V2Document.is_demo.is_(False),  # type: ignore[union-attr]
+        or_(
+            V2Document.owner_id == actor.id,
+            col(V2Document.id).in_(shared_document_ids),
+            and_(
+                V2Document.visibility == "organization",
+                V2Document.organization_id == actor.organization_id,
+            )
+            if actor.organization_id is not None
+            else (V2Document.id.is_(None)),  # type: ignore[union-attr] -- always false
+        ),
+    )
+    return base
+
+
+def get_v2_document_for_actor(
+    session: Session, actor: User, document_id: uuid.UUID, *, demo: bool
+) -> V2Document | None:
     statement = (
         select(V2Document)
         .where(V2Document.id == document_id)
-        .where(V2Document.is_demo.is_(False))  # type: ignore[union-attr]
-        .where(
-            or_(
-                V2Document.owner_id == actor.id,
-                col(V2Document.id).in_(shared_document_ids),
-                and_(
-                    V2Document.visibility == "organization",
-                    V2Document.organization_id == actor.organization_id,
-                ),
-            )
-        )
+        .where(build_v2_document_acl_filter(actor, demo=demo))
     )
     return session.exec(statement).first()
 

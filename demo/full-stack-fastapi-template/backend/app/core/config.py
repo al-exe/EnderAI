@@ -105,10 +105,25 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str | None = None
     STRIPE_SECRET_KEY: str | None = None
     STRIPE_PRICE_ID: str | None = None
+    STRIPE_PRICE_ID_PRO: str | None = None
+    STRIPE_PRICE_ID_MAX: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_API_BASE_URL: str = "https://api.stripe.com"
     FIREBASE_PROJECT_ID: str | None = None
     FIREBASE_SERVICE_ACCOUNT_JSON: str | None = None
+    # Taskforce Search — managed inference + BYOK + embeddings.
+    # All optional so dev environments without keys can still boot; Search
+    # endpoints surface a clear error when a required key is missing.
+    OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+    # url-safe base64-encoded 32-byte key (cryptography.fernet.Fernet.generate_key()).
+    # Required when BYOK is enabled in prod; if unset, BYOK endpoints refuse writes.
+    BYOK_ENCRYPTION_KEY: str | None = None
+    SEARCH_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    SEARCH_ANSWER_MODEL: str = "claude-sonnet-4-6"
+    # Cron-sweep cadence for the embedding indexer (seconds between sweeps).
+    SEARCH_INDEX_SWEEP_INTERVAL_SECONDS: int = 30
+    SEARCH_INDEX_BATCH_SIZE: int = 50
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:
