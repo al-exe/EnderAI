@@ -93,6 +93,50 @@ def test_v2_documents_create_update_get(client: TestClient) -> None:
     assert empty_update.status_code == 422, empty_update.text
 
 
+def test_v2_documents_can_be_deleted_by_owner(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=headers,
+        json={"title": "Throwaway draft"},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/v2/documents/{document_id}", headers=headers
+    )
+    assert deleted.status_code == 204, deleted.text
+
+    fetched = client.get(
+        f"/api/v1/v2/documents/{document_id}", headers=headers
+    )
+    assert fetched.status_code == 404, fetched.text
+
+
+def test_v2_documents_delete_requires_ownership(client: TestClient) -> None:
+    _, owner_headers = _signup(client)
+    _, other_headers = _signup(client)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=owner_headers,
+        json={"title": "Owner only"},
+    )
+    document_id = created.json()["id"]
+
+    forbidden = client.delete(
+        f"/api/v1/v2/documents/{document_id}", headers=other_headers
+    )
+    assert forbidden.status_code == 404, forbidden.text
+
+    fetched = client.get(
+        f"/api/v1/v2/documents/{document_id}", headers=owner_headers
+    )
+    assert fetched.status_code == 200, fetched.text
+
+
 def test_v2_document_folders_can_organize_documents(
     client: TestClient,
 ) -> None:

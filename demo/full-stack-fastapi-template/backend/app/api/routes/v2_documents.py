@@ -543,6 +543,22 @@ def update_v2_document(
     )
 
 
+@router.delete("/{document_id}", status_code=204)
+def delete_v2_document(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> None:
+    _maybe_seed_demo(session, current_user, demo)
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    _require_document_owner(document, current_user)
+    session.delete(document)
+    session.commit()
+
+
 @router.post(
     "/{document_id}/usage",
     response_model=MetricsUsageRecorded,
