@@ -3,8 +3,9 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
+from pgvector.sqlalchemy import Vector
 from pydantic import EmailStr
-from sqlalchemy import DateTime, Numeric, UniqueConstraint
+from sqlalchemy import DateTime, LargeBinary, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -967,6 +968,14 @@ class V2Document(SQLModel, table=True):
     updated_at: datetime | None = Field(
         default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
     )  # type: ignore[arg-type]
+    # Search indexing drift markers. NULL `last_indexed_at` means the
+    # cron-sweep hasn't seen this document yet; index_version lets us
+    # invalidate the whole corpus when the chunking/embedding strategy
+    # changes (bump the constant in app/core/search/indexing.py).
+    last_indexed_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    index_version: str | None = Field(default=None, max_length=16)
 
 
 class V2DocumentCreate(SQLModel):
@@ -1367,3 +1376,130 @@ class MetricsResponse(SQLModel):
 
     class Config:
         populate_by_name = True
+
+
+# ============================================================
+# Taskforce V2 Search — embeddings, BYOK credentials, eligibility
+# ============================================================
+
+
+class SourceItemEmbedding(SQLModel, table=True):
+    """One row per indexable chunk across all sources (Documents today,
+    Slack/GitHub/Gmail/GDocs later). The ``source_kind`` + ``source_item_id``
+    + ``chunk_anchor_id`` triple is unique; re-indexing the same chunk
+    replaces the row. ACL columns are denormalized so retrieval can filter
+    in SQL without joining the originating table on every query."""
+
+    __tablename__ = "source_item_embedding"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_kind",
+            "source_item_id",
+            "chunk_anchor_id",
+            name="uq_source_item_embedding_anchor",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    source_kind: str = Field(max_length=32, nullable=False)
+    source_item_id: str = Field(max_length=64, nullable=False)
+    chunk_anchor_id: str = Field(max_length=64, nullable=False)
+    chunk_text: str = Field(nullable=False)
+    embedding: list[float] = Field(sa_type=Vector(1536))  # type: ignore[arg-type]
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE"
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None, foreign_key="organization.id", ondelete="SET NULL"
+    )
+    visibility: str = Field(max_length=16, nullable=False)
+    is_demo: bool = Field(default=False, nullable=False)
+    # Short hash of the chunk text we embedded. The cron-sweep compares
+    # this against the freshly-computed hash before re-embedding, so
+    # idempotent re-runs are nearly free.
+    version_hash: str = Field(max_length=64, nullable=False)
+    indexed_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[arg-type]
+        nullable=False,
+    )
+
+
+class ByokCredential(SQLModel, table=True):
+    """Bring-Your-Own-Key store for Pro-tier Search.
+
+    The API key itself is Fernet-encrypted at rest (key derived from
+    ``settings.BYOK_ENCRYPTION_KEY``). Only the last four characters
+    are stored in cleartext (``key_fingerprint``) so the UI can show
+    "…sk-Ab9F" without ever reading the ciphertext."""
+
+    __tablename__ = "byok_credential"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "provider", name="uq_byok_credential_user_provider"
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", index=True
+    )
+    provider: Literal["anthropic", "openai"] = Field(max_length=32, nullable=False)
+    encrypted_api_key: bytes = Field(sa_type=LargeBinary, nullable=False)  # type: ignore[arg-type]
+    key_fingerprint: str = Field(max_length=16, nullable=False)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[arg-type]
+        nullable=False,
+    )
+    last_validated_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    revoked_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+
+
+# ---- BYOK request/response shapes ----------------------------
+
+
+class ByokCredentialCreate(SQLModel):
+    provider: Literal["anthropic", "openai"]
+    api_key: str = Field(min_length=10, max_length=512)
+
+
+class ByokCredentialPublic(SQLModel):
+    """Returned to the frontend. Never includes the api_key itself."""
+
+    provider: Literal["anthropic", "openai"]
+    key_fingerprint: str
+    created_at: datetime
+    last_validated_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ByokCredentialsPublic(SQLModel):
+    credentials: list[ByokCredentialPublic] = Field(default_factory=list)
+
+
+# ---- Search eligibility + response shapes --------------------
+
+
+class SearchEligibilityPublic(SQLModel):
+    """Drives the Search tab's gating UX. ``allowed`` is the boolean the
+    frontend reads; when ``allowed`` is false, ``reason`` explains how
+    the user can become eligible (upgrade vs add BYOK)."""
+
+    tier: Literal["free", "pro", "max"]
+    allowed: bool
+    route: Literal["managed", "byok:anthropic", "byok:openai"] | None = None
+    reason: Literal["upgrade_required", "byok_required"] | None = None
+    byok: list[ByokCredentialPublic] = Field(default_factory=list)
+
+
+class SearchQuery(SQLModel):
+    """Request body for POST /v2/search."""
+
+    query: str = Field(min_length=1, max_length=2000)
+    top_k: int = Field(default=8, ge=1, le=20)
+    demo: bool = False

@@ -13,8 +13,10 @@ from app.api.routes import (
     topics,
     users,
     utils,
+    v2_byok,
     v2_documents,
     v2_metrics,
+    v2_search,
 )
 from app.core.config import settings
 
@@ -31,6 +33,8 @@ api_router.include_router(context_packs.router)
 api_router.include_router(skills.router)
 api_router.include_router(v2_documents.router)
 api_router.include_router(v2_metrics.router)
+api_router.include_router(v2_byok.router)
+api_router.include_router(v2_search.router)
 api_router.include_router(utils.router)
 
 if settings.ENVIRONMENT == "local":
