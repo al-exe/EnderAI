@@ -93,6 +93,64 @@ def test_v2_documents_create_update_get(client: TestClient) -> None:
     assert empty_update.status_code == 422, empty_update.text
 
 
+def test_v2_documents_owner_can_set_displayed_dates(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=headers,
+        json={"title": "Backdated draft"},
+    )
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+
+    custom_created = "2025-01-02T03:04:05+00:00"
+    custom_updated = "2025-06-07T08:09:10+00:00"
+    updated = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=headers,
+        json={
+            "created_at": custom_created,
+            "updated_at": custom_updated,
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["created_at"].startswith("2025-01-02T03:04:05")
+    assert body["updated_at"].startswith("2025-06-07T08:09:10")
+
+    # A subsequent edit without an explicit updated_at should bump it forward.
+    bumped = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=headers,
+        json={"human_summary": "Edited later."},
+    )
+    assert bumped.status_code == 200, bumped.text
+    assert bumped.json()["updated_at"] != body["updated_at"]
+
+
+def test_v2_documents_non_owner_cannot_set_dates(client: TestClient) -> None:
+    _, owner_headers = _signup(client)
+    _, other_headers = _signup(client)
+
+    created = client.post(
+        "/api/v1/v2/documents/",
+        headers=owner_headers,
+        json={"title": "Shared as editor"},
+    )
+    document_id = created.json()["id"]
+
+    forbidden = client.patch(
+        f"/api/v1/v2/documents/{document_id}",
+        headers=other_headers,
+        json={"created_at": "2025-01-01T00:00:00+00:00"},
+    )
+    # Non-collaborator gets 404 from the actor-scoped fetch; an editor share
+    # would surface as 403 via _require_document_owner. Either way, dates are
+    # owner-only.
+    assert forbidden.status_code in {403, 404}, forbidden.text
+
+
 def test_v2_documents_can_be_deleted_by_owner(client: TestClient) -> None:
     _, headers = _signup(client)
 

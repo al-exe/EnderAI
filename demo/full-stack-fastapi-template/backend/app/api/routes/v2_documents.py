@@ -510,6 +510,11 @@ def update_v2_document(
     if "folder_id" in document_in.model_fields_set:
         _require_document_owner(document, current_user)
         _validate_folder_access(session, current_user, document_in.folder_id, demo=demo)
+    if (
+        "created_at" in document_in.model_fields_set
+        or "updated_at" in document_in.model_fields_set
+    ):
+        _require_document_owner(document, current_user)
     if not apply_v2_document_update(document, document_in):
         if document_in.usage is not None:
             # Allow callers to PATCH purely to record usage. We still need the

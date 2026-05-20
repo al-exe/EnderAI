@@ -1007,6 +1007,11 @@ class V2DocumentUpdate(SQLModel):
     details_markdown_sections: list[V2DocumentDetailsSection] | None = None
     visibility: Literal["private", "organization"] | None = None
     folder_id: uuid.UUID | None = None
+    # Owner-only overrides for the displayed timestamps. When the owner edits
+    # these from the document page we trust the new value rather than
+    # auto-bumping updated_at to "now" inside apply_v2_document_update.
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     # Optional usage payload — same semantics as V2DocumentCreate.usage.
     usage: "TaskforceUsagePayload | None" = None
 
