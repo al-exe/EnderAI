@@ -36,6 +36,7 @@ def test_billing_status_for_user_without_customer(
     assert response.status_code == 200, response.text
     assert response.json()["has_customer"] is False
     assert response.json()["is_subscription_active"] is False
+    assert response.json()["subscription_tier"] == "free"
 
 
 def test_checkout_session_creates_customer_and_returns_url(
@@ -128,6 +129,7 @@ def test_subscription_webhook_updates_billing_state(
     assert user.stripe_subscription_id == "sub_test"
     assert user.stripe_subscription_status == "active"
     assert user.stripe_price_id == "price_test"
+    assert user.subscription_tier == "pro"
     assert user.stripe_subscription_current_period_end is not None
 
 

@@ -3,6 +3,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.security import get_password_hash, verify_password
+from app.core.tiering import sync_subscription_tier
 from app.models import Organization, User, UserCreate, UserUpdate
 
 
@@ -18,6 +19,7 @@ def create_user(
     if user_create.password:
         extra_data["hashed_password"] = get_password_hash(user_create.password)
     db_obj = User.model_validate(user_create, update=extra_data)
+    sync_subscription_tier(db_obj)
     session.add(db_obj)
     session.flush()
     if db_obj.organization_id is None:
@@ -43,6 +45,7 @@ def update_user(*, session: Session, db_user: User, user_in: UserUpdate) -> Any:
         hashed_password = get_password_hash(password)
         extra_data["hashed_password"] = hashed_password
     db_user.sqlmodel_update(user_data, update=extra_data)
+    sync_subscription_tier(db_user)
     session.add(db_user)
     session.commit()
     session.refresh(db_user)

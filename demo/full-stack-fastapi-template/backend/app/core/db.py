@@ -2,6 +2,7 @@ from sqlmodel import Session, create_engine, select
 
 from app import crud
 from app.core.config import settings
+from app.core.tiering import sync_subscription_tier
 from app.models import User, UserCreate
 
 engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
@@ -38,6 +39,7 @@ def init_db(session: Session) -> None:
         )
         user = crud.create_user(session=session, user_create=user_in, commit=False)
         user.v2 = is_v2_enabled_identity(user.email)
+        sync_subscription_tier(user)
         session.add(user)
         session.commit()
         session.refresh(user)

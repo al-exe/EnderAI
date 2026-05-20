@@ -308,6 +308,7 @@ def test_retrieve_users(
         assert "stripe_subscription_current_period_end" in item
         assert "stripe_subscription_cancel_at_period_end" in item
         assert "stripe_price_id" in item
+        assert "subscription_tier" in item
 
 
 def test_update_user_me(

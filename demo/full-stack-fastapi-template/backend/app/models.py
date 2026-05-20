@@ -203,6 +203,7 @@ class User(UserBase, table=True):
     )
     stripe_subscription_cancel_at_period_end: bool = False
     stripe_price_id: str | None = Field(default=None, max_length=255)
+    subscription_tier: str = Field(default="free", index=True, max_length=16)
 
 
 class UserPublic(UserBase):
@@ -214,6 +215,7 @@ class UserPublic(UserBase):
     stripe_subscription_current_period_end: datetime | None = None
     stripe_subscription_cancel_at_period_end: bool = False
     stripe_price_id: str | None = None
+    subscription_tier: Literal["free", "pro", "max", "admin"] = "free"
 
 
 class UsersPublic(SQLModel):
@@ -228,6 +230,7 @@ class BillingStatusPublic(SQLModel):
     subscription_cancel_at_period_end: bool = False
     price_id: str | None = None
     is_subscription_active: bool = False
+    subscription_tier: Literal["free", "pro", "max", "admin"] = "free"
 
 
 class BillingSessionPublic(SQLModel):
@@ -1509,7 +1512,7 @@ class SearchEligibilityPublic(SQLModel):
     frontend reads; when ``allowed`` is false, ``reason`` explains how
     the user can become eligible (upgrade vs add BYOK)."""
 
-    tier: Literal["free", "pro", "max"]
+    tier: Literal["free", "pro", "max", "admin"]
     allowed: bool
     route: Literal["managed", "byok:anthropic", "byok:openai"] | None = None
     reason: Literal["upgrade_required", "byok_required"] | None = None

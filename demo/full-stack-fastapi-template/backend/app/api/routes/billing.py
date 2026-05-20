@@ -14,11 +14,14 @@ from app.core.stripe_billing import (
     get_subscription_price_id,
     verify_webhook_signature,
 )
+from app.core.tiering import (
+    ACTIVE_SUBSCRIPTION_STATUSES,
+    sync_subscription_tier,
+)
 from app.models import BillingSessionPublic, BillingStatusPublic, Message, User
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
-ACTIVE_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 stripe_client = StripeBillingClient()
 
 
@@ -37,6 +40,7 @@ def _to_billing_status(user: User) -> BillingStatusPublic:
         ),
         price_id=user.stripe_price_id,
         is_subscription_active=status_value in ACTIVE_SUBSCRIPTION_STATUSES,
+        subscription_tier=sync_subscription_tier(user).value,
     )
 
 
@@ -114,6 +118,7 @@ def _apply_subscription_payload(
     price_id = get_subscription_price_id(subscription)
     if price_id:
         user.stripe_price_id = price_id
+    sync_subscription_tier(user)
 
 
 def _handle_checkout_session_completed(
@@ -141,6 +146,7 @@ def _handle_checkout_session_completed(
         user.stripe_subscription_id = subscription_id
     if settings.STRIPE_PRICE_ID:
         user.stripe_price_id = settings.STRIPE_PRICE_ID
+    sync_subscription_tier(user)
     session.add(user)
 
 
@@ -179,6 +185,7 @@ def _handle_invoice_event(
     if not user:
         return
     user.stripe_subscription_status = status_value
+    sync_subscription_tier(user)
     session.add(user)
 
 

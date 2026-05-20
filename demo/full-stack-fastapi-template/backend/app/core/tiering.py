@@ -25,6 +25,7 @@ class Tier(StrEnum):
     FREE = "free"
     PRO = "pro"
     MAX = "max"
+    ADMIN = "admin"
 
 
 def _price_id_to_tier() -> dict[str, Tier]:
@@ -36,24 +37,56 @@ def _price_id_to_tier() -> dict[str, Tier]:
         mapping[settings.STRIPE_PRICE_ID_PRO] = Tier.PRO
     if settings.STRIPE_PRICE_ID_MAX:
         mapping[settings.STRIPE_PRICE_ID_MAX] = Tier.MAX
+    if settings.STRIPE_PRICE_ID and settings.STRIPE_PRICE_ID not in mapping:
+        mapping[settings.STRIPE_PRICE_ID] = Tier.PRO
     return mapping
 
 
-def resolve_tier(user: User) -> Tier:
-    """Resolve a user's current paid tier from Stripe state.
+def normalize_tier(value: str | None) -> Tier:
+    if not value:
+        return Tier.FREE
+    try:
+        return Tier(value)
+    except ValueError:
+        return Tier.FREE
 
-    A subscription is "live" only when its status is active/trialing AND
-    its price_id maps to a known tier. Cancelled/past_due subscriptions
-    fall back to Free immediately even if ``stripe_price_id`` is still
-    populated — this matches how the existing billing helper interprets
-    ``is_subscription_active``."""
+
+def tier_from_price_id(price_id: str | None) -> Tier | None:
+    if not price_id:
+        return None
+    return _price_id_to_tier().get(price_id)
+
+
+def resolve_tier(user: User) -> Tier:
+    """Resolve a user's current effective tier.
+
+    Admins are always Admin. Non-admin paid tiers are live only when
+    Stripe says the subscription is active/trialing. Cancelled/past_due
+    subscriptions fall back to Free immediately even if ``stripe_price_id``
+    or the stored ``subscription_tier`` still says Pro/Max."""
+
+    if user.is_superuser:
+        return Tier.ADMIN
 
     if user.stripe_subscription_status not in ACTIVE_SUBSCRIPTION_STATUSES:
         return Tier.FREE
-    price_id = user.stripe_price_id
-    if not price_id:
-        return Tier.FREE
-    return _price_id_to_tier().get(price_id, Tier.FREE)
+
+    price_tier = tier_from_price_id(user.stripe_price_id)
+    if price_tier in {Tier.PRO, Tier.MAX}:
+        return price_tier
+
+    stored_tier = normalize_tier(getattr(user, "subscription_tier", None))
+    if stored_tier in {Tier.PRO, Tier.MAX}:
+        return stored_tier
+    return Tier.FREE
+
+
+def sync_subscription_tier(user: User) -> Tier:
+    """Persist the effective account tier for API consumers and gates."""
+
+    tier = resolve_tier(user)
+    user.subscription_tier = tier.value
+    return tier
 
 
 @dataclass(frozen=True)
@@ -83,9 +116,9 @@ def can_use_search(
     if so, how the LLM call should be routed.
 
     Routing rules:
-      - Max  → always routes through our managed Claude credential.
-      - Pro  → must supply BYOK (anthropic OR openai); we route through it.
-      - Free → never allowed; UI shows the upsell card.
+      - Admin/Max → always routes through our managed Claude credential.
+      - Pro       → must supply BYOK (anthropic OR openai); we route through it.
+      - Free      → never allowed; UI shows the upsell card.
 
     BYOK *does not* override managed routing on Max — Max users opted
     into "we pay for the LLM," and we don't second-guess that choice
@@ -93,7 +126,7 @@ def can_use_search(
 
     tier = resolve_tier(user)
 
-    if tier == Tier.MAX:
+    if tier in {Tier.ADMIN, Tier.MAX}:
         return SearchEligibility(
             tier=tier, allowed=True, route="managed", byok=byok_credentials
         )

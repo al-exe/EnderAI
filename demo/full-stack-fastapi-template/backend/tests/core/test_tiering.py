@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core import tiering
-from app.core.tiering import SearchEligibility, Tier, can_use_search, resolve_tier
+from app.core.tiering import (
+    SearchEligibility,
+    Tier,
+    can_use_search,
+    resolve_tier,
+    sync_subscription_tier,
+)
 from app.models import ByokCredential, User
 
 PRO_PRICE = "price_pro_test"
@@ -26,17 +32,24 @@ def _patch_price_ids(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_PRO", PRO_PRICE)
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_MAX", MAX_PRICE)
+    monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID", "price_legacy_pro")
 
 
 def _make_user(
-    *, status: str | None = None, price_id: str | None = None
+    *,
+    status: str | None = None,
+    price_id: str | None = None,
+    is_superuser: bool = False,
+    subscription_tier: str = "free",
 ) -> User:
     return User(
         id=uuid.uuid4(),
         email="t@example.com",
         hashed_password="x",
+        is_superuser=is_superuser,
         stripe_subscription_status=status,
         stripe_price_id=price_id,
+        subscription_tier=subscription_tier,
     )
 
 
@@ -59,6 +72,10 @@ def test_resolve_tier_free_when_no_subscription() -> None:
     assert resolve_tier(_make_user()) == Tier.FREE
 
 
+def test_resolve_tier_admin_for_superuser() -> None:
+    assert resolve_tier(_make_user(is_superuser=True)) == Tier.ADMIN
+
+
 def test_resolve_tier_free_when_inactive_status() -> None:
     user = _make_user(status="past_due", price_id=PRO_PRICE)
     assert resolve_tier(user) == Tier.FREE
@@ -72,6 +89,16 @@ def test_resolve_tier_free_when_unknown_price_id() -> None:
 def test_resolve_tier_pro_when_active_pro_price() -> None:
     user = _make_user(status="active", price_id=PRO_PRICE)
     assert resolve_tier(user) == Tier.PRO
+
+
+def test_resolve_tier_pro_for_legacy_checkout_price() -> None:
+    user = _make_user(status="active", price_id="price_legacy_pro")
+    assert resolve_tier(user) == Tier.PRO
+
+
+def test_resolve_tier_from_stored_tier_when_price_id_missing() -> None:
+    user = _make_user(status="active", subscription_tier="max")
+    assert resolve_tier(user) == Tier.MAX
 
 
 def test_resolve_tier_max_when_trialing_max_price() -> None:
@@ -96,6 +123,20 @@ def test_can_use_search_max_always_managed() -> None:
     assert out.allowed is True
     assert out.route == "managed"
     assert out.reason is None
+
+
+def test_can_use_search_admin_routes_to_managed() -> None:
+    user = _make_user(is_superuser=True)
+    out = can_use_search(user, [])
+    assert out.allowed is True
+    assert out.tier == Tier.ADMIN
+    assert out.route == "managed"
+
+
+def test_sync_subscription_tier_persists_effective_tier() -> None:
+    user = _make_user(status="active", price_id=PRO_PRICE)
+    assert sync_subscription_tier(user) == Tier.PRO
+    assert user.subscription_tier == "pro"
 
 
 def test_can_use_search_pro_without_byok_blocked() -> None:
