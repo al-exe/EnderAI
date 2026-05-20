@@ -1378,6 +1378,25 @@ class MetricsResponse(SQLModel):
         populate_by_name = True
 
 
+class MetricEventRecordedPublic(SQLModel):
+    """Response shape for POST /v2/metrics/usage.
+
+    Mirrors the columns the Metrics page can attribute back to a single
+    write so the caller (typically a harness hook) can confirm what the
+    backend booked. ``usd_amount`` is null when the model_id isn't in
+    our pricing snapshot — tokens still record, dollar attribution is
+    just deferred until pricing lands."""
+
+    id: uuid.UUID
+    kind: str
+    occurred_at: datetime
+    model_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    usd_amount: str | None = None
+
+
 # ============================================================
 # Taskforce V2 Search — embeddings, BYOK credentials, eligibility
 # ============================================================

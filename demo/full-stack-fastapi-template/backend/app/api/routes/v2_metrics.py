@@ -28,14 +28,17 @@ from app.core.metrics import (
     sum_metric_total,
     top_models,
 )
+from app.core.metrics.events import record_search_usage
 from app.models import (
     MetricBreakdownEntry,
     MetricDefinitionPublic,
     MetricDefinitionsResponse,
+    MetricEventRecordedPublic,
     MetricPresentationPublic,
     MetricSeriesPoint,
     MetricsResponse,
     MetricValuePublic,
+    TaskforceUsagePayload,
 )
 
 router = APIRouter(prefix="/v2/metrics", tags=["v2-metrics"])
@@ -263,3 +266,57 @@ def read_metrics(
             include_breakdowns=include_breakdowns,
         )
     return response
+
+
+@router.post(
+    "/usage",
+    response_model=MetricEventRecordedPublic,
+    status_code=201,
+)
+def record_session_usage(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    usage: TaskforceUsagePayload,
+    source: str = Query(
+        default="hook",
+        max_length=32,
+        description=(
+            "Free-form label written to the metrics_event payload so the "
+            "read API can split spend by origin (e.g. 'hook', 'search', "
+            "'cli'). Defaults to 'hook' which is the Claude Code Stop "
+            "hook ingest path."
+        ),
+    ),
+    demo: bool = Query(default=False),
+) -> Any:
+    """Record a ``tokens.consumed`` event without requiring an active
+    document.
+
+    The document-scoped ``POST /v2/documents/{id}/usage`` route assumes
+    the agent is mid-task with an active document; the Claude Code
+    Stop hook (and Codex, Cursor, etc.) doesn't necessarily have one.
+    This endpoint lets a harness fire-and-forget per-turn usage so the
+    Metrics page populates regardless of whether the agent went
+    through the V2 document lifecycle."""
+
+    event = record_search_usage(
+        session,
+        user=current_user,
+        usage=usage,
+        document=None,
+        is_demo=demo,
+        billed_to=source,
+    )
+    session.commit()
+    session.refresh(event)
+    return MetricEventRecordedPublic(
+        id=event.id,
+        kind=event.kind,
+        occurred_at=event.occurred_at,
+        model_id=event.model_id,
+        input_tokens=event.input_tokens,
+        output_tokens=event.output_tokens,
+        cache_read_tokens=event.cache_read_tokens,
+        usd_amount=str(event.usd_amount) if event.usd_amount is not None else None,
+    )
