@@ -1286,6 +1286,7 @@ METRICS_EVENT_TOKENS_CONSUMED = "tokens.consumed"
 METRICS_EVENT_TOKENS_SAVED_CACHE = "tokens.saved.cache"
 METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY = "tokens.saved.summary_only"
 METRICS_EVENT_TOKENS_SAVED_REUSE = "tokens.saved.reuse"
+METRICS_EVENT_TASKFORCE_OBSERVED = "taskforce.observed"
 
 
 class TaskforceUsagePayload(SQLModel):
@@ -1412,6 +1413,77 @@ class TaskforceSessionLogResponse(SQLModel):
 
     session_id: str
     entries: list[TaskforceSessionLogEntry]
+
+
+# ----- Taskforce observation (Phase 4, TF-178) ----------------------------
+
+
+class TaskforceTranscriptTurn(SQLModel):
+    """One turn in a redacted Claude Code transcript.
+
+    Both ``role`` and ``content`` are best-effort: hooks ship whatever they
+    could extract from the harness's session log. We don't strictly enforce
+    role values so future Claude Code schema bumps don't break ingest.
+    """
+
+    role: str
+    content: str
+
+
+class TaskforceHarnessUsage(SQLModel):
+    """Aggregated per-session token counts reported by the hook.
+
+    Unlike the per-turn ``TaskforceUsagePayload``, this is the authoritative
+    session total — the harness rolls it up by reading its own meter. We
+    trust this for the ``tokens.consumed.agent_session`` event so the
+    dashboard reflects real session cost even when the model can't see its
+    own tokens.
+    """
+
+    model_id: str = Field(min_length=1, max_length=128)
+    total_input_tokens: int = Field(default=0, ge=0)
+    total_output_tokens: int = Field(default=0, ge=0)
+    total_cache_read_tokens: int = Field(default=0, ge=0)
+    total_cache_write_tokens: int = Field(default=0, ge=0)
+
+
+class TaskforceCommandRun(SQLModel):
+    cmd: str = Field(min_length=1, max_length=2000)
+    exit_code: int | None = None
+
+
+class TaskforceObserveRequest(SQLModel):
+    """Request body for POST /v2/taskforce/observe.
+
+    Fired by the Stop hook (``kind: "final"``) at session end and by the
+    PostToolUse hook (``kind: "checkpoint"``) every N tool calls.
+    """
+
+    kind: Literal["checkpoint", "final"]
+    prompt: str = Field(min_length=0, max_length=8000)
+    transcript: list[TaskforceTranscriptTurn] = Field(default_factory=list)
+    active_document_id: uuid.UUID | None = None
+    pinned_query_id: uuid.UUID | None = None
+    session_id: str | None = Field(default=None, max_length=128)
+    cwd: str | None = None
+    files_touched: list[str] = Field(default_factory=list)
+    commands_run: list[TaskforceCommandRun] = Field(default_factory=list)
+    diff_summary: str | None = None
+    duration_ms: int = Field(default=0, ge=0)
+    harness: TaskforceHarnessUsage | None = None
+    checkpoint_index: int | None = Field(default=None, ge=1)
+
+
+class TaskforceObserveResponse(SQLModel):
+    """Response from POST /v2/taskforce/observe."""
+
+    action: Literal["created", "updated", "skipped"]
+    document_id: uuid.UUID | None = None
+    patched_fields: list[str] = Field(default_factory=list)
+    reason: str
+    metrics_events_recorded: list[uuid.UUID] = Field(default_factory=list)
+    summarizer_usd_cost: Decimal = Decimal(0)
+    shadow: bool = False
 
 
 # ----- Metrics read-side public shapes -------------------------------------

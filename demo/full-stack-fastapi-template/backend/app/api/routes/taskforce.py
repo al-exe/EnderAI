@@ -19,11 +19,14 @@ from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.taskforce.discover import discover as run_discover
+from app.core.taskforce.observe import observe as run_observe
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     MetricsEvent,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
+    TaskforceObserveRequest,
+    TaskforceObserveResponse,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     V2Document,
@@ -48,6 +51,43 @@ def discover_route(
     """
 
     response = run_discover(
+        session,
+        actor=current_user,
+        request=body,
+        demo=demo,
+    )
+    session.commit()
+    return response
+
+
+@router.post(
+    "/observe",
+    response_model=TaskforceObserveResponse,
+    status_code=202,
+)
+async def observe_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceObserveRequest,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Server-side observation entry point (TF-178 / Phase 4).
+
+    Called by the Stop hook (``kind: "final"``) and the PostToolUse
+    hook (``kind: "checkpoint"``). The handler:
+      * runs a deterministic materiality check
+      * calls the haiku summarizer when material
+      * patches the active document (or creates a fresh one) — unless
+        ``TASKFORCE_OBSERVE_SHADOW=1`` (default), in which case the
+        intent is audited but no doc state changes
+      * records ``tokens.consumed`` events for the summarizer and the
+        harness-reported session totals
+    Returns a structured envelope so the hook can log + the dashboard
+    can attribute. Failures never propagate; the hook should treat any
+    non-2xx as "skip".
+    """
+
+    response = await run_observe(
         session,
         actor=current_user,
         request=body,
