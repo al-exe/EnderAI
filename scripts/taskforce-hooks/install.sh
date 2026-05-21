@@ -62,7 +62,10 @@ merge_hook() {
             // [{matcher: "*", hooks: []}]
         )
         | .hooks[$hook_name] |= (
-            if any(.hooks[]?; .command == $cmd) then
+            # `.` is the array of {matcher, hooks} entries at this point.
+            # Dedup: if any entry already lists our command, leave the
+            # whole array alone. Otherwise, append to the wildcard matcher.
+            if (any(.[]; .hooks[]?.command == $cmd)) then
                 .
             else
                 map(
