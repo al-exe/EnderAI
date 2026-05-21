@@ -33,6 +33,31 @@ def test_get_users_normal_user_me(
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
     assert current_user["v2"] is False
+    assert current_user["subscription_tier"] == "free"
+
+
+def test_get_users_me_sanitizes_admin_tier(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID", "price_admin_test")
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    user.stripe_subscription_status = "active"
+    user.stripe_price_id = "price_admin_test"
+    db.add(user)
+    db.commit()
+    headers = user_authentication_headers(client=client, email=email, password=password)
+
+    r = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["subscription_tier"] == "max"
 
 
 def test_user_last_seen_updates_on_authenticated_page_access(
@@ -308,6 +333,7 @@ def test_retrieve_users(
         assert "stripe_subscription_current_period_end" in item
         assert "stripe_subscription_cancel_at_period_end" in item
         assert "stripe_price_id" in item
+        assert "subscription_tier" in item
 
 
 def test_update_user_me(

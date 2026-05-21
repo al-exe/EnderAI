@@ -11,6 +11,7 @@ from app.core import firebase_auth, security
 from app.core.config import settings
 from app.core.db import is_v2_enabled_identity
 from app.core.demo import ensure_demo_workspace
+from app.core.tiering import resolve_public_tier
 from app.models import (
     FirebaseTokenExchange,
     Message,
@@ -153,7 +154,9 @@ def test_token(current_user: CurrentUser) -> Any:
     """
     Test access token
     """
-    return current_user
+    return UserPublic.model_validate(current_user).model_copy(
+        update={"subscription_tier": resolve_public_tier(current_user)}
+    )
 
 
 @router.post("/password-recovery/{email}")

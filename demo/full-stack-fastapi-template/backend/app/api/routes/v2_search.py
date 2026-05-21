@@ -39,7 +39,7 @@ from app.core.search.types import (
     SearchHit,
     TokenEvent,
 )
-from app.core.tiering import SearchEligibility, can_use_search
+from app.core.tiering import SearchEligibility, can_use_search, public_tier
 from app.models import (
     ByokCredential,
     ByokCredentialPublic,
@@ -83,7 +83,7 @@ def _eligibility_to_public(
     eligibility: SearchEligibility, byok: list[ByokCredential]
 ) -> SearchEligibilityPublic:
     return SearchEligibilityPublic(
-        tier=eligibility.tier.value,
+        tier=public_tier(eligibility.tier),
         allowed=eligibility.allowed,
         route=eligibility.route,
         reason=eligibility.reason,

@@ -12,11 +12,20 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core import tiering
-from app.core.tiering import SearchEligibility, Tier, can_use_search, resolve_tier
+from app.core.tiering import (
+    SearchEligibility,
+    Tier,
+    can_use_search,
+    resolve_public_tier,
+    resolve_tier,
+)
 from app.models import ByokCredential, User
 
+ADMIN_PRICE = "price_admin_test"
 PRO_PRICE = "price_pro_test"
 MAX_PRICE = "price_max_test"
+TASKFORCE_PRO_PRICE = "price_taskforce_pro_live"
+TASKFORCE_MAX_PRICE = "price_taskforce_max_live"
 
 
 @pytest.fixture(autouse=True)
@@ -24,8 +33,11 @@ def _patch_price_ids(monkeypatch: pytest.MonkeyPatch) -> None:
     """The tier helper reads ``settings`` lazily; pin both price IDs
     so the tests don't depend on the deployment's real Stripe config."""
 
+    monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID", ADMIN_PRICE)
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_PRO", PRO_PRICE)
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_MAX", MAX_PRICE)
+    monkeypatch.setattr(tiering.settings, "STRIPE_TASKFORCE_PRO", TASKFORCE_PRO_PRICE)
+    monkeypatch.setattr(tiering.settings, "STRIPE_TASKFORCE_MAX", TASKFORCE_MAX_PRICE)
 
 
 def _make_user(
@@ -79,6 +91,23 @@ def test_resolve_tier_max_when_trialing_max_price() -> None:
     assert resolve_tier(user) == Tier.MAX
 
 
+def test_resolve_tier_admin_when_active_legacy_checkout_price() -> None:
+    user = _make_user(status="active", price_id=ADMIN_PRICE)
+    assert resolve_tier(user) == Tier.ADMIN
+    assert resolve_public_tier(user) == "max"
+
+
+def test_resolve_tier_maps_live_taskforce_prices() -> None:
+    assert (
+        resolve_tier(_make_user(status="active", price_id=TASKFORCE_PRO_PRICE))
+        == Tier.PRO
+    )
+    assert (
+        resolve_tier(_make_user(status="active", price_id=TASKFORCE_MAX_PRICE))
+        == Tier.MAX
+    )
+
+
 # ---- can_use_search --------------------------------------------------
 
 
@@ -93,6 +122,15 @@ def test_can_use_search_free_blocked_with_upgrade_reason() -> None:
 def test_can_use_search_max_always_managed() -> None:
     user = _make_user(status="active", price_id=MAX_PRICE)
     out = can_use_search(user, [])
+    assert out.allowed is True
+    assert out.route == "managed"
+    assert out.reason is None
+
+
+def test_can_use_search_admin_routes_to_managed() -> None:
+    user = _make_user(status="active", price_id=ADMIN_PRICE)
+    out = can_use_search(user, [])
+    assert out.tier == Tier.ADMIN
     assert out.allowed is True
     assert out.route == "managed"
     assert out.reason is None

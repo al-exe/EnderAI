@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.models import ByokCredential, User
 
 ACTIVE_SUBSCRIPTION_STATUSES: set[str] = {"active", "trialing"}
+PublicTier = Literal["free", "pro", "max"]
 
 
 # Use the (str, Enum) mixin rather than enum.StrEnum — StrEnum landed
@@ -29,6 +30,7 @@ class Tier(str, Enum):
     FREE = "free"
     PRO = "pro"
     MAX = "max"
+    ADMIN = "admin"
 
 
 def _price_id_to_tier() -> dict[str, Tier]:
@@ -36,10 +38,16 @@ def _price_id_to_tier() -> dict[str, Tier]:
     import time sees the override."""
 
     mapping: dict[str, Tier] = {}
+    if settings.STRIPE_PRICE_ID:
+        mapping[settings.STRIPE_PRICE_ID] = Tier.ADMIN
     if settings.STRIPE_PRICE_ID_PRO:
         mapping[settings.STRIPE_PRICE_ID_PRO] = Tier.PRO
     if settings.STRIPE_PRICE_ID_MAX:
         mapping[settings.STRIPE_PRICE_ID_MAX] = Tier.MAX
+    if settings.STRIPE_TASKFORCE_PRO:
+        mapping[settings.STRIPE_TASKFORCE_PRO] = Tier.PRO
+    if settings.STRIPE_TASKFORCE_MAX:
+        mapping[settings.STRIPE_TASKFORCE_MAX] = Tier.MAX
     return mapping
 
 
@@ -58,6 +66,18 @@ def resolve_tier(user: User) -> Tier:
     if not price_id:
         return Tier.FREE
     return _price_id_to_tier().get(price_id, Tier.FREE)
+
+
+def public_tier(tier: Tier) -> PublicTier:
+    if tier == Tier.PRO:
+        return "pro"
+    if tier in {Tier.MAX, Tier.ADMIN}:
+        return "max"
+    return "free"
+
+
+def resolve_public_tier(user: User) -> PublicTier:
+    return public_tier(resolve_tier(user))
 
 
 @dataclass(frozen=True)
@@ -97,7 +117,7 @@ def can_use_search(
 
     tier = resolve_tier(user)
 
-    if tier == Tier.MAX:
+    if tier in {Tier.MAX, Tier.ADMIN}:
         return SearchEligibility(
             tier=tier, allowed=True, route="managed", byok=byok_credentials
         )

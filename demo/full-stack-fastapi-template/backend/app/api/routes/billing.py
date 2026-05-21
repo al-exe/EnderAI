@@ -14,6 +14,7 @@ from app.core.stripe_billing import (
     get_subscription_price_id,
     verify_webhook_signature,
 )
+from app.core.tiering import resolve_public_tier
 from app.models import (
     BillingCheckoutSessionCreate,
     BillingSessionPublic,
@@ -43,6 +44,7 @@ def _to_billing_status(user: User) -> BillingStatusPublic:
         ),
         price_id=user.stripe_price_id,
         is_subscription_active=status_value in ACTIVE_SUBSCRIPTION_STATUSES,
+        subscription_tier=resolve_public_tier(user),
     )
 
 
@@ -239,9 +241,10 @@ def create_checkout_session(
                 name=current_user.full_name,
                 user_id=str(current_user.id),
             )
-            customer_id = _object_id(customer.get("id"))
-            if not customer_id:
+            new_customer_id = _object_id(customer.get("id"))
+            if not new_customer_id:
                 raise StripeBillingError("Stripe did not return a customer ID")
+            customer_id = new_customer_id
             current_user.stripe_customer_id = customer_id
             session.add(current_user)
             session.commit()
