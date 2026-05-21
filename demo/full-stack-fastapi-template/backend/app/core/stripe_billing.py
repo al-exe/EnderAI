@@ -193,27 +193,24 @@ class StripeBillingClient:
         *,
         customer_id: str,
         user_id: str,
+        price_id: str,
         success_url: str,
         cancel_url: str,
     ) -> dict[str, Any]:
-        if not settings.STRIPE_PRICE_ID:
-            raise StripeBillingError(
-                "Stripe price ID is not configured",
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
         return self._request(
             "/v1/checkout/sessions",
             {
                 "mode": "subscription",
                 "customer": customer_id,
                 "client_reference_id": user_id,
-                "line_items[0][price]": settings.STRIPE_PRICE_ID,
+                "line_items[0][price]": price_id,
                 "line_items[0][quantity]": 1,
                 "success_url": success_url,
                 "cancel_url": cancel_url,
                 "metadata[user_id]": user_id,
+                "metadata[taskforce_price_id]": price_id,
                 "subscription_data[metadata][user_id]": user_id,
+                "subscription_data[metadata][taskforce_price_id]": price_id,
             },
         )
 

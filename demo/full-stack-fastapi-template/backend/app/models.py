@@ -230,6 +230,10 @@ class BillingStatusPublic(SQLModel):
     is_subscription_active: bool = False
 
 
+class BillingCheckoutSessionCreate(SQLModel):
+    tier: Literal["pro", "max"]
+
+
 class BillingSessionPublic(SQLModel):
     url: str
 

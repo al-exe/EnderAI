@@ -14,7 +14,13 @@ from app.core.stripe_billing import (
     get_subscription_price_id,
     verify_webhook_signature,
 )
-from app.models import BillingSessionPublic, BillingStatusPublic, Message, User
+from app.models import (
+    BillingCheckoutSessionCreate,
+    BillingSessionPublic,
+    BillingStatusPublic,
+    Message,
+    User,
+)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -42,6 +48,20 @@ def _to_billing_status(user: User) -> BillingStatusPublic:
 
 def _to_stripe_error(exc: StripeBillingError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.message)
+
+
+def _checkout_price_id(tier: str) -> str:
+    price_ids = {
+        "pro": settings.STRIPE_TASKFORCE_PRO,
+        "max": settings.STRIPE_TASKFORCE_MAX,
+    }
+    price_id = price_ids[tier]
+    if not price_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Stripe price ID is not configured for Taskforce {tier.title()}",
+        )
+    return price_id
 
 
 def _get_customer_id(user: User) -> str:
@@ -139,7 +159,12 @@ def _handle_checkout_session_completed(
         user.stripe_customer_id = customer_id
     if subscription_id:
         user.stripe_subscription_id = subscription_id
-    if settings.STRIPE_PRICE_ID:
+    metadata_price_id = None
+    if isinstance(metadata, dict):
+        metadata_price_id = metadata.get("taskforce_price_id")
+    if isinstance(metadata_price_id, str):
+        user.stripe_price_id = metadata_price_id
+    elif settings.STRIPE_PRICE_ID:
         user.stripe_price_id = settings.STRIPE_PRICE_ID
     session.add(user)
 
@@ -192,6 +217,7 @@ def create_checkout_session(
     *,
     session: SessionDep,
     current_user: CurrentUser,
+    checkout: BillingCheckoutSessionCreate,
 ) -> BillingSessionPublic:
     if (
         current_user.stripe_subscription_status in ACTIVE_SUBSCRIPTION_STATUSES
@@ -201,6 +227,8 @@ def create_checkout_session(
             status_code=400,
             detail="This user already has an active Stripe subscription",
         )
+
+    price_id = _checkout_price_id(checkout.tier)
 
     try:
         if current_user.stripe_customer_id:
@@ -222,6 +250,7 @@ def create_checkout_session(
         checkout_session = stripe_client.create_checkout_session(
             customer_id=customer_id,
             user_id=str(current_user.id),
+            price_id=price_id,
             success_url=_settings_url(),
             cancel_url=_settings_url(),
         )

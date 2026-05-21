@@ -51,9 +51,10 @@ def test_checkout_session_creates_customer_and_returns_url(
     )
     headers = user_authentication_headers(client=client, email=email, password=password)
 
-    monkeypatch.setattr(settings, "STRIPE_PRICE_ID", "price_test")
+    monkeypatch.setattr(settings, "STRIPE_TASKFORCE_PRO", "price_pro_live")
     from app.api.routes import billing
 
+    checkout_args = {}
     monkeypatch.setattr(
         billing.stripe_client,
         "create_customer",
@@ -62,21 +63,74 @@ def test_checkout_session_creates_customer_and_returns_url(
     monkeypatch.setattr(
         billing.stripe_client,
         "create_checkout_session",
-        lambda **_: {"url": "https://checkout.stripe.test/session"},
+        lambda **kwargs: checkout_args.update(kwargs)
+        or {"url": "https://checkout.stripe.test/session"},
     )
 
     response = client.post(
         f"{settings.API_V1_STR}/billing/checkout-session",
         headers=headers,
+        json={"tier": "pro"},
     )
 
     assert response.status_code == 200, response.text
     assert response.json() == {"url": "https://checkout.stripe.test/session"}
+    assert checkout_args["price_id"] == "price_pro_live"
 
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None
     db.refresh(user)
     assert user.stripe_customer_id == "cus_test"
+
+
+def test_checkout_session_uses_max_price(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "STRIPE_TASKFORCE_MAX", "price_max_live")
+    from app.api.routes import billing
+
+    checkout_args = {}
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "create_customer",
+        lambda **_: {"id": "cus_max_test"},
+    )
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "create_checkout_session",
+        lambda **kwargs: checkout_args.update(kwargs)
+        or {"url": "https://checkout.stripe.test/session"},
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/billing/checkout-session",
+        headers=normal_user_token_headers,
+        json={"tier": "max"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert checkout_args["price_id"] == "price_max_live"
+
+
+def test_checkout_session_rejects_unconfigured_tier(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "STRIPE_TASKFORCE_MAX", None)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/billing/checkout-session",
+        headers=normal_user_token_headers,
+        json={"tier": "max"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Stripe price ID is not configured for Taskforce Max"
+    )
 
 
 def test_subscription_webhook_updates_billing_state(
