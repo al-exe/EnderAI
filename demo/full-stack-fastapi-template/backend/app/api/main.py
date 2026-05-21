@@ -10,6 +10,7 @@ from app.api.routes import (
     private,
     search,
     skills,
+    taskforce,
     topics,
     users,
     utils,
@@ -33,6 +34,7 @@ api_router.include_router(context_packs.router)
 api_router.include_router(skills.router)
 api_router.include_router(v2_documents.router)
 api_router.include_router(v2_metrics.router)
+api_router.include_router(taskforce.router)
 api_router.include_router(v2_byok.router)
 api_router.include_router(v2_search.router)
 api_router.include_router(utils.router)

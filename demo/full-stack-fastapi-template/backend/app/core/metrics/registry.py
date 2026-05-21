@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
     METRICS_EVENT_DOCUMENT_CREATED,
     METRICS_EVENT_DOCUMENT_FINISHED,
     METRICS_EVENT_DOCUMENT_REUSED,
@@ -140,6 +141,19 @@ REGISTRY: dict[str, MetricDefinition] = {
         ),
         composed=True,
         presentation=MetricPresentation(format="ratio"),
+    ),
+    "documents_consulted": MetricDefinition(
+        name="documents_consulted",
+        display_name="Documents Consulted",
+        unit="count",
+        description=(
+            "Distinct V2 documents the Taskforce hooks surfaced to the agent in the window. "
+            "Each match returned by POST /v2/taskforce/discover counts once; the discover "
+            "endpoint is fired automatically by the UserPromptSubmit hook (TF-176)."
+        ),
+        kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
+        composed=True,
+        presentation=MetricPresentation(format="count"),
     ),
 }
 

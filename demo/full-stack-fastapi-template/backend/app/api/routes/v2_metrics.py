@@ -21,6 +21,7 @@ from app.core.metrics import (
     MetricDefinition,
     all_metric_names,
     daily_series,
+    documents_consulted_count,
     documents_touched_count,
     resolve_window,
     reuse_rate,
@@ -91,19 +92,16 @@ def _compute_metric_value(
     defn: MetricDefinition,
     include_breakdowns: bool,
 ) -> MetricValuePublic:
-    if defn.name == "documents_touched":
-        total = Decimal(
-            documents_touched_count(
-                session, user_id=user_id, is_demo=is_demo, window=window
-            )
+    if defn.name in {"documents_touched", "documents_consulted"}:
+        counter = (
+            documents_touched_count
+            if defn.name == "documents_touched"
+            else documents_consulted_count
         )
+        total = Decimal(counter(session, user_id=user_id, is_demo=is_demo, window=window))
         prev_window = window.previous()
         prev_total = (
-            Decimal(
-                documents_touched_count(
-                    session, user_id=user_id, is_demo=is_demo, window=prev_window
-                )
-            )
+            Decimal(counter(session, user_id=user_id, is_demo=is_demo, window=prev_window))
             if prev_window is not None
             else None
         )

@@ -7,6 +7,7 @@ See docs/taskforce-metrics-engine-plan.md.
 """
 
 from app.core.metrics.events import (
+    record_document_consulted,
     record_document_created,
     record_document_finished,
     record_document_reused,
@@ -18,6 +19,7 @@ from app.core.metrics.queries import (
     MetricWindow,
     SavingsBreakdown,
     daily_series,
+    documents_consulted_count,
     documents_touched_count,
     resolve_window,
     reuse_rate,
@@ -58,9 +60,11 @@ __all__ = [
     "count_paragraph_tokens",
     "count_tokens",
     "daily_series",
+    "documents_consulted_count",
     "documents_touched_count",
     "metric",
     "pricing_for",
+    "record_document_consulted",
     "record_document_created",
     "record_document_finished",
     "record_document_reused",
