@@ -21,6 +21,7 @@ import {
   type ActiveDocumentState,
 } from "./v2Documents/index.js";
 import { callTaskforceDiscover } from "./taskforce/discover.js";
+import { callTaskforceSessionLog } from "./taskforce/sessionLog.js";
 
 export type McpServerOptions = {
   // Optional backend bearer token provider used for all tool calls in this server instance.
@@ -289,7 +290,16 @@ const TaskforceDiscoverArgsSchema = z
     recent_commands: z.array(z.string()).optional(),
     k: z.number().int().min(1).max(3).optional(),
     min_score: z.number().min(0).max(1).optional(),
+    session_id: z.string().min(1).max(128).optional(),
     demo: z.boolean().optional(),
+  })
+  .strict();
+
+// TF-176 / Phase 2: per-session consult log.
+const TaskforceSessionLogArgsSchema = z
+  .object({
+    session_id: z.string().min(1).max(128),
+    limit: z.number().int().min(1).max(200).optional(),
   })
   .strict();
 
@@ -1644,6 +1654,30 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
         },
         {
+          name: "taskforce_session_log",
+          description:
+            "Return the Taskforce discovery preamble + consult history for a Claude Code session. Powers the `/taskforce` slash command — an agent or user can ask 'what did the hook pull into context this session?' without leaving Claude Code. Filters `document.consulted` events by `session_id` (which the UserPromptSubmit hook embeds on every discover call) and returns the per-match summary so the same preamble the hook injected can be replayed.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              session_id: {
+                type: "string",
+                minLength: 1,
+                maxLength: 128,
+                description: "Claude Code session id, sourced from the hook payload.",
+              },
+              limit: {
+                type: "integer",
+                minimum: 1,
+                maximum: 200,
+                description: "Max entries to return (default 50).",
+              },
+            },
+            required: ["session_id"],
+          },
+        },
+        {
           name: "taskforce_discover",
           description:
             "Look up the top 1–3 V2 documents related to a user prompt from the actor's library. Powers the hook-driven Taskforce workflow (TF-174 epic). The canonical caller is the UserPromptSubmit hook (TF-176), which POSTs the backend HTTP endpoint directly; this MCP tool exists as a fallback for harnesses without hook support and for agents that want to explicitly look up prior work mid-session. Each match returned is recorded as a `document.consulted` metrics event so the dashboard can attribute consultation back to a query.",
@@ -2241,6 +2275,19 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         } catch (err) {
           return toolError(
             `taskforce_discover failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "taskforce_session_log") {
+        const args = TaskforceSessionLogArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await callTaskforceSessionLog(args, { bearerToken });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `taskforce_session_log failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }

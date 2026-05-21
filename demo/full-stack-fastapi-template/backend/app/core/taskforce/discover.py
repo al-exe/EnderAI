@@ -183,6 +183,7 @@ def discover(
             query_id=query_id,
             source="discover_endpoint",
             is_demo=demo,
+            session_id=request.session_id,
         )
 
     return TaskforceDiscoverResponse(query_id=query_id, matches=matches)

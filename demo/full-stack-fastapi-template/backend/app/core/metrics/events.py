@@ -448,6 +448,7 @@ def record_document_consulted(
     source: str,
     is_demo: bool,
     pricing_model_id: str | None = None,
+    session_id: str | None = None,
 ) -> MetricsEvent:
     """Record one ``document.consulted`` event (TF-175 / Phase 1 + TF-177 / Phase 3).
 
@@ -486,6 +487,8 @@ def record_document_consulted(
         "match_reasons": match_reasons,
         "pricing_model_id": pricing_model,
     }
+    if session_id:
+        payload["session_id"] = session_id
 
     event = _build_event(
         kind=METRICS_EVENT_DOCUMENT_CONSULTED,
