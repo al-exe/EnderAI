@@ -1272,6 +1272,7 @@ METRICS_EVENT_DOCUMENT_CREATED = "document.created"
 METRICS_EVENT_DOCUMENT_UPDATED = "document.updated"
 METRICS_EVENT_DOCUMENT_REUSED = "document.reused"
 METRICS_EVENT_DOCUMENT_FINISHED = "document.finished"
+METRICS_EVENT_DOCUMENT_CONSULTED = "document.consulted"
 METRICS_EVENT_TOKENS_CONSUMED = "tokens.consumed"
 METRICS_EVENT_TOKENS_SAVED_CACHE = "tokens.saved.cache"
 METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY = "tokens.saved.summary_only"
@@ -1332,6 +1333,52 @@ class TaskforceReusePayload(SQLModel):
     band: Literal["high", "medium", "low", "explicit", "forced-new"] | None = None
     reasons: list[str] = Field(default_factory=list)
     usage: TaskforceUsagePayload | None = None
+
+
+# ----- Taskforce hook-driven discovery (Phase 1, TF-175) -------------------
+
+
+class TaskforceDiscoverRequest(SQLModel):
+    """Request body for POST /v2/taskforce/discover.
+
+    Driven by the UserPromptSubmit hook (Phase 2). All fields except
+    ``prompt`` are optional context that the hook may collect from the
+    user's environment to sharpen the match.
+    """
+
+    prompt: str = Field(min_length=1, max_length=8000)
+    cwd: str | None = None
+    files: list[str] = Field(default_factory=list)
+    git_branch: str | None = None
+    recent_commands: list[str] = Field(default_factory=list)
+    # k is hard-capped at 3 in the handler regardless of the requested value.
+    k: int = Field(default=3, ge=1, le=3)
+    min_score: float = Field(default=0.3, ge=0, le=1)
+
+
+class TaskforceDiscoverMatch(SQLModel):
+    document_id: uuid.UUID
+    title: str
+    score: float = Field(ge=0, le=1)
+    confidence_band: Literal["high", "medium", "low"]
+    match_reasons: list[str]
+    summary_markdown: str
+    last_touched_at: datetime | None
+    outcome: str | None = None
+    rediscovery_cost_tokens: int = 0
+    consult_token_cost: int = 0
+
+
+class TaskforceDiscoverResponse(SQLModel):
+    """Response from POST /v2/taskforce/discover.
+
+    Always returns a stable ``query_id`` (even when ``matches`` is empty)
+    so the hook can echo it back when acknowledging which matches it
+    actually injected into the prompt.
+    """
+
+    query_id: uuid.UUID
+    matches: list[TaskforceDiscoverMatch]
 
 
 # ----- Metrics read-side public shapes -------------------------------------

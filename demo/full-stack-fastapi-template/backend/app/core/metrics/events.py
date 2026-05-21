@@ -16,6 +16,7 @@ Conventions:
 
 from __future__ import annotations
 
+import uuid as uuid_module
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -29,6 +30,7 @@ from app.core.metrics.savings import (
     summary_only_savings,
 )
 from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
     METRICS_EVENT_DOCUMENT_CREATED,
     METRICS_EVENT_DOCUMENT_FINISHED,
     METRICS_EVENT_DOCUMENT_REUSED,
@@ -424,3 +426,60 @@ def record_document_reused(
             )
         )
     return events
+
+
+def record_document_consulted(
+    session: Session,
+    *,
+    user: User,
+    document: V2Document,
+    score: float,
+    band: str,
+    match_reasons: list[str],
+    summary_tokens: int,
+    rediscovery_cost_tokens: int,
+    query_id: uuid_module.UUID,
+    source: str,
+    is_demo: bool,
+) -> MetricsEvent:
+    """Record one ``document.consulted`` event (TF-175 / Phase 1).
+
+    The hook-driven discovery endpoint emits one of these per returned
+    match. The ``net_saved_tokens`` field is computed here as
+    ``max(0, rediscovery_cost_tokens - summary_tokens)`` so the read path
+    (Phase 3, TF-177) can sum a single field for the
+    ``avoided_rediscovery`` metric without revisiting the math.
+
+    No primary "document.*" event fires — this is purely a "the agent
+    looked at this" signal. Consult events are *not* counted in
+    ``reuse_rate`` (which is about the create-vs-reuse decision, not
+    consultation).
+    """
+
+    occurred_at = _now()
+    net_saved_tokens = max(0, rediscovery_cost_tokens - summary_tokens)
+    payload: dict[str, Any] = {
+        "source": source,
+        "score": round(score, 4),
+        "band": band,
+        "query_id": str(query_id),
+        "summary_tokens": summary_tokens,
+        "rediscovery_cost_tokens": rediscovery_cost_tokens,
+        "net_saved_tokens": net_saved_tokens,
+        "match_reasons": match_reasons,
+    }
+
+    event = _build_event(
+        kind=METRICS_EVENT_DOCUMENT_CONSULTED,
+        user=user,
+        document=document,
+        occurred_at=occurred_at,
+        is_demo=is_demo,
+        # ``input_tokens`` doubles as the headline savings field so the
+        # registry's ``avoided_rediscovery`` metric can ``sum(input_tokens)``
+        # across ``document.consulted`` events without parsing JSONB.
+        input_tokens=net_saved_tokens or None,
+        payload=payload,
+    )
+    session.add(event)
+    return event

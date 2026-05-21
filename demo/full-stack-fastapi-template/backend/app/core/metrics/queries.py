@@ -105,6 +105,31 @@ def sum_metric_total(
     return Decimal(str(result))
 
 
+def _distinct_documents_for_kinds(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    is_demo: bool,
+    window: MetricWindow,
+    kinds: tuple[str, ...],
+) -> int:
+    """Count distinct ``document_id`` values across the given event kinds.
+
+    Backs both ``documents_touched`` (across the four document.* lifecycle
+    kinds) and ``documents_consulted`` (just ``document.consulted``).
+    """
+
+    if not kinds:
+        return 0
+    statement = select(func.count(func.distinct(MetricsEvent.document_id))).where(
+        col(MetricsEvent.kind).in_(kinds)
+    )
+    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = statement.where(col(MetricsEvent.document_id).is_not(None))
+    result = session.exec(statement).first()
+    return int(result or 0)
+
+
 def documents_touched_count(
     session: Session,
     *,
@@ -114,14 +139,34 @@ def documents_touched_count(
 ) -> int:
     """Distinct document_ids across the four document.* kinds in the window."""
 
-    defn = REGISTRY["documents_touched"]
-    statement = select(func.count(func.distinct(MetricsEvent.document_id))).where(
-        col(MetricsEvent.kind).in_(defn.kinds)
+    return _distinct_documents_for_kinds(
+        session,
+        user_id=user_id,
+        is_demo=is_demo,
+        window=window,
+        kinds=REGISTRY["documents_touched"].kinds,
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
-    statement = statement.where(col(MetricsEvent.document_id).is_not(None))
-    result = session.exec(statement).first()
-    return int(result or 0)
+
+
+def documents_consulted_count(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    is_demo: bool,
+    window: MetricWindow,
+) -> int:
+    """Distinct document_ids touched by ``document.consulted`` events.
+
+    Backs the ``documents_consulted`` metric (TF-175).
+    """
+
+    return _distinct_documents_for_kinds(
+        session,
+        user_id=user_id,
+        is_demo=is_demo,
+        window=window,
+        kinds=REGISTRY["documents_consulted"].kinds,
+    )
 
 
 def reuse_rate(
