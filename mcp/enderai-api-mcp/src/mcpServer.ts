@@ -20,6 +20,7 @@ import {
   updateDocument,
   type ActiveDocumentState,
 } from "./v2Documents/index.js";
+import { callTaskforceDiscover } from "./taskforce/discover.js";
 
 export type McpServerOptions = {
   // Optional backend bearer token provider used for all tool calls in this server instance.
@@ -273,6 +274,22 @@ const FinishDocumentArgsSchema = z
     closing_note: z.string().optional(),
     demo: z.boolean().optional(),
     usage: TaskforceUsageSchema.optional(),
+  })
+  .strict();
+
+// TF-175 / Phase 1: hook-driven discovery. The MCP tool here is mostly a
+// fallback for harnesses without hook support — the canonical caller is
+// the UserPromptSubmit hook (TF-176) that POSTs the backend directly.
+const TaskforceDiscoverArgsSchema = z
+  .object({
+    prompt: z.string().min(1).max(8000),
+    cwd: z.string().optional(),
+    files: z.array(z.string()).optional(),
+    git_branch: z.string().optional(),
+    recent_commands: z.array(z.string()).optional(),
+    k: z.number().int().min(1).max(3).optional(),
+    min_score: z.number().min(0).max(1).optional(),
+    demo: z.boolean().optional(),
   })
   .strict();
 
@@ -1627,6 +1644,50 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
         },
         {
+          name: "taskforce_discover",
+          description:
+            "Look up the top 1–3 V2 documents related to a user prompt from the actor's library. Powers the hook-driven Taskforce workflow (TF-174 epic). The canonical caller is the UserPromptSubmit hook (TF-176), which POSTs the backend HTTP endpoint directly; this MCP tool exists as a fallback for harnesses without hook support and for agents that want to explicitly look up prior work mid-session. Each match returned is recorded as a `document.consulted` metrics event so the dashboard can attribute consultation back to a query.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              prompt: {
+                type: "string",
+                minLength: 1,
+                maxLength: 8000,
+                description: "The user prompt or research question to match against.",
+              },
+              cwd: { type: "string", description: "Working directory hint." },
+              files: {
+                ...stringArrayJsonSchema,
+                description: "Files in scope for this turn.",
+              },
+              git_branch: { type: "string", description: "Active git branch." },
+              recent_commands: {
+                ...stringArrayJsonSchema,
+                description: "Recent shell commands the harness saw.",
+              },
+              k: {
+                type: "integer",
+                minimum: 1,
+                maximum: 3,
+                description: "Max matches to return (hard cap 3). Defaults to 3.",
+              },
+              min_score: {
+                type: "number",
+                minimum: 0,
+                maximum: 1,
+                description: "Filter matches below this score. Defaults to 0.3.",
+              },
+              demo: {
+                type: "boolean",
+                description: "Operate against demo documents.",
+              },
+            },
+            required: ["prompt"],
+          },
+        },
+        {
           name: "enderai_session_info",
           description:
             "Return the current EnderAI MCP session policy, auth model, active case/topic ids, and authenticated user summary when available.",
@@ -2167,6 +2228,19 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         } catch (err) {
           return toolError(
             `enderai_finish_document failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "taskforce_discover") {
+        const args = TaskforceDiscoverArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await callTaskforceDiscover(args, { bearerToken });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `taskforce_discover failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
