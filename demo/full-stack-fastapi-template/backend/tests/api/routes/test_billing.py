@@ -3,6 +3,7 @@ import hmac
 import json
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -141,6 +142,115 @@ def test_checkout_session_uses_max_price(
 
     assert response.status_code == 200, response.text
     assert checkout_args["price_id"] == "price_max_live"
+
+
+def test_checkout_session_updates_active_subscription_price(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    user.stripe_customer_id = "cus_existing"
+    user.stripe_subscription_id = "sub_existing"
+    user.stripe_subscription_status = "active"
+    user.stripe_price_id = "price_pro_live"
+    db.add(user)
+    db.commit()
+    headers = user_authentication_headers(client=client, email=email, password=password)
+
+    monkeypatch.setattr(settings, "STRIPE_TASKFORCE_MAX", "price_max_live")
+    from app.api.routes import billing
+
+    update_args = {}
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "update_subscription_price",
+        lambda **kwargs: update_args.update(kwargs)
+        or {
+            "id": "sub_existing",
+            "customer": "cus_existing",
+            "status": "active",
+            "cancel_at_period_end": False,
+            "current_period_end": 1_800_000_000,
+            "items": {
+                "data": [
+                    {
+                        "id": "si_existing",
+                        "price": {"id": "price_max_live"},
+                        "current_period_end": 1_800_000_000,
+                    }
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "create_checkout_session",
+        lambda **_: pytest.fail("active subscriptions should not use checkout"),
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/billing/checkout-session",
+        headers=headers,
+        json={"tier": "max"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"url": "http://localhost:5173/settings?tab=billing"}
+    assert update_args == {
+        "subscription_id": "sub_existing",
+        "user_id": str(user.id),
+        "price_id": "price_max_live",
+    }
+    db.refresh(user)
+    assert user.stripe_price_id == "price_max_live"
+
+
+def test_checkout_session_same_active_tier_is_noop(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    user.stripe_subscription_id = "sub_existing"
+    user.stripe_subscription_status = "active"
+    user.stripe_price_id = "price_pro_live"
+    db.add(user)
+    db.commit()
+    headers = user_authentication_headers(client=client, email=email, password=password)
+
+    monkeypatch.setattr(settings, "STRIPE_TASKFORCE_PRO", "price_pro_live")
+    from app.api.routes import billing
+
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "update_subscription_price",
+        lambda **_: pytest.fail("same-tier selection should not update Stripe"),
+    )
+    monkeypatch.setattr(
+        billing.stripe_client,
+        "create_checkout_session",
+        lambda **_: pytest.fail("same-tier selection should not create checkout"),
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/billing/checkout-session",
+        headers=headers,
+        json={"tier": "pro"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"url": "http://localhost:5173/settings?tab=billing"}
 
 
 def test_checkout_session_rejects_unconfigured_tier(

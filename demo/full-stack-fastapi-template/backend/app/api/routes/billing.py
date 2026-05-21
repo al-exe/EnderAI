@@ -221,16 +221,31 @@ def create_checkout_session(
     current_user: CurrentUser,
     checkout: BillingCheckoutSessionCreate,
 ) -> BillingSessionPublic:
-    if (
-        current_user.stripe_subscription_status in ACTIVE_SUBSCRIPTION_STATUSES
-        and current_user.stripe_subscription_id
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="This user already has an active Stripe subscription",
-        )
-
     price_id = _checkout_price_id(checkout.tier)
+    active_subscription_id = (
+        current_user.stripe_subscription_id
+        if current_user.stripe_subscription_status in ACTIVE_SUBSCRIPTION_STATUSES
+        else None
+    )
+
+    if active_subscription_id:
+        if current_user.stripe_price_id == price_id:
+            return BillingSessionPublic(url=_settings_url())
+
+        try:
+            subscription = stripe_client.update_subscription_price(
+                subscription_id=active_subscription_id,
+                user_id=str(current_user.id),
+                price_id=price_id,
+            )
+        except StripeBillingError as exc:
+            raise _to_stripe_error(exc)
+
+        _apply_subscription_payload(current_user, subscription)
+        current_user.stripe_price_id = price_id
+        session.add(current_user)
+        session.commit()
+        return BillingSessionPublic(url=_settings_url())
 
     try:
         if current_user.stripe_customer_id:
