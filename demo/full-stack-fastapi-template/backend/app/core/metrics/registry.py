@@ -155,6 +155,34 @@ REGISTRY: dict[str, MetricDefinition] = {
         composed=True,
         presentation=MetricPresentation(format="count"),
     ),
+    "avoided_rediscovery": MetricDefinition(
+        name="avoided_rediscovery",
+        display_name="Avoided Rediscovery",
+        unit="tokens",
+        description=(
+            "Tokens Taskforce kept the agent from having to re-derive. For each "
+            "consultation, this is max(0, document.rediscovery_cost - summary_read). "
+            "Rediscovery cost is a structural estimate (commands + files inspected + "
+            "decisions + sections) capped at 50k tokens per doc. v1 coefficients are "
+            "round numbers and will be tuned from real consult data."
+        ),
+        kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
+        field_name="input_tokens",
+        presentation=MetricPresentation(format="compact-int", icon="spark"),
+    ),
+    "avoided_rediscovery_usd": MetricDefinition(
+        name="avoided_rediscovery_usd",
+        display_name="Avoided Rediscovery (USD)",
+        unit="usd",
+        description=(
+            "USD value of avoided_rediscovery, priced at the pricing snapshot effective "
+            "at consultation time. Defaults to claude-opus-4-7 rates when the hook does "
+            "not declare the agent's model."
+        ),
+        kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
+        field_name="usd_amount",
+        presentation=MetricPresentation(format="usd", icon="dollar"),
+    ),
 }
 
 

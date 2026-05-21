@@ -2160,22 +2160,26 @@ def apply_v2_document_update(document: V2Document, update: V2DocumentUpdate) -> 
 
 
 def refresh_v2_document_token_counts(document: V2Document) -> None:
-    """Recompute summary_tokens / details_tokens from the doc's current state.
+    """Recompute summary_tokens / details_tokens / rediscovery_cost_tokens.
 
-    Idempotent and cheap (char-based heuristic). Called after mutation so
-    the metrics engine's reuse-savings estimator (plan §2.2 source 3) has
-    fresh inputs without an extra scan.
+    Idempotent and cheap (char-based heuristic + regex over details).
+    Called after mutation so:
+      * the reuse-savings estimator (plan §2.2 source 3) has fresh inputs
+      * the Phase 3 ``avoided_rediscovery`` metric (TF-177) reflects
+        current doc structure on every consultation
     """
 
     from app.core.metrics import (
         count_details_sections_tokens,
         count_paragraph_tokens,
     )
+    from app.core.taskforce.rediscovery import compute_rediscovery_cost
 
     document.summary_tokens = count_paragraph_tokens(document.main_body)
     document.details_tokens = count_details_sections_tokens(
         document.details_markdown_sections
     )
+    document.rediscovery_cost_tokens = compute_rediscovery_cost(document)
 
 
 def ensure_v2_documents_demo_seed(session: Session, user: User) -> bool:

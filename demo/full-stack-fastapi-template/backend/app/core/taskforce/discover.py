@@ -189,14 +189,12 @@ def discover(
 
 
 def _placeholder_rediscovery_cost(document: V2Document) -> int:
-    """Coarse rediscovery cost estimate used until Phase 3 lands.
+    """Pull the cached rediscovery cost computed by Phase 3 (TF-177).
 
-    Uses the cached ``summary_tokens`` + ``details_tokens`` on V2Document
-    that already exist for the reuse-savings calculator. This is roughly
-    "if you had to ingest this whole doc from scratch, that's the cost".
-    Phase 3 (TF-177) replaces this with the §5.2 structural formula.
+    The column is populated on every doc mutation by
+    ``refresh_v2_document_token_counts``; a backfill migration seeded
+    existing rows. The placeholder name is kept so call sites can swap
+    without churn if the source changes again.
     """
 
-    summary = int(getattr(document, "summary_tokens", 0) or 0)
-    details = int(getattr(document, "details_tokens", 0) or 0)
-    return summary + details
+    return int(getattr(document, "rediscovery_cost_tokens", 0) or 0)
