@@ -1363,6 +1363,9 @@ class TaskforceDiscoverRequest(SQLModel):
     # k is hard-capped at 3 in the handler regardless of the requested value.
     k: int = Field(default=3, ge=1, le=3)
     min_score: float = Field(default=0.3, ge=0, le=1)
+    # Optional Claude Code session id, persisted on consult events so the
+    # session-log endpoint (TF-176) can return the per-session preamble.
+    session_id: str | None = Field(default=None, max_length=128)
 
 
 class TaskforceDiscoverMatch(SQLModel):
@@ -1388,6 +1391,27 @@ class TaskforceDiscoverResponse(SQLModel):
 
     query_id: uuid.UUID
     matches: list[TaskforceDiscoverMatch]
+
+
+class TaskforceSessionLogEntry(SQLModel):
+    """One discover→match in the per-session log (TF-176)."""
+
+    document_id: uuid.UUID
+    title: str
+    score: float
+    confidence_band: Literal["high", "medium", "low"]
+    match_reasons: list[str]
+    summary_markdown: str
+    occurred_at: datetime
+    query_id: str
+    net_saved_tokens: int
+
+
+class TaskforceSessionLogResponse(SQLModel):
+    """Response from GET /v2/taskforce/session-log?session_id=…"""
+
+    session_id: str
+    entries: list[TaskforceSessionLogEntry]
 
 
 # ----- Metrics read-side public shapes -------------------------------------

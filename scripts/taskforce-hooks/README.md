@@ -1,0 +1,75 @@
+# Taskforce Claude Code hooks (TF-174 epic)
+
+Drop-in hooks that wire the **Taskforce** workflow into Claude Code without the agent having to call any tool explicitly. Phase 2 (TF-176) ships the UserPromptSubmit hook; Phase 4 (TF-178) will add Stop + PostToolUse hooks.
+
+## What it does
+
+Every time you submit a prompt to Claude Code:
+
+1. The hook asks the Taskforce backend (`POST /v2/taskforce/discover`) for the top 1–3 V2 documents related to your prompt.
+2. If anything's relevant (above the score threshold), it prepends a short "Related prior work" preamble to the prompt so the agent has the context.
+3. A one-line `[Taskforce] N related docs pulled · …` banner is written to stderr so you can see what was injected.
+4. Each surfaced match records a `document.consulted` metrics event, so the dashboard's **Avoided Rediscovery** card (TF-177, behind feature flag) starts moving.
+
+When there are no matches, the hook is silent — Claude Code sees your prompt unchanged.
+
+## Install
+
+Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the EnderAI MCP token from `~/.enderai_mcp_token` (created by the Connect Agent flow at https://www.enderai.xyz).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks/install.sh | bash
+```
+
+Or from a clone:
+
+```bash
+bash scripts/taskforce-hooks/install.sh
+```
+
+The installer is idempotent: re-running it leaves `~/.claude/hooks/taskforce-user-prompt-submit.sh` and `~/.claude/settings.json` in a consistent state.
+
+Restart your Claude Code session for the hook to take effect.
+
+## Verify
+
+```bash
+# Hook is registered:
+jq '.hooks.UserPromptSubmit' ~/.claude/settings.json
+
+# Token is reachable:
+test -r ~/.enderai_mcp_token && echo "token ok" || echo "token missing"
+
+# Recent activity:
+tail -f ~/.claude/taskforce-discover.log
+```
+
+After a prompt that triggers a match you should see the banner in your Claude Code UI and a `POST /v2/taskforce/discover → 200` line in the log.
+
+## Configuration
+
+| Env var | Default | What it does |
+|---|---|---|
+| `ENDERAI_BACKEND_URL` | `https://enderai-backend.onrender.com` | Backend base URL. Override for local dev. |
+| `TASKFORCE_PREAMBLE_BUDGET` | `1500` | Approximate token budget for the injected preamble. Higher = more context, more prompt cost. |
+| `TASKFORCE_HOOK_DEBUG` | `0` | Mirror logs to stderr (helpful while iterating on the hook). |
+
+## How it's safe
+
+- **Never blocks the session.** All failure paths exit 0. The hook can be missing curl, missing jq, missing token, or hit a 500 — the user sees an unchanged prompt.
+- **Best-effort secrets handling.** Only the prompt itself, cwd, and git branch ship to the backend. We don't read the transcript.
+- **Silent on empty.** If discovery returns nothing, the hook writes nothing — no banner spam, no log noise.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| No banner ever appears | Token missing or library empty | `cat ~/.enderai_mcp_token`; check the log; run a workflow that creates a doc first |
+| Banner appears but prompt feels unchanged | Claude Code version doesn't yet inject UserPromptSubmit stdout into the prompt | Upgrade Claude Code |
+| `[Taskforce] hook schema mismatch` (future) | Claude Code's UserPromptSubmit contract changed | Re-run the installer |
+
+## Plan + epic
+
+- Plan: `~/dev/docs/claude-mcp-brainstorm.md` §2.4, §3.4, §3.5, §7.2
+- Epic: TF-174
+- Ticket: TF-176
