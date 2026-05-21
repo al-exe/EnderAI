@@ -1108,9 +1108,32 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
     return toolJson(res);
   }
 
+  // TF-180: every `enderai_*` tool has a `taskforce_*` canonical alias.
+  // The dispatcher below normalizes `taskforce_*` → `enderai_*` so handlers
+  // stay coded against the existing names. Both names are advertised in
+  // ListTools so existing user configs keep working while new docs +
+  // CLAUDE.md can point at the canonical taskforce_* names.
+  const TASKFORCE_TO_ENDERAI_ALIASES: Record<string, string> = {
+    taskforce_begin_case: "enderai_begin_case",
+    taskforce_update_case: "enderai_update_case",
+    taskforce_use_skill: "enderai_use_skill",
+    taskforce_finish_case: "enderai_finish_case",
+    taskforce_request: "enderai_request",
+    taskforce_begin_document: "enderai_begin_document",
+    taskforce_update_document: "enderai_update_document",
+    taskforce_finish_document: "enderai_finish_document",
+    taskforce_session_info: "enderai_session_info",
+    taskforce_openapi: "enderai_openapi",
+    taskforce_health_check: "enderai_health_check",
+  };
+  const ENDERAI_TO_TASKFORCE_NAMES: Record<string, string> = Object.fromEntries(
+    Object.entries(TASKFORCE_TO_ENDERAI_ALIASES).map(([tf, en]) => [en, tf]),
+  );
+  const ALIAS_DEPRECATION_PREFIX =
+    "[Deprecated alias — use the `taskforce_*` name. Removal in a future release.] ";
+
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
+    const primary = [
         {
           name: "enderai_begin_case",
           description:
@@ -1737,12 +1760,37 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           description: "Fetch the backend health check at /api/v1/utils/health-check/.",
           inputSchema: { type: "object", additionalProperties: false, properties: {} },
         },
-      ],
-    };
+      ];
+    // Build the canonical taskforce_* entries + keep enderai_* as
+    // deprecated aliases for one release. taskforce_discover and
+    // taskforce_session_log are already canonical-named (TF-175/176) and
+    // don't need duplication.
+    const renamed: typeof primary = [];
+    const aliases: typeof primary = [];
+    for (const tool of primary) {
+      const taskforceName = ENDERAI_TO_TASKFORCE_NAMES[tool.name];
+      if (taskforceName) {
+        renamed.push({ ...tool, name: taskforceName });
+        aliases.push({
+          ...tool,
+          description: ALIAS_DEPRECATION_PREFIX + tool.description,
+        });
+      } else {
+        renamed.push(tool);
+      }
+    }
+    return { tools: [...renamed, ...aliases] };
   });
 
+  function canonicalizeToolName(name: string): string {
+    return TASKFORCE_TO_ENDERAI_ALIASES[name] ?? name;
+  }
+
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const name = req.params.name;
+    // Normalize taskforce_* canonical names → enderai_* (the existing
+    // handler-dispatch keys). Two-way aliasing (TF-180): both names are
+    // advertised in ListTools, both reach the same handler here.
+    const name = canonicalizeToolName(req.params.name);
 
     try {
       if (name === "enderai_begin_case") {
