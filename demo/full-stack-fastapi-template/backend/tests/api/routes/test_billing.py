@@ -38,6 +38,35 @@ def test_billing_status_for_user_without_customer(
     assert response.json()["is_subscription_active"] is False
 
 
+def test_billing_status_sanitizes_admin_tier(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID", "price_admin_test")
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    user.stripe_subscription_status = "active"
+    user.stripe_price_id = "price_admin_test"
+    db.add(user)
+    db.commit()
+    headers = user_authentication_headers(client=client, email=email, password=password)
+
+    response = client.get(
+        f"{settings.API_V1_STR}/billing/status",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["is_subscription_active"] is True
+    assert body["subscription_tier"] == "max"
+
+
 def test_checkout_session_creates_customer_and_returns_url(
     client: TestClient,
     db: Session,

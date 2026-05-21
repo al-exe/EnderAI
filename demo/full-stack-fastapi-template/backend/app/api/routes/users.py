@@ -15,6 +15,7 @@ from app.core import firebase_auth
 from app.core.config import settings
 from app.core.demo import ensure_demo_workspace
 from app.core.security import get_password_hash, verify_password
+from app.core.tiering import resolve_public_tier
 from app.models import (
     Message,
     Organization,
@@ -30,6 +31,12 @@ from app.models import (
 from app.utils import generate_new_account_email, send_email
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _to_user_public(user: User) -> UserPublic:
+    return UserPublic.model_validate(user).model_copy(
+        update={"subscription_tier": resolve_public_tier(user)}
+    )
 
 
 def _validate_organization_id(
@@ -77,7 +84,7 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     count = session.exec(count_statement).one()
     statement = select(User).order_by(User.created_at.desc()).offset(skip).limit(limit)
     users = session.exec(statement).all()
-    return UsersPublic(data=users, count=count)
+    return UsersPublic(data=[_to_user_public(user) for user in users], count=count)
 
 
 @router.post("/", dependencies=[Depends(get_current_superuser)], response_model=UserPublic)
@@ -106,7 +113,7 @@ def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
             subject=email_data.subject,
             html_content=email_data.html_content,
         )
-    return user
+    return _to_user_public(user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -130,7 +137,7 @@ def update_user_me(
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
-    return current_user
+    return _to_user_public(current_user)
 
 
 @router.patch("/me/password", response_model=Message)
@@ -157,7 +164,7 @@ def update_password_me(
 
 @router.get("/me", response_model=UserPublic)
 def read_user_me(current_user: CurrentUser) -> Any:
-    return current_user
+    return _to_user_public(current_user)
 
 
 @router.delete("/me", response_model=Message)
@@ -189,7 +196,7 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     ensure_demo_workspace(session, user)
     session.commit()
     session.refresh(user)
-    return user
+    return _to_user_public(user)
 
 
 @router.get("/{user_id}", response_model=UserPublic)
@@ -205,7 +212,7 @@ def read_user_by_id(
         )
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return _to_user_public(user)
 
 
 @router.patch(
@@ -236,7 +243,7 @@ def update_user(*, session: SessionDep, user_id: uuid.UUID, user_in: UserUpdate)
         _validate_organization_role(user_in.organization_role)
 
     db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
-    return db_user
+    return _to_user_public(db_user)
 
 
 @router.delete("/{user_id}", dependencies=[Depends(get_current_superuser)])

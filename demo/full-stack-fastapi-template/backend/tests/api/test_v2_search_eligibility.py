@@ -8,20 +8,22 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.core.config import settings
 from app.core import tiering
+from app.core.config import settings
 from app.core.search import byok as byok_module
 from app.models import User
 from tests.utils.user import authentication_token_from_email
 from tests.utils.utils import random_email
 
 API = settings.API_V1_STR
+ADMIN_PRICE = "price_admin_test"
 PRO_PRICE = "price_pro_test"
 MAX_PRICE = "price_max_test"
 
 
 @pytest.fixture(autouse=True)
 def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID", ADMIN_PRICE)
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_PRO", PRO_PRICE)
     monkeypatch.setattr(tiering.settings, "STRIPE_PRICE_ID_MAX", MAX_PRICE)
     monkeypatch.setattr(
@@ -30,7 +32,7 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         Fernet.generate_key().decode("utf-8"),
     )
 
-    async def _ok(provider: str, api_key: str) -> None:
+    async def _ok(_provider: str, _api_key: str) -> None:
         return None
 
     monkeypatch.setattr(byok_module, "validate_api_key", _ok)
@@ -63,6 +65,18 @@ def test_eligibility_free_default(client: TestClient, db: Session) -> None:
 def test_eligibility_max_routes_to_managed(client: TestClient, db: Session) -> None:
     headers, user = _auth(client, db)
     _set_tier(db, user, status="active", price=MAX_PRICE)
+    resp = client.get(f"{API}/v2/search/eligibility", headers=headers)
+    body = resp.json()
+    assert body["tier"] == "max"
+    assert body["allowed"] is True
+    assert body["route"] == "managed"
+
+
+def test_eligibility_admin_is_publicly_reported_as_max(
+    client: TestClient, db: Session
+) -> None:
+    headers, user = _auth(client, db)
+    _set_tier(db, user, status="active", price=ADMIN_PRICE)
     resp = client.get(f"{API}/v2/search/eligibility", headers=headers)
     body = resp.json()
     assert body["tier"] == "max"

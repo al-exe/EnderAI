@@ -214,6 +214,7 @@ class UserPublic(UserBase):
     stripe_subscription_current_period_end: datetime | None = None
     stripe_subscription_cancel_at_period_end: bool = False
     stripe_price_id: str | None = None
+    subscription_tier: Literal["free", "pro", "max"] = "free"
 
 
 class UsersPublic(SQLModel):
@@ -228,6 +229,7 @@ class BillingStatusPublic(SQLModel):
     subscription_cancel_at_period_end: bool = False
     price_id: str | None = None
     is_subscription_active: bool = False
+    subscription_tier: Literal["free", "pro", "max"] = "free"
 
 
 class BillingCheckoutSessionCreate(SQLModel):
