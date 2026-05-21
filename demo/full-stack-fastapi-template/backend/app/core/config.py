@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     STRIPE_PRICE_ID: str | None = None
     STRIPE_PRICE_ID_PRO: str | None = None
     STRIPE_PRICE_ID_MAX: str | None = None
+    STRIPE_TASKFORCE_PRO: str | None = None
+    STRIPE_TASKFORCE_MAX: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_API_BASE_URL: str = "https://api.stripe.com"
     FIREBASE_PROJECT_ID: str | None = None
