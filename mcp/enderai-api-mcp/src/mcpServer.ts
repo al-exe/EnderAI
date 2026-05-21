@@ -1479,7 +1479,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_begin_document",
           description:
-            "Taskforce v2 document lifecycle: start of meaningful work. Lists current user's V2 documents, scores them against the request using a deterministic congruence engine (title/file/symbol/error/anchor/collaborator overlap, recency, intent phrases minus tenant/repo/error-family/terminal-state conflicts), and either reuses+self-heals the top match or creates a fresh document. Honors explicit document_id and force_new. Remembers the active document for this MCP session. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (cache, summary-only, reuse-on-begin) that show up on the Taskforce Metrics page.",
+            "[DEPRECATED — Taskforce hooks handle this automatically. Prefer the UserPromptSubmit hook (TF-176) for discovery and the Stop hook (TF-178) for lifecycle. Use `taskforce_discover` if you need an explicit handle from within an MCP session. This tool will be removed in a future release.] Taskforce v2 document lifecycle: start of meaningful work. Lists current user's V2 documents, scores them against the request using a deterministic congruence engine (title/file/symbol/error/anchor/collaborator overlap, recency, intent phrases minus tenant/repo/error-family/terminal-state conflicts), and either reuses+self-heals the top match or creates a fresh document. Honors explicit document_id and force_new. Remembers the active document for this MCP session. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (cache, summary-only, reuse-on-begin) that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1534,7 +1534,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_update_document",
           description:
-            "Append material progress to the active Taskforce v2 document and keep Summary claims backed by Details evidence anchors. Requires a prior enderai_begin_document call in this MCP session unless document_id is supplied. Use enderai_finish_document, not this tool, to finalize. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (including the summary-only savings when view_consulted == 'summary') that show up on the Taskforce Metrics page.",
+            "[DEPRECATED — Taskforce hooks (TF-176 / TF-178) handle this automatically via the PostToolUse + Stop observe path. This tool will be removed in a future release.] Append material progress to the active Taskforce v2 document and keep Summary claims backed by Details evidence anchors. Requires a prior enderai_begin_document call in this MCP session unless document_id is supplied. Use enderai_finish_document, not this tool, to finalize. Pass `usage` to report this turn's token consumption — the backend prices it and computes attributable savings (including the summary-only savings when view_consulted == 'summary') that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
@@ -1633,7 +1633,7 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         {
           name: "enderai_finish_document",
           description:
-            "Finalize the active Taskforce v2 document at completion or pause. Adds an Outcome section to Details (with status, outcome, validation, follow-ups) and links it from Summary. Clears the active-document pointer for this MCP session. Pass `usage` to report the finalization turn's token consumption — the backend prices it and computes attributable savings that show up on the Taskforce Metrics page.",
+            "[DEPRECATED — Taskforce hooks (TF-178) finalize automatically when the Claude Code session ends via the Stop hook. This tool will be removed in a future release.] Finalize the active Taskforce v2 document at completion or pause. Adds an Outcome section to Details (with status, outcome, validation, follow-ups) and links it from Summary. Clears the active-document pointer for this MCP session. Pass `usage` to report the finalization turn's token consumption — the backend prices it and computes attributable savings that show up on the Taskforce Metrics page.",
           inputSchema: {
             type: "object",
             additionalProperties: false,
