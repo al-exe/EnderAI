@@ -50,6 +50,19 @@ def get_subscription_price_id(subscription: dict[str, Any]) -> str | None:
     return _string_id(price)
 
 
+def get_subscription_item_id(subscription: dict[str, Any]) -> str | None:
+    items = subscription.get("items")
+    if not isinstance(items, dict):
+        return None
+    data = items.get("data")
+    if not isinstance(data, list) or not data:
+        return None
+    first_item = data[0]
+    if not isinstance(first_item, dict):
+        return None
+    return _string_id(first_item)
+
+
 def get_subscription_period_end(subscription: dict[str, Any]) -> datetime | None:
     top_level_period_end = datetime_from_stripe_timestamp(
         subscription.get("current_period_end")
@@ -63,11 +76,13 @@ def get_subscription_period_end(subscription: dict[str, Any]) -> datetime | None
     data = items.get("data")
     if not isinstance(data, list):
         return None
-    period_ends = [
-        item.get("current_period_end")
-        for item in data
-        if isinstance(item, dict) and isinstance(item.get("current_period_end"), int)
-    ]
+    period_ends: list[int] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        period_end = item.get("current_period_end")
+        if isinstance(period_end, int):
+            period_ends.append(period_end)
     if not period_ends:
         return None
     return datetime_from_stripe_timestamp(max(period_ends))
@@ -107,7 +122,9 @@ def verify_webhook_signature(payload: bytes, signature_header: str) -> dict[str,
     try:
         timestamp = int(timestamp_values[0])
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid Stripe signature timestamp")
+        raise HTTPException(
+            status_code=400, detail="Invalid Stripe signature timestamp"
+        )
 
     if abs(time.time() - timestamp) > 300:
         raise HTTPException(status_code=400, detail="Expired Stripe webhook signature")
@@ -141,15 +158,22 @@ class StripeBillingClient:
             )
         return settings.STRIPE_SECRET_KEY
 
-    def _request(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
+    def _request(
+        self, path: str, data: dict[str, Any] | None = None, *, method: str = "POST"
+    ) -> dict[str, Any]:
         secret_key = self._require_secret_key()
+        request_method = method.upper()
+        request_kwargs: dict[str, Any] = {
+            "url": urljoin(settings.STRIPE_API_BASE_URL.rstrip("/") + "/", path),
+            "headers": {"Authorization": f"Bearer {secret_key}"},
+            "timeout": 20,
+        }
+        if request_method == "GET":
+            request_kwargs["params"] = data
+        else:
+            request_kwargs["data"] = data or {}
         try:
-            response = httpx.post(
-                urljoin(settings.STRIPE_API_BASE_URL.rstrip("/") + "/", path),
-                data=data,
-                headers={"Authorization": f"Bearer {secret_key}"},
-                timeout=20,
-            )
+            response = httpx.request(request_method, **request_kwargs)
         except httpx.HTTPError as exc:
             raise StripeBillingError("Stripe request failed") from exc
 
@@ -187,6 +211,33 @@ class StripeBillingClient:
         if name:
             data["name"] = name
         return self._request("/v1/customers", data)
+
+    def retrieve_subscription(self, *, subscription_id: str) -> dict[str, Any]:
+        return self._request(f"/v1/subscriptions/{subscription_id}", method="GET")
+
+    def update_subscription_price(
+        self,
+        *,
+        subscription_id: str,
+        user_id: str,
+        price_id: str,
+    ) -> dict[str, Any]:
+        subscription = self.retrieve_subscription(subscription_id=subscription_id)
+        item_id = get_subscription_item_id(subscription)
+        if not item_id:
+            raise StripeBillingError("Stripe subscription item was not found")
+
+        return self._request(
+            f"/v1/subscriptions/{subscription_id}",
+            {
+                "items[0][id]": item_id,
+                "items[0][price]": price_id,
+                "payment_behavior": "allow_incomplete",
+                "proration_behavior": "create_prorations",
+                "metadata[user_id]": user_id,
+                "metadata[taskforce_price_id]": price_id,
+            },
+        )
 
     def create_checkout_session(
         self,
