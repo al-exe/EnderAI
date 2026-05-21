@@ -967,6 +967,11 @@ class V2Document(SQLModel, table=True):
     )
     summary_tokens: int = Field(default=0, nullable=False)
     details_tokens: int = Field(default=0, nullable=False)
+    # TF-177 / Phase 3: cached "how many tokens would it take to redo this
+    # investigation from scratch". Recomputed on every doc mutation by
+    # refresh_v2_document_token_counts. Capped at 50k inside
+    # app.core.taskforce.rediscovery to keep gaming bounded.
+    rediscovery_cost_tokens: int = Field(default=0, nullable=False)
     is_demo: bool = Field(default=False, index=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
@@ -1094,6 +1099,10 @@ class V2DocumentPublic(SQLModel):
     details_file_name: str
     details_markdown_sections: list[V2DocumentDetailsSection]
     is_demo: bool
+    # TF-177 / Phase 3: cached structural estimate of "what it would cost to
+    # redo this investigation from scratch". Surfaced on the public model
+    # so the methodology / document UI can show users a defensible number.
+    rediscovery_cost_tokens: int = 0
     created_at: datetime | None
     updated_at: datetime | None
 

@@ -428,6 +428,12 @@ def record_document_reused(
     return events
 
 
+# Default pricing model used when the consulting agent didn't declare one
+# (the discover endpoint doesn't know the agent's model). Matches the
+# fallback in ``record_document_reused``.
+_DEFAULT_CONSULT_PRICING_MODEL = "claude-opus-4-7"
+
+
 def record_document_consulted(
     session: Session,
     *,
@@ -441,14 +447,18 @@ def record_document_consulted(
     query_id: uuid_module.UUID,
     source: str,
     is_demo: bool,
+    pricing_model_id: str | None = None,
 ) -> MetricsEvent:
-    """Record one ``document.consulted`` event (TF-175 / Phase 1).
+    """Record one ``document.consulted`` event (TF-175 / Phase 1 + TF-177 / Phase 3).
 
-    The hook-driven discovery endpoint emits one of these per returned
-    match. The ``net_saved_tokens`` field is computed here as
-    ``max(0, rediscovery_cost_tokens - summary_tokens)`` so the read path
-    (Phase 3, TF-177) can sum a single field for the
-    ``avoided_rediscovery`` metric without revisiting the math.
+    Emits a single event with two savings-bearing fields:
+      * ``input_tokens`` carries ``net_saved_tokens`` so the registry's
+        ``avoided_rediscovery`` metric can ``sum(input_tokens)`` without
+        parsing JSONB.
+      * ``usd_amount`` carries the priced value of those tokens, snapshotted
+        at the current pricing for the agent's model (or the configured
+        default model when the caller didn't pass one). That feeds the
+        ``avoided_rediscovery_usd`` metric.
 
     No primary "document.*" event fires — this is purely a "the agent
     looked at this" signal. Consult events are *not* counted in
@@ -458,6 +468,13 @@ def record_document_consulted(
 
     occurred_at = _now()
     net_saved_tokens = max(0, rediscovery_cost_tokens - summary_tokens)
+
+    pricing_model = pricing_model_id or _DEFAULT_CONSULT_PRICING_MODEL
+    pricing = pricing_for(session, pricing_model, occurred_at)
+    usd_amount: Decimal | None = None
+    if pricing is not None and net_saved_tokens > 0 and pricing.input_per_mtok is not None:
+        usd_amount = (Decimal(net_saved_tokens) / Decimal(1_000_000)) * pricing.input_per_mtok
+
     payload: dict[str, Any] = {
         "source": source,
         "score": round(score, 4),
@@ -467,6 +484,7 @@ def record_document_consulted(
         "rediscovery_cost_tokens": rediscovery_cost_tokens,
         "net_saved_tokens": net_saved_tokens,
         "match_reasons": match_reasons,
+        "pricing_model_id": pricing_model,
     }
 
     event = _build_event(
@@ -475,10 +493,13 @@ def record_document_consulted(
         document=document,
         occurred_at=occurred_at,
         is_demo=is_demo,
+        model_id=pricing_model,
+        pricing=pricing,
         # ``input_tokens`` doubles as the headline savings field so the
         # registry's ``avoided_rediscovery`` metric can ``sum(input_tokens)``
         # across ``document.consulted`` events without parsing JSONB.
         input_tokens=net_saved_tokens or None,
+        usd_amount=usd_amount if usd_amount and usd_amount > 0 else None,
         payload=payload,
     )
     session.add(event)
