@@ -1,6 +1,12 @@
 # Taskforce Claude Code hooks (TF-174 epic)
 
-Drop-in hooks that wire the **Taskforce** workflow into Claude Code without the agent having to call any tool explicitly. Phase 2 (TF-176) ships the UserPromptSubmit hook; Phase 4 (TF-178) will add Stop + PostToolUse hooks.
+Drop-in hooks that wire the **Taskforce** workflow into Claude Code without the agent having to call any tool explicitly. TF-174 epic.
+
+## What ships
+
+- **UserPromptSubmit** (TF-176) — on every prompt, asks the backend for related prior work and prepends a preamble.
+- **Stop** (TF-178) — when a session ends, ships a redacted transcript digest to `/v2/taskforce/observe` with `kind: "final"`. The backend summarizes it via haiku and PATCHes the active document (or creates a fresh one).
+- **PostToolUse** (TF-178) — every 10 tool calls (configurable via `TASKFORCE_CHECKPOINT_EVERY`), ships a mid-session checkpoint to the same endpoint with `kind: "checkpoint"`.
 
 ## What it does
 
@@ -12,6 +18,8 @@ Every time you submit a prompt to Claude Code:
 4. Each surfaced match records a `document.consulted` metrics event, so the dashboard's **Avoided Rediscovery** card (TF-177, behind feature flag) starts moving.
 
 When there are no matches, the hook is silent — Claude Code sees your prompt unchanged.
+
+When the session ends (Stop hook) or every 10 tool calls (PostToolUse hook), the backend gets a digest of what happened. **The observe endpoint defaults to shadow mode** (`TASKFORCE_OBSERVE_SHADOW=1`): it records what *would* happen but doesn't touch any documents until someone flips the flag server-side. That's the §7.4 rollout safety net.
 
 ## Install
 

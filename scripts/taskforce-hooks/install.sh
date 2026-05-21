@@ -15,18 +15,27 @@ set -euo pipefail
 HOOK_DIR="${HOME}/.claude/hooks"
 SETTINGS_FILE="${HOME}/.claude/settings.json"
 USER_PROMPT_HOOK="${HOOK_DIR}/taskforce-user-prompt-submit.sh"
+STOP_HOOK="${HOOK_DIR}/taskforce-stop.sh"
+POST_TOOL_HOOK="${HOOK_DIR}/taskforce-post-tool-use.sh"
 
 REPO_RAW_BASE="${TASKFORCE_HOOK_REPO_RAW:-https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks}"
 
-mkdir -p "$HOOK_DIR"
+mkdir -p "$HOOK_DIR" "${HOME}/.taskforce"
 
-echo "→ Installing UserPromptSubmit hook to ${USER_PROMPT_HOOK}"
-if [[ -f "${PWD}/scripts/taskforce-hooks/user-prompt-submit.sh" ]]; then
-    install -m 0755 "${PWD}/scripts/taskforce-hooks/user-prompt-submit.sh" "$USER_PROMPT_HOOK"
-else
-    curl -fsSL "${REPO_RAW_BASE}/user-prompt-submit.sh" -o "$USER_PROMPT_HOOK"
-    chmod 0755 "$USER_PROMPT_HOOK"
-fi
+install_hook() {
+    local source_name="$1" target="$2"
+    echo "→ Installing ${source_name} → ${target}"
+    if [[ -f "${PWD}/scripts/taskforce-hooks/${source_name}" ]]; then
+        install -m 0755 "${PWD}/scripts/taskforce-hooks/${source_name}" "$target"
+    else
+        curl -fsSL "${REPO_RAW_BASE}/${source_name}" -o "$target"
+        chmod 0755 "$target"
+    fi
+}
+
+install_hook "user-prompt-submit.sh" "$USER_PROMPT_HOOK"
+install_hook "stop.sh"                "$STOP_HOOK"
+install_hook "post-tool-use.sh"       "$POST_TOOL_HOOK"
 
 # Merge the hooks block into ~/.claude/settings.json. Uses jq so any
 # existing entries (e.g. the Stop hook from the EnderAI Connect Agent
@@ -38,51 +47,40 @@ fi
 
 if ! command -v jq >/dev/null 2>&1; then
     echo "WARNING: jq is required to merge settings.json safely."
-    echo "Install jq, or merge the following into ~/.claude/settings.json:"
-    cat <<JSON
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${USER_PROMPT_HOOK}",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  }
-}
-JSON
-    exit 0
+    echo "Install jq, then re-run this script."
+    exit 1
 fi
 
-tmp_file="$(mktemp)"
-jq --arg cmd "$USER_PROMPT_HOOK" '
-    .hooks = (.hooks // {})
-    | .hooks.UserPromptSubmit = (
-        .hooks.UserPromptSubmit
-        // [{matcher: "*", hooks: []}]
-    )
-    | .hooks.UserPromptSubmit |= (
-        if any(.hooks[]?; .command == $cmd) then
-            .
-        else
-            map(
-                if .matcher == "*" then
-                    .hooks = ((.hooks // []) + [
-                        {type: "command", command: $cmd, timeout: 5}
-                    ])
-                else . end
-            )
-        end
-    )
-' "$SETTINGS_FILE" > "$tmp_file"
+merge_hook() {
+    local hook_name="$1" command="$2" timeout="$3"
+    local tmp_file
+    tmp_file="$(mktemp)"
+    jq --arg hook_name "$hook_name" --arg cmd "$command" --argjson timeout "$timeout" '
+        .hooks = (.hooks // {})
+        | .hooks[$hook_name] = (
+            .hooks[$hook_name]
+            // [{matcher: "*", hooks: []}]
+        )
+        | .hooks[$hook_name] |= (
+            if any(.hooks[]?; .command == $cmd) then
+                .
+            else
+                map(
+                    if .matcher == "*" then
+                        .hooks = ((.hooks // []) + [
+                            {type: "command", command: $cmd, timeout: $timeout}
+                        ])
+                    else . end
+                )
+            end
+        )
+    ' "$SETTINGS_FILE" > "$tmp_file"
+    mv "$tmp_file" "$SETTINGS_FILE"
+}
 
-mv "$tmp_file" "$SETTINGS_FILE"
+merge_hook UserPromptSubmit "$USER_PROMPT_HOOK" 5
+merge_hook Stop             "$STOP_HOOK"        30
+merge_hook PostToolUse      "$POST_TOOL_HOOK"   15
 
 echo "✓ Hook installed and ~/.claude/settings.json updated."
 echo ""
