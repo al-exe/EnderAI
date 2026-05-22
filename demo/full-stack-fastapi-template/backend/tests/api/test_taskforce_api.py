@@ -261,6 +261,101 @@ def test_session_log_filters_by_session(client: TestClient) -> None:
         assert entry["title"]
 
 
+# ----- TF-181 / Phase 7: Tier 2 MCP entry points --------------------------
+
+
+def test_session_start_returns_session_id_and_matches(client: TestClient) -> None:
+    _, headers = _signup(client)
+    _create_document(
+        client,
+        headers,
+        title="Library polish — Tier 2 fixture",
+        description="Cleanup of the metrics page.",
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/start",
+        headers=headers,
+        json={"prompt": "library polish metrics card", "min_score": 0.0},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert "session_id" in body
+    # session_id is a valid UUID string
+    import uuid as _uuid
+    _uuid.UUID(body["session_id"])
+    assert isinstance(body["matches"], list)
+    # suggested_pin is either null or a UUID matching one of the matches
+    if body["suggested_pin"] is not None:
+        match_ids = {m["document_id"] for m in body["matches"]}
+        assert body["suggested_pin"] in match_ids
+
+
+def test_session_observe_with_structured_fields_skips_summarizer(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    doc_id = _create_document(client, headers, title="Tier 2 observe fixture")
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "test prompt",
+            "transcript": [],
+            "active_document_id": doc_id,
+            "session_id": "tier-2-test",
+            "summary_points": [
+                "First claim about the work",
+                "Second claim with more context",
+            ],
+            "decisions": ["Use the structured-path orchestrator"],
+            "outcome": "shipped",
+            "files_touched": ["src/foo.py", "tests/foo.py"],
+            "duration_ms": 1000,
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["structured_path"] is True
+    # Summarizer was skipped → no LLM cost
+    assert body["summarizer_usd_cost"] in ("0", 0, "0.0", "0.00")
+
+
+def test_session_observe_without_structured_fields_uses_summarizer_path(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    doc_id = _create_document(client, headers, title="Tier 2 fallback fixture")
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "test prompt",
+            "transcript": [
+                {"role": "user", "content": "do work"},
+                {"role": "assistant", "content": "doing"},
+                {"role": "assistant", "content": "more work"},
+                {"role": "assistant", "content": "done"},
+            ],
+            "active_document_id": doc_id,
+            "session_id": "tier-2-fallback",
+            "files_touched": ["src/bar.py", "src/baz.py"],
+            "duration_ms": 1000,
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    # structured_path should be False since no summary_points/details/decisions/outcome
+    assert body["structured_path"] is False
+    # Likely skipped with no_managed_anthropic_key in test env, but the path is
+    # documented as non-structured.
+    assert body["reason"] in {"no_managed_anthropic_key", "cost_capped", "ok", "shadow_mode", "empty_summary_no_active_doc"}
+
+
 def test_avoided_rediscovery_metric_accumulates_from_consults(
     client: TestClient,
 ) -> None:

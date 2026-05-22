@@ -1452,11 +1452,27 @@ class TaskforceCommandRun(SQLModel):
     exit_code: int | None = None
 
 
+class TaskforceDetailsSectionInput(SQLModel):
+    """One Details section in a Tier 2 structured observe call (TF-181)."""
+
+    anchor_id: str = Field(min_length=1, max_length=64)
+    markdown: str = Field(min_length=1, max_length=4000)
+
+
 class TaskforceObserveRequest(SQLModel):
     """Request body for POST /v2/taskforce/observe.
 
-    Fired by the Stop hook (``kind: "final"``) at session end and by the
-    PostToolUse hook (``kind: "checkpoint"``) every N tool calls.
+    Fired by:
+      * Tier 1 hooks (TF-176/178) — Stop ``kind: "final"`` or PostToolUse
+        ``kind: "checkpoint"`` with a redacted ``transcript`` blob.
+      * Tier 2 MCP tools (TF-181) — ``taskforce_session_observe`` with
+        structured fields (``summary_points`` / ``details_sections`` /
+        ``decisions`` / ``outcome``) so the backend can skip the haiku
+        summarizer entirely.
+
+    When ``transcript`` is empty AND any structured field is non-empty,
+    the orchestrator builds the patch directly from the structured fields
+    and ``summarizer_usd_cost`` stays at 0.
     """
 
     kind: Literal["checkpoint", "final"]
@@ -1473,6 +1489,14 @@ class TaskforceObserveRequest(SQLModel):
     harness: TaskforceHarnessUsage | None = None
     checkpoint_index: int | None = Field(default=None, ge=1)
 
+    # TF-181 / Tier 2 structured fields. Each is optional and bypasses the
+    # haiku summarizer for that piece. Agents that can produce these
+    # locally (Codex, Cursor) ship them directly instead of a transcript.
+    summary_points: list[str] = Field(default_factory=list)
+    details_sections: list[TaskforceDetailsSectionInput] = Field(default_factory=list)
+    decisions: list[str] = Field(default_factory=list)
+    outcome: Literal["shipped", "blocked", "paused", "interrupted"] | None = None
+
 
 class TaskforceObserveResponse(SQLModel):
     """Response from POST /v2/taskforce/observe."""
@@ -1484,6 +1508,50 @@ class TaskforceObserveResponse(SQLModel):
     metrics_events_recorded: list[uuid.UUID] = Field(default_factory=list)
     summarizer_usd_cost: Decimal = Decimal(0)
     shadow: bool = False
+    # TF-181: surfaced when the orchestrator used structured fields
+    # directly without invoking the haiku summarizer. Helps the agent
+    # confirm it's hitting the cheap path.
+    structured_path: bool = False
+
+
+# ----- TF-181 / Phase 7 — session start (Tier 2 entry point) -------------
+
+
+class TaskforceSessionStartRequest(SQLModel):
+    """Request body for POST /v2/taskforce/session/start.
+
+    Mints a fresh session_id and runs discovery in one call. Returned to
+    Tier 2 agents (Codex, Cursor) so they don't have to call discover +
+    generate a session_id separately.
+    """
+
+    prompt: str = Field(min_length=1, max_length=8000)
+    cwd: str | None = None
+    files: list[str] = Field(default_factory=list)
+    git_branch: str | None = None
+    recent_commands: list[str] = Field(default_factory=list)
+    k: int = Field(default=3, ge=1, le=3)
+    min_score: float = Field(default=0.3, ge=0, le=1)
+    demo: bool = False
+
+
+class TaskforceSessionStartResponse(SQLModel):
+    """Response from POST /v2/taskforce/session/start.
+
+    ``session_id`` is a UUID the agent threads through every subsequent
+    ``taskforce_session_observe`` call. ``suggested_pin`` is the top
+    match's document id when the match cleared the high-confidence band,
+    so the agent can adopt it as the active document without a second
+    decision step.
+    """
+
+    session_id: uuid.UUID
+    matches: list[TaskforceDiscoverMatch]
+    suggested_pin: uuid.UUID | None = None
+    reminder: str = (
+        "Call taskforce_session_observe with this session_id when the work "
+        "is complete or paused. The backend will summarize automatically."
+    )
 
 
 # ----- Metrics read-side public shapes -------------------------------------

@@ -70,6 +70,45 @@ def _shadow_mode() -> bool:
     return os.environ.get("TASKFORCE_OBSERVE_SHADOW", "1") not in {"0", "false", "False"}
 
 
+def _has_structured_payload(request: TaskforceObserveRequest) -> bool:
+    """TF-181: agent supplied summary_points / details_sections / decisions
+    directly, so we can skip the haiku summarizer and just write the patch."""
+
+    return bool(
+        request.summary_points
+        or request.details_sections
+        or request.decisions
+        or request.outcome
+    )
+
+
+def _summary_from_structured(request: TaskforceObserveRequest) -> SummarizerResult:
+    """Synthesize a SummarizerResult from the request's structured fields.
+
+    Lets the rest of the orchestrator stay shape-stable; downstream code
+    doesn't care whether the summary came from haiku or from the agent.
+    """
+
+    return SummarizerResult(
+        materiality_score=1.0,
+        summary_points=list(request.summary_points)[:6],
+        details_sections=[
+            {"anchor_id": s.anchor_id, "markdown": s.markdown[:4000]}
+            for s in request.details_sections
+        ][:4],
+        files_touched=list(request.files_touched),
+        commands_of_interest=[cmd.cmd for cmd in request.commands_run][:8],
+        decisions=list(request.decisions)[:4],
+        outcome=request.outcome,
+        open_questions=[],
+        raw_text="<structured>",
+        input_tokens=0,
+        output_tokens=0,
+        usd_cost=Decimal(0),
+        prompt_version=PROMPT_VERSION,
+    )
+
+
 async def observe(
     session: Session,
     *,
@@ -78,6 +117,7 @@ async def observe(
     demo: bool,
 ) -> TaskforceObserveResponse:
     shadow = _shadow_mode()
+    structured = _has_structured_payload(request)
 
     materiality = assess_materiality(request)
     if not materiality.material:
@@ -96,51 +136,59 @@ async def observe(
             metrics_events_recorded=[audit.id],
             summarizer_usd_cost=Decimal(0),
             shadow=shadow,
+            structured_path=structured,
         )
 
-    today_cost = _summarizer_cost_today(session, actor=actor)
-    if today_cost >= DEFAULT_DAILY_USD_CAP:
-        audit = _record_audit(
-            session,
-            actor=actor,
-            request=request,
-            action="skipped",
-            reason=f"cost_capped (today=${today_cost})",
-            summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
-        )
-        return TaskforceObserveResponse(
-            action="skipped",
-            reason="cost_capped",
-            metrics_events_recorded=[audit.id],
-            summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
-        )
+    if structured:
+        # Agent already gave us the digest; no LLM call, no cost cap check,
+        # no managed-key requirement.
+        summary = _summary_from_structured(request)
+    else:
+        today_cost = _summarizer_cost_today(session, actor=actor)
+        if today_cost >= DEFAULT_DAILY_USD_CAP:
+            audit = _record_audit(
+                session,
+                actor=actor,
+                request=request,
+                action="skipped",
+                reason=f"cost_capped (today=${today_cost})",
+                summarizer_usd_cost=Decimal(0),
+                shadow=shadow,
+            )
+            return TaskforceObserveResponse(
+                action="skipped",
+                reason="cost_capped",
+                metrics_events_recorded=[audit.id],
+                summarizer_usd_cost=Decimal(0),
+                shadow=shadow,
+                structured_path=structured,
+            )
 
-    api_key = settings.ANTHROPIC_API_KEY
-    if not api_key:
-        audit = _record_audit(
-            session,
-            actor=actor,
-            request=request,
-            action="skipped",
-            reason="no_managed_anthropic_key",
-            summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
-        )
-        return TaskforceObserveResponse(
-            action="skipped",
-            reason="no_managed_anthropic_key",
-            metrics_events_recorded=[audit.id],
-            summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
-        )
+        api_key = settings.ANTHROPIC_API_KEY
+        if not api_key:
+            audit = _record_audit(
+                session,
+                actor=actor,
+                request=request,
+                action="skipped",
+                reason="no_managed_anthropic_key",
+                summarizer_usd_cost=Decimal(0),
+                shadow=shadow,
+            )
+            return TaskforceObserveResponse(
+                action="skipped",
+                reason="no_managed_anthropic_key",
+                metrics_events_recorded=[audit.id],
+                summarizer_usd_cost=Decimal(0),
+                shadow=shadow,
+                structured_path=structured,
+            )
 
-    summary = await summarize(
-        transcript=request.transcript,
-        prompt=request.prompt,
-        api_key=api_key,
-    )
+        summary = await summarize(
+            transcript=request.transcript,
+            prompt=request.prompt,
+            api_key=api_key,
+        )
 
     summarizer_event = _record_summarizer_consumption(
         session,
@@ -176,6 +224,7 @@ async def observe(
             metrics_events_recorded=recorded_ids,
             summarizer_usd_cost=summary.usd_cost,
             shadow=shadow,
+            structured_path=structured,
         )
 
     update_payload = _build_update_payload(summary)
@@ -193,6 +242,7 @@ async def observe(
             extra_payload={
                 "would_patch_document_id": str(document.id) if document else None,
                 "would_patch_fields": patched_fields,
+                "structured_path": structured,
             },
         )
         recorded_ids = _ids(summarizer_event, harness_event, audit)
@@ -204,6 +254,7 @@ async def observe(
             metrics_events_recorded=recorded_ids,
             summarizer_usd_cost=summary.usd_cost,
             shadow=True,
+            structured_path=structured,
         )
 
     action: str
@@ -242,6 +293,7 @@ async def observe(
         metrics_events_recorded=recorded_ids,
         summarizer_usd_cost=summary.usd_cost,
         shadow=False,
+        structured_path=structured,
     )
 
 

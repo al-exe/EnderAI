@@ -20,6 +20,7 @@ from sqlmodel import col, select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
+from app.core.taskforce.session import session_start as run_session_start
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     MetricsEvent,
@@ -28,6 +29,8 @@ from app.models import (
     TaskforceObserveRequest,
     TaskforceObserveResponse,
     TaskforceSessionLogEntry,
+    TaskforceSessionStartRequest,
+    TaskforceSessionStartResponse,
     TaskforceSessionLogResponse,
     V2Document,
 )
@@ -55,6 +58,37 @@ def discover_route(
         actor=current_user,
         request=body,
         demo=demo,
+    )
+    session.commit()
+    return response
+
+
+@router.post(
+    "/session/start",
+    response_model=TaskforceSessionStartResponse,
+    status_code=201,
+)
+def session_start_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceSessionStartRequest,
+) -> Any:
+    """Tier 2 entry point for hookless agents (TF-181).
+
+    Mints a session_id and runs discovery in one call. The agent
+    threads the returned ``session_id`` through every subsequent
+    ``taskforce_session_observe`` (i.e. POST /observe) call so the
+    backend can correlate them.
+
+    ``suggested_pin`` is non-null when the top match cleared the
+    high-confidence band; the agent should adopt it as the active
+    document without a second decision step.
+    """
+
+    response = run_session_start(
+        session,
+        actor=current_user,
+        request=body,
     )
     session.commit()
     return response
