@@ -11,12 +11,16 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "dev:http": "tsx src/httpServer.ts",
+    "dev:cli": "tsx src/cli/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "start:http": "node dist/httpServer.js",
     "smoke": "npm run build && tsx test/smoke.ts",
     "smoke:http": "npm run build && tsx test/streamableHttpSmoke.ts",
     "test": "vitest run"
+  },
+  "bin": {
+    "taskforce-cli": "./dist/cli/index.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
