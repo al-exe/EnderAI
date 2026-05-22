@@ -83,6 +83,35 @@ Guidance:
 - `/api/v1/tasks/*` -> `/api/v1/threads/*`
 - `/api/v1/library/*` -> `/api/v1/artifacts/*`
 
+## `taskforce-cli` (TF-182 — Tier 3 hookless agents)
+
+Same package ships a CLI binary for harnesses that don't speak MCP (plain Anthropic SDK, ChatGPT browser sessions, custom Python scripts). Wraps the same HTTP endpoints the hooks and MCP tools use, same auth (`~/.enderai_mcp_token`).
+
+```bash
+# Run from source
+npm run dev:cli -- --help
+
+# Or after build, via the `bin` entry
+npm run build
+./dist/cli/index.js --help
+# (or `npm link` for a global symlink)
+
+# Real usage
+taskforce-cli discover --prompt "fix metrics card" --cwd $PWD --pretty
+taskforce-cli session  --prompt "library polish"   --pretty
+taskforce-cli observe  --session-id <id> --kind final \
+    --active-document-id <doc-id> \
+    --summary-points "Removed lock badge,Stopped click propagation" \
+    --decisions "Use stopPropagation handler" \
+    --outcome shipped \
+    --files-touched "src/routes/v2/library.tsx"
+taskforce-cli session-log --session-id <id> --pretty
+```
+
+Auth precedence: `--token` flag → `TASKFORCE_BEARER_TOKEN` env → `ENDERAI_BEARER_TOKEN` env → `~/.enderai_mcp_token` file.
+
+Pass `--pretty` for human-readable JSON output. Pass `--backend URL` to point at a different deployment.
+
 ## Environment
 
 - `ENDERAI_BASE_URL` (default: `https://enderai-backend.onrender.com`)
