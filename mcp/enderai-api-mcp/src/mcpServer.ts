@@ -21,6 +21,10 @@ import {
   type ActiveDocumentState,
 } from "./v2Documents/index.js";
 import { callTaskforceDiscover } from "./taskforce/discover.js";
+import {
+  callTaskforceSessionObserve,
+  callTaskforceSessionStart,
+} from "./taskforce/session.js";
 import { callTaskforceSessionLog } from "./taskforce/sessionLog.js";
 
 export type McpServerOptions = {
@@ -300,6 +304,69 @@ const TaskforceSessionLogArgsSchema = z
   .object({
     session_id: z.string().min(1).max(128),
     limit: z.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+// TF-181 / Phase 7: Tier 2 hookless-agent entry points.
+const TaskforceSessionStartArgsSchema = z
+  .object({
+    prompt: z.string().min(1).max(8000),
+    cwd: z.string().optional(),
+    files: z.array(z.string()).optional(),
+    git_branch: z.string().optional(),
+    recent_commands: z.array(z.string()).optional(),
+    k: z.number().int().min(1).max(3).optional(),
+    min_score: z.number().min(0).max(1).optional(),
+    demo: z.boolean().optional(),
+  })
+  .strict();
+
+const TaskforceTranscriptTurnSchema = z
+  .object({ role: z.string().min(1), content: z.string() })
+  .strict();
+
+const TaskforceCommandRunSchema = z
+  .object({
+    cmd: z.string().min(1).max(2000),
+    exit_code: z.number().int().nullable().optional(),
+  })
+  .strict();
+
+const TaskforceHarnessUsageSchema = z
+  .object({
+    model_id: z.string().min(1).max(128),
+    total_input_tokens: z.number().int().nonnegative().optional(),
+    total_output_tokens: z.number().int().nonnegative().optional(),
+    total_cache_read_tokens: z.number().int().nonnegative().optional(),
+    total_cache_write_tokens: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+const TaskforceDetailsSectionInputSchema = z
+  .object({
+    anchor_id: z.string().min(1).max(64),
+    markdown: z.string().min(1).max(4000),
+  })
+  .strict();
+
+const TaskforceSessionObserveArgsSchema = z
+  .object({
+    session_id: z.string().min(1).max(128),
+    kind: z.enum(["checkpoint", "final"]),
+    prompt: z.string().max(8000).optional(),
+    active_document_id: z.string().uuid().optional(),
+    transcript: z.array(TaskforceTranscriptTurnSchema).optional(),
+    cwd: z.string().optional(),
+    files_touched: z.array(z.string()).optional(),
+    commands_run: z.array(TaskforceCommandRunSchema).optional(),
+    diff_summary: z.string().optional(),
+    duration_ms: z.number().int().nonnegative().optional(),
+    harness: TaskforceHarnessUsageSchema.optional(),
+    checkpoint_index: z.number().int().positive().optional(),
+    summary_points: z.array(z.string().min(1)).optional(),
+    details_sections: z.array(TaskforceDetailsSectionInputSchema).optional(),
+    decisions: z.array(z.string().min(1)).optional(),
+    outcome: z.enum(["shipped", "blocked", "paused", "interrupted"]).optional(),
   })
   .strict();
 
@@ -1677,6 +1744,156 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
           },
         },
         {
+          name: "taskforce_session_start",
+          description:
+            "Canonical entry point for hookless agents (Codex, Cursor, plain API harnesses — TF-174 §15 Tier 2). Mints a UUID `session_id`, runs Taskforce discovery against the actor's library, and returns up to 3 related prior documents plus an optional `suggested_pin` when the top match is high-confidence. Thread the returned `session_id` through every subsequent `taskforce_session_observe` call. This tool **replaces** the legacy `enderai_begin_document` workflow for non-hook agents — call it once at the start of meaningful work and you do not need to call `enderai_update_document` / `enderai_finish_document` at all.",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              prompt: {
+                type: "string",
+                minLength: 1,
+                maxLength: 8000,
+                description: "The user's request that initiates this session.",
+              },
+              cwd: { type: "string", description: "Working directory hint." },
+              files: {
+                ...stringArrayJsonSchema,
+                description: "Files in scope for this turn.",
+              },
+              git_branch: { type: "string", description: "Active git branch." },
+              recent_commands: {
+                ...stringArrayJsonSchema,
+                description: "Recent shell commands the harness knows about.",
+              },
+              k: {
+                type: "integer",
+                minimum: 1,
+                maximum: 3,
+                description: "Max matches to return (hard cap 3, defaults to 3).",
+              },
+              min_score: {
+                type: "number",
+                minimum: 0,
+                maximum: 1,
+                description: "Filter matches below this score (default 0.3).",
+              },
+              demo: {
+                type: "boolean",
+                description: "Operate against demo documents.",
+              },
+            },
+            required: ["prompt"],
+          },
+        },
+        {
+          name: "taskforce_session_observe",
+          description:
+            "Pair of `taskforce_session_start` (TF-174 §15 Tier 2). Call once when meaningful work completes or pauses with `kind: \"final\"`, or mid-session with `kind: \"checkpoint\"`. Pass the session_id from `taskforce_session_start`. **Prefer structured fields** (`summary_points` + `details_sections` + `decisions` + `outcome`) over shipping a transcript blob — when structured fields are present the backend skips the haiku summarizer entirely (cheaper, deterministic). Use `active_document_id` to bind the patch to the agent's chosen doc (usually the `suggested_pin` from session_start).",
+          inputSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              session_id: {
+                type: "string",
+                minLength: 1,
+                maxLength: 128,
+                description: "Session id from taskforce_session_start.",
+              },
+              kind: {
+                type: "string",
+                enum: ["checkpoint", "final"],
+                description: "`final` at session end; `checkpoint` for mid-session updates.",
+              },
+              prompt: {
+                type: "string",
+                maxLength: 8000,
+                description: "Optional context (original user request).",
+              },
+              active_document_id: {
+                type: "string",
+                description: "Document to patch; usually `suggested_pin` from session_start.",
+              },
+              summary_points: {
+                ...stringArrayJsonSchema,
+                description: "1–6 claim sentences to append to the doc's Summary.",
+              },
+              details_sections: {
+                type: "array",
+                description: "Markdown sections to upsert by anchor_id.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["anchor_id", "markdown"],
+                  properties: {
+                    anchor_id: { type: "string", minLength: 1, maxLength: 64 },
+                    markdown: { type: "string", minLength: 1, maxLength: 4000 },
+                  },
+                },
+              },
+              decisions: {
+                ...stringArrayJsonSchema,
+                description: "Decisions the agent made this session.",
+              },
+              outcome: {
+                type: "string",
+                enum: ["shipped", "blocked", "paused", "interrupted"],
+                description: "Terminal status of the work.",
+              },
+              files_touched: {
+                ...stringArrayJsonSchema,
+                description: "Files inspected or modified.",
+              },
+              commands_run: {
+                type: "array",
+                description: "Shell commands run during the session.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["cmd"],
+                  properties: {
+                    cmd: { type: "string", minLength: 1, maxLength: 2000 },
+                    exit_code: { type: ["integer", "null"] },
+                  },
+                },
+              },
+              cwd: { type: "string" },
+              diff_summary: { type: "string" },
+              duration_ms: { type: "integer", minimum: 0 },
+              harness: {
+                type: "object",
+                additionalProperties: false,
+                description: "Self-reported per-session token usage.",
+                required: ["model_id"],
+                properties: {
+                  model_id: { type: "string", minLength: 1, maxLength: 128 },
+                  total_input_tokens: { type: "integer", minimum: 0 },
+                  total_output_tokens: { type: "integer", minimum: 0 },
+                  total_cache_read_tokens: { type: "integer", minimum: 0 },
+                  total_cache_write_tokens: { type: "integer", minimum: 0 },
+                },
+              },
+              transcript: {
+                type: "array",
+                description:
+                  "Optional redacted transcript — only used when structured fields are empty. Prefer summary_points/details_sections to avoid summarizer cost.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["role", "content"],
+                  properties: {
+                    role: { type: "string", minLength: 1 },
+                    content: { type: "string" },
+                  },
+                },
+              },
+              checkpoint_index: { type: "integer", minimum: 1 },
+            },
+            required: ["session_id", "kind"],
+          },
+        },
+        {
           name: "taskforce_session_log",
           description:
             "Return the Taskforce discovery preamble + consult history for a Claude Code session. Powers the `/taskforce` slash command — an agent or user can ask 'what did the hook pull into context this session?' without leaving Claude Code. Filters `document.consulted` events by `session_id` (which the UserPromptSubmit hook embeds on every discover call) and returns the per-match summary so the same preamble the hook injected can be replayed.",
@@ -2336,6 +2553,32 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         } catch (err) {
           return toolError(
             `taskforce_session_log failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "taskforce_session_start") {
+        const args = TaskforceSessionStartArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await callTaskforceSessionStart(args, { bearerToken });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `taskforce_session_start failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      if (name === "taskforce_session_observe") {
+        const args = TaskforceSessionObserveArgsSchema.parse(req.params.arguments ?? {});
+        const bearerToken = opts.backendBearerTokenProvider?.();
+        try {
+          const result = await callTaskforceSessionObserve(args, { bearerToken });
+          return toolJson(result);
+        } catch (err) {
+          return toolError(
+            `taskforce_session_observe failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
