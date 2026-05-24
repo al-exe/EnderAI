@@ -20,6 +20,7 @@ from sqlalchemy import desc
 from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep
+from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
@@ -35,6 +36,7 @@ from app.models import (
     TaskforceReferenceResponse,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
+    TaskforceSessionSavingsResponse,
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
     V2Document,
@@ -282,3 +284,29 @@ def session_log_route(
         )
 
     return TaskforceSessionLogResponse(session_id=session_id, entries=entries)
+
+
+@router.get("/session-savings", response_model=TaskforceSessionSavingsResponse)
+def session_savings_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str = Query(..., min_length=1, max_length=128),
+    pricing_model_id: str | None = Query(default=None, min_length=1, max_length=128),
+) -> Any:
+    """Return aggregate net savings for a single Taskforce session."""
+
+    savings = taskforce_session_savings(
+        session,
+        user_id=current_user.id,
+        session_id=session_id,
+        pricing_model_id=pricing_model_id,
+    )
+    return TaskforceSessionSavingsResponse(
+        session_id=savings.session_id,
+        doc_count=savings.doc_count,
+        net_saved_tokens=savings.net_saved_tokens,
+        usd_saved=savings.usd_saved,
+        pricing_model_id=savings.pricing_model_id,
+        occurred_at_first=savings.occurred_at_first,
+        occurred_at_last=savings.occurred_at_last,
+    )

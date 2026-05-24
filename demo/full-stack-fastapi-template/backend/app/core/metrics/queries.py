@@ -25,6 +25,7 @@ from app.core.metrics.registry import (
     MetricDefinition,
 )
 from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
     METRICS_EVENT_TOKENS_CONSUMED,
     METRICS_EVENT_TOKENS_SAVED_CACHE,
     METRICS_EVENT_TOKENS_SAVED_REUSE,
@@ -226,6 +227,65 @@ def savings_breakdown(
         cache=sums.get(METRICS_EVENT_TOKENS_SAVED_CACHE, Decimal(0)),
         summary_only=sums.get(METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY, Decimal(0)),
         reuse=sums.get(METRICS_EVENT_TOKENS_SAVED_REUSE, Decimal(0)),
+    )
+
+
+@dataclass(frozen=True)
+class TaskforceSessionSavings:
+    session_id: str
+    doc_count: int
+    net_saved_tokens: int
+    usd_saved: Decimal
+    pricing_model_id: str | None
+    occurred_at_first: datetime | None
+    occurred_at_last: datetime | None
+
+
+def taskforce_session_savings(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    session_id: str,
+    pricing_model_id: str | None = None,
+) -> TaskforceSessionSavings:
+    """Aggregate savings from ``document.consulted`` events for one session."""
+
+    statement = (
+        select(
+            func.count(func.distinct(MetricsEvent.document_id)),
+            func.coalesce(func.sum(MetricsEvent.input_tokens), 0),
+            func.coalesce(func.sum(MetricsEvent.usd_amount), 0),
+            func.min(MetricsEvent.occurred_at),
+            func.max(MetricsEvent.occurred_at),
+        )
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        .where(MetricsEvent.user_id == user_id)
+        .where(MetricsEvent.payload["session_id"].astext == session_id)  # type: ignore[index]
+    )
+    doc_count, net_saved_tokens, usd_saved, occurred_at_first, occurred_at_last = (
+        session.exec(statement).one()
+    )
+
+    usd = Decimal(str(usd_saved or 0))
+    if pricing_model_id and occurred_at_last is not None:
+        from app.core.metrics.pricing import pricing_for
+
+        pricing = pricing_for(session, pricing_model_id, occurred_at_last)
+        if pricing is not None and pricing.input_per_mtok is not None:
+            usd = (
+                Decimal(int(net_saved_tokens or 0)) / Decimal(1_000_000)
+            ) * pricing.input_per_mtok
+        else:
+            usd = Decimal(0)
+
+    return TaskforceSessionSavings(
+        session_id=session_id,
+        doc_count=int(doc_count or 0),
+        net_saved_tokens=int(net_saved_tokens or 0),
+        usd_saved=usd.quantize(Decimal("0.000001")),
+        pricing_model_id=pricing_model_id,
+        occurred_at_first=occurred_at_first,
+        occurred_at_last=occurred_at_last,
     )
 
 
