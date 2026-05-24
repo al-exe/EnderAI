@@ -59,6 +59,7 @@ After a prompt that triggers a match you should see the banner in your Claude Co
 | Env var | Default | What it does |
 |---|---|---|
 | `ENDERAI_BACKEND_URL` | `https://enderai-backend.onrender.com` | Backend base URL. Override for local dev. |
+| `TASKFORCE_HOOKS_DISABLED` | `0` | Set to `1` to make all Taskforce hooks exit 0 after dependency checks. Useful when invoking `/tf` manually so hooks and the skill do not both emit context. |
 | `TASKFORCE_PREAMBLE_BUDGET` | `1500` | Approximate token budget for the injected preamble. Higher = more context, more prompt cost. |
 | `TASKFORCE_HOOK_DEBUG` | `0` | Mirror logs to stderr (helpful while iterating on the hook). |
 
