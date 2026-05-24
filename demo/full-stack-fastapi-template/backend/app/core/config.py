@@ -24,7 +24,13 @@ def parse_cors(v: Any) -> list[str] | str:
 
 
 def expand_cors_origin_aliases(origins: list[str]) -> list[str]:
+    # enderai.xyz aliases stay through the taskforce.tools cutover so
+    # in-flight tabs and cached agent tokens still pass CORS while DNS /
+    # redirects propagate. Drop them once the redirect has been live long
+    # enough that no client is still sending the old Origin header.
     aliases_by_origin = {
+        "https://taskforce.tools": "https://www.taskforce.tools",
+        "https://www.taskforce.tools": "https://taskforce.tools",
         "https://enderai.xyz": "https://www.enderai.xyz",
         "https://www.enderai.xyz": "https://enderai.xyz",
     }

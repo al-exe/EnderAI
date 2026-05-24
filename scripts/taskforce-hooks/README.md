@@ -23,7 +23,7 @@ When the session ends (Stop hook) or every 10 tool calls (PostToolUse hook), the
 
 ## Install
 
-Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the EnderAI MCP token from `~/.enderai_mcp_token` (created by the Connect Agent flow at https://www.enderai.xyz).
+Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.enderai_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks/install.sh | bash
