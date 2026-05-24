@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -8,8 +9,12 @@ from urllib.parse import urljoin
 
 import httpx
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session
 
 from app.core.config import settings
+
+log = logging.getLogger(__name__)
 
 
 class StripeBillingError(Exception):
@@ -147,6 +152,65 @@ def verify_webhook_signature(payload: bytes, signature_header: str) -> dict[str,
     if not isinstance(event, dict):
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook event")
     return event
+
+
+# ---- Stripe webhook idempotency WAL (TF-193, demo branch only) -----
+#
+# Records each inbound Stripe event so duplicate delivery can be
+# detected at the route boundary. The handler in
+# `app/api/routes/billing.py` is expected to short-circuit on a False
+# return BEFORE calling `_dispatch_event` — on this branch the call is
+# intentionally placed AFTER dispatch (the demo bug). The fix moves it
+# back to the correct position.
+#
+# Keyed on `(event_id, is_test_mode)` so test-mode replays do not
+# collide with live fulfillment.
+
+
+def record_stripe_event_or_skip(
+    session: Session, event: dict[str, Any]
+) -> bool:
+    """Insert a WAL row for this Stripe event; return False on duplicate.
+
+    Returns:
+      True  — first time we have seen this event_id, fulfillment should run.
+      False — duplicate; the caller MUST NOT re-run fulfillment.
+
+    Reads `event.id` and `event.livemode` from the Stripe event payload.
+    Demo-branch scaffolding for TF-193; do not move to main as-is.
+    """
+
+    # Lazy import to avoid circular models <-> billing imports at module load.
+    from app.models import StripeWebhookEvent
+
+    event_id = event.get("id")
+    if not isinstance(event_id, str) or not event_id:
+        # Unsigned / malformed events should never reach here, but if they
+        # do, fail open so the handler still runs (preserves existing
+        # behavior pre-WAL).
+        log.warning("stripe.webhook.missing_event_id")
+        return True
+
+    is_test_mode = not bool(event.get("livemode", True))
+    event_type = event.get("type") or "unknown"
+
+    row = StripeWebhookEvent(
+        event_id=event_id,
+        is_test_mode=is_test_mode,
+        event_type=event_type[:128],
+    )
+    session.add(row)
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        log.info(
+            "stripe.webhook.dedup_hit event_id=%s is_test_mode=%s",
+            event_id,
+            is_test_mode,
+        )
+        return False
+    return True
 
 
 class StripeBillingClient:

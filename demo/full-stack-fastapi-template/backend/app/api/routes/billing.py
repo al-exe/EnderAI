@@ -12,6 +12,7 @@ from app.core.stripe_billing import (
     get_invoice_subscription_id,
     get_subscription_period_end,
     get_subscription_price_id,
+    record_stripe_event_or_skip,
     verify_webhook_signature,
 )
 from app.core.tiering import resolve_public_tier
@@ -324,6 +325,13 @@ async def receive_stripe_webhook(
     if not isinstance(event_type, str) or not isinstance(event_object, dict):
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook event")
 
+    # ⚠️ DEMO BRANCH (TF-193): the WAL call is intentionally placed
+    # AFTER fulfillment dispatch. This is the bug the demo video
+    # records the fix for — duplicate webhook retries re-run the
+    # plan-upgrade fulfillment side effect before the WAL catches up.
+    # The fix moves `record_stripe_event_or_skip(...)` and an
+    # early-return for duplicates ABOVE the dispatch block.
+    # See DEMO_BRANCH.md at repo root. DO NOT MERGE TO MAIN.
     if event_type == "checkout.session.completed":
         _handle_checkout_session_completed(session, event_object)
     elif event_type in {
@@ -336,6 +344,10 @@ async def receive_stripe_webhook(
         _handle_invoice_event(session, event_object, status_value="active")
     elif event_type == "invoice.payment_failed":
         _handle_invoice_event(session, event_object, status_value="past_due")
+
+    # ⚠️ WAL is written AFTER fulfillment — the bug. Concurrent retries
+    # both pass the dispatch block before either writes the row.
+    record_stripe_event_or_skip(session, event)
 
     session.commit()
     return Message(message="Stripe webhook processed")

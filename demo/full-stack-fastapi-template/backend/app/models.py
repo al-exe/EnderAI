@@ -1786,3 +1786,31 @@ class SearchQuery(SQLModel):
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=20)
     demo: bool = False
+
+
+# ---- Stripe webhook WAL (demo branch only, TF-193) -----------------
+#
+# This model exists ONLY on the demo/stripe-double-charge branch. It
+# backs the deliberate "WAL-after-fulfillment" regression the demo
+# video records against. DO NOT MERGE TO MAIN — the demo branch is
+# intentionally broken so the recorded fix has something to do.
+# See DEMO_BRANCH.md at repo root.
+class StripeWebhookEvent(SQLModel, table=True):
+    """Inbound Stripe webhook WAL keyed on (event_id, is_test_mode).
+
+    Demo-branch scaffolding for the plan-upgrade double-charge fix:
+    `record_stripe_event_or_skip` writes here and returns False on
+    duplicate. On the demo branch the WAL is called AFTER dispatch
+    (the bug). After the fix it's called BEFORE dispatch.
+    """
+
+    __tablename__ = "stripe_webhook_event"
+
+    event_id: str = Field(primary_key=True, max_length=128)
+    is_test_mode: bool = Field(primary_key=True, default=False)
+    event_type: str = Field(max_length=128)
+    processed_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore[arg-type]
+        nullable=False,
+    )
