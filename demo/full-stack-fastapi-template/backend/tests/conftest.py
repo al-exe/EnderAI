@@ -12,6 +12,8 @@ from app.core.db import engine, init_db
 from app.main import app
 from app.models import (
     AgentCredential,
+    AgentSpecialist,
+    AgentSpecialistDocumentLink,
     CaseEvent,
     CaseRecord,
     Organization,
@@ -46,6 +48,8 @@ def db() -> Generator[Session, None, None]:
         session.execute(delete(Skill))
         session.execute(delete(CaseRecord))
         session.execute(delete(Topic))
+        session.execute(delete(AgentSpecialistDocumentLink))
+        session.execute(delete(AgentSpecialist))
         session.execute(delete(V2DocumentFavorite))
         session.execute(delete(V2DocumentShare))
         session.execute(delete(V2Document))

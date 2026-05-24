@@ -1112,6 +1112,141 @@ class V2DocumentsPublic(SQLModel):
     count: int
 
 
+class AgentSpecialist(SQLModel, table=True):
+    __tablename__ = "agent_specialist"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="user.id",
+        index=True,
+        ondelete="CASCADE",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    slug: str = Field(unique=True, index=True, max_length=64)
+    name: str = Field(max_length=80)
+    role: str = Field(max_length=160)
+    short_description: str = Field(max_length=240)
+    description: str = Field(default="")
+    status: str = Field(default="active", index=True, max_length=16)
+    visibility: str = Field(default="private", index=True, max_length=16)
+    domain_tags: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    routing_triggers: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    negative_triggers: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    instructions: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
+    created_from: str = Field(default="seeded", max_length=32)
+    is_demo: bool = Field(default=False, index=True)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class AgentSpecialistDocumentLink(SQLModel, table=True):
+    __tablename__ = "agent_specialist_document_link"
+    __table_args__ = (
+        UniqueConstraint(
+            "specialist_id",
+            "document_id",
+            name="uq_agent_doc_link",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    specialist_id: uuid.UUID = Field(
+        foreign_key="agent_specialist.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    document_id: uuid.UUID = Field(
+        foreign_key="v2_document.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    anchor_id: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=240)
+    weight: float = Field(default=1.0)
+    is_pinned: bool = Field(default=False)
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class AgentSpecialistSummary(SQLModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    role: str
+    short_description: str
+    domain_tags: list[str] = Field(default_factory=list)
+    status: Literal["active", "draft", "archived"]
+    linked_docs_count: int = Field(default=0, ge=0)
+    invocations_count: int = Field(default=0, ge=0)
+    tokens_saved: int = Field(default=0, ge=0)
+    last_invoked_at: datetime | None = None
+
+
+class AgentsListResponse(SQLModel):
+    items: list[AgentSpecialistSummary]
+
+
+class AgentSpecialistLinkedDoc(SQLModel):
+    document_id: uuid.UUID
+    title: str
+    description: str
+    anchor_id: str | None = None
+    href: str
+    reason: str | None = None
+
+
+class AgentSpecialistInvocationSummary(SQLModel):
+    id: uuid.UUID
+    prompt: str
+    summary: str | None = None
+    session_id: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    documents_consulted_count: int = Field(default=0, ge=0)
+    tokens_saved: int = Field(default=0, ge=0)
+    created_at: datetime
+
+
+class AgentSpecialistStats(SQLModel):
+    invocations_count: int = Field(default=0, ge=0)
+    linked_docs_count: int = Field(default=0, ge=0)
+    tokens_saved: int = Field(default=0, ge=0)
+    usd_saved: Decimal = Decimal(0)
+
+
+class AgentSpecialistDetail(SQLModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    role: str
+    description: str
+    domain_tags: list[str] = Field(default_factory=list)
+    routing_triggers: list[str] = Field(default_factory=list)
+    negative_triggers: list[str] = Field(default_factory=list)
+    instructions: list[str] = Field(default_factory=list)
+    linked_knowledge: list[AgentSpecialistLinkedDoc] = Field(default_factory=list)
+    recent_invocations: list[AgentSpecialistInvocationSummary] = Field(
+        default_factory=list
+    )
+    stats: AgentSpecialistStats
+
+
 class Message(SQLModel):
     message: str
 
