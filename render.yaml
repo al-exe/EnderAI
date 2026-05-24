@@ -41,9 +41,13 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: BACKEND_CORS_ORIGINS
-        value: https://enderai.xyz,https://www.enderai.xyz
+        # enderai.xyz origins stay through the taskforce.tools cutover so
+        # any tab/agent still sending the old Origin header gets through
+        # CORS. Drop once the enderai.xyz → taskforce.tools redirect has
+        # been live long enough.
+        value: https://taskforce.tools,https://www.taskforce.tools,https://enderai.xyz,https://www.enderai.xyz
       - key: FRONTEND_HOST
-        value: https://www.enderai.xyz
+        value: https://www.taskforce.tools
       - key: STRIPE_API_BASE_URL
         value: https://api.stripe.com
       - key: SEARCH_EMBEDDING_MODEL
