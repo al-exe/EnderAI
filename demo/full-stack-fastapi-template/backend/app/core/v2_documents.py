@@ -1877,6 +1877,411 @@ DEMO_SEED: list[dict[str, Any]] = [
             },
         ],
     },
+    # -----------------------------------------------------------------
+    # Stripe webhook idempotency trio (TF-191, demo video)
+    #
+    # Three linked docs that surface together on the demo prompt
+    # "Stripe is double-charging some users on plan upgrades…"
+    # See ~/dev/docs/taskforce-agents-demo-handoff.md §3 for design
+    # rationale and ~/dev/docs/taskforce-demo-video-plan.md §5 for the
+    # rediscovery-cost math (~$0.38 savings target).
+    #
+    # IMPORTANT credibility framing: the incident-2026-04-11 section
+    # says "baseline webhook replay coverage existed but did not cover
+    # this newer plan-upgrade fulfillment path" — NOT "we added a
+    # replay test." That framing matches TF-193's renamed regression
+    # test (`test_plan_upgrade_webhook_retry_short_circuits_before_dispatch`)
+    # and keeps the demo narration honest.
+    # -----------------------------------------------------------------
+    {
+        "title": "Stripe webhook idempotency strategy",
+        "description": (
+            "How we dedupe Stripe webhook retries so plan upgrades "
+            "don't double-fulfill. Decision record + WAL table design."
+        ),
+        "created_at": _dt(2026, 4, 12),
+        "updated_at": _dt(2026, 4, 27),
+        "collaborators": ["Alex Lee", "Codex"],
+        "ai_generated_summary": (
+            "Inbound Stripe webhooks are deduped via a "
+            "stripe_webhook_event WAL table keyed on event_id and "
+            "is_test_mode. billing.py checks the WAL before dispatching "
+            "to handlers; duplicates return 200 OK without re-running "
+            "fulfillment. Baseline replay coverage exists, but newer "
+            "event-specific fulfillment paths still need targeted "
+            "regression tests."
+        ),
+        "human_summary": (
+            "Stripe retries webhook delivery on non-2xx responses and "
+            "can redeliver events during service recovery. After the "
+            "2026-04-11 Pro upgrade double-charge incident, we captured "
+            "the invariant: inbound Stripe events must be deduped at "
+            "the route boundary before fulfillment. Baseline replay "
+            "coverage exists; newer plan-upgrade paths still need "
+            "targeted regression tests (see "
+            "stripe-plan-upgrade-regression-coverage)."
+        ),
+        "main_body": [
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Stripe may redeliver webhook events. "
+                            "Inbound handlers must be idempotent at "
+                            "the route boundary."
+                        ),
+                        "evidence_anchor_id": "decision-wal-table",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "The stripe_webhook_event WAL must be "
+                            "written before fulfillment dispatch, not "
+                            "after."
+                        ),
+                        "evidence_anchor_id": "decision-wal-table",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Baseline replay tests cover duplicate "
+                            "delivery, but event-specific side effects "
+                            "need targeted regression coverage."
+                        ),
+                        "evidence_anchor_id": "targeted-regression-test",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Test-mode and live-mode events must be "
+                            "scoped separately via event.livemode / "
+                            "is_test_mode."
+                        ),
+                        "evidence_anchor_id": "gotcha-test-vs-live",
+                    }
+                ]
+            },
+        ],
+        "details_file_name": "stripe-webhook-idempotency.details.md",
+        "details_markdown_sections": [
+            {
+                "anchor_id": "decision-wal-table",
+                "markdown": (
+                    "## Decision — WAL table at the route boundary\n\n"
+                    "**Chose:** dedicated `stripe_webhook_event` WAL "
+                    "table, checked in `app/api/routes/billing.py` "
+                    "BEFORE dispatching to any handler.\n\n"
+                    "**Why:** fulfillment handlers are not uniformly "
+                    "idempotent. Some webhook types, such as "
+                    "`customer.subscription.updated`, do not have a "
+                    "natural unique side-effect key across all upgrade "
+                    "paths.\n\n"
+                    "**Ruled out:**\n"
+                    "- In-handler dedupe with `ON CONFLICT DO NOTHING` "
+                    "on fulfillment rows.\n"
+                    "- Redis SETNX with TTL in the payment critical "
+                    "path.\n"
+                    "- Trusting Stripe's `Idempotency-Key` header, "
+                    "which applies to outbound Stripe API calls, not "
+                    "inbound webhooks.\n\n"
+                    "**Files:**\n"
+                    "- `app/api/routes/billing.py`\n"
+                    "- `app/core/stripe_billing.py`\n"
+                    "- `app/models.py`\n"
+                    "- `app/alembic/versions/*stripe_webhook_wal*.py`\n"
+                ),
+            },
+            {
+                "anchor_id": "incident-2026-04-11",
+                "markdown": (
+                    "## Incident — 2026-04-11 double-charge\n\n"
+                    "30 customers on Pro upgrades got charged twice "
+                    "over a 90-minute window. Root cause: Stripe "
+                    "aggressively retried webhook delivery during "
+                    "recovery, and our upgrade flow ran twice for the "
+                    "same event.\n\n"
+                    "**Symptoms:**\n"
+                    "- Duplicate invoices for the same "
+                    "`subscription_id`\n"
+                    "- Sentry spike on "
+                    "`stripe.upgrade.duplicate_invoice`\n"
+                    "- Customer-facing: two charges in the same "
+                    "billing cycle\n\n"
+                    "**Resolution:**\n"
+                    "- Hotfix: voided duplicate invoices and refunded "
+                    "affected charges\n"
+                    "- Followup: added the WAL table plus baseline "
+                    "webhook replay coverage\n\n"
+                    "**Important nuance:** the baseline replay test "
+                    "verified duplicate delivery at the webhook "
+                    "boundary, but did not assert every newer "
+                    "downstream fulfillment side effect. Newer "
+                    "event-specific fulfillment paths — particularly "
+                    "`customer.subscription.updated` plan upgrades — "
+                    "still need targeted regression tests that prove "
+                    "the side effect ran exactly once. See "
+                    "`stripe-plan-upgrade-regression-coverage` for the "
+                    "current pattern.\n"
+                ),
+            },
+            {
+                "anchor_id": "targeted-regression-test",
+                "markdown": (
+                    "## Test guidance — plan-upgrade replay "
+                    "regression\n\n"
+                    "Baseline replay coverage is not enough for "
+                    "billing changes. For plan upgrades, the "
+                    "regression test must assert that a duplicate "
+                    "`customer.subscription.updated` event does not "
+                    "re-fire fulfillment.\n\n"
+                    "Preferred test name:\n\n"
+                    "```text\n"
+                    "test_plan_upgrade_webhook_retry_short_circuits_before_dispatch\n"
+                    "```\n\n"
+                    "The test should:\n"
+                    "1. POST the same signed Stripe plan-upgrade "
+                    "webhook twice.\n"
+                    "2. Assert both responses are successful.\n"
+                    "3. Assert the plan-upgrade fulfillment side "
+                    "effect ran exactly once.\n"
+                    "4. Assert duplicate delivery returns before "
+                    "`_dispatch_event()`.\n"
+                ),
+            },
+            {
+                "anchor_id": "gotcha-test-vs-live",
+                "markdown": (
+                    "## Gotcha — test mode vs live mode events\n\n"
+                    "Stripe webhooks fire in both live and test mode. "
+                    "We scope WAL rows by `(event_id, is_test_mode)` "
+                    "so test-mode replays cannot collide with live "
+                    "fulfillment.\n\n"
+                    "Use `event.livemode` from the payload, not log "
+                    "text or event id prefixes, when deciding whether "
+                    "the event is test or live.\n"
+                ),
+            },
+        ],
+    },
+    {
+        "title": "Debugging Stripe webhook retries and double-fire fulfillment",
+        "description": (
+            "Playbook for replaying webhooks, reading the WAL, and "
+            "diagnosing duplicate delivery."
+        ),
+        "created_at": _dt(2026, 4, 14),
+        "updated_at": _dt(2026, 5, 2),
+        "collaborators": ["Alex Lee"],
+        "ai_generated_summary": (
+            "Use Stripe CLI event replay to reproduce delivery flakes. "
+            "Check the WAL for `(event_id, is_test_mode)`, confirm the "
+            "route short-circuits before dispatch, and inspect "
+            "event.livemode when logs are ambiguous."
+        ),
+        "human_summary": (
+            "Operational playbook for Stripe webhook flakes. Covers "
+            "replaying events with the Stripe CLI, reading "
+            "stripe_webhook_event, interpreting dedup hits, checking "
+            "test/live mode, and distinguishing duplicate delivery "
+            "from non-idempotent fulfillment."
+        ),
+        "main_body": [
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "If Stripe double-fires a webhook, first "
+                            "check whether the WAL short-circuits "
+                            "before fulfillment dispatch."
+                        ),
+                        "evidence_anchor_id": "repro-with-stripe-cli",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "A dedup hit should return 200 without "
+                            "re-running the fulfillment path."
+                        ),
+                        "evidence_anchor_id": "dedup-hit-log",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Test-mode events look similar to live "
+                            "events in logs; check event.livemode."
+                        ),
+                        "evidence_anchor_id": "test-mode-trap",
+                    }
+                ]
+            },
+        ],
+        "details_file_name": "debugging-stripe-webhooks.details.md",
+        "details_markdown_sections": [
+            {
+                "anchor_id": "repro-with-stripe-cli",
+                "markdown": (
+                    "## Reproducing webhook retries that double-fire\n\n"
+                    "Start by reading `app/api/routes/billing.py` to "
+                    "confirm the WAL short-circuit runs before "
+                    "`_dispatch_event`. Then replay an event with the "
+                    "Stripe CLI:\n\n"
+                    "```bash\n"
+                    "stripe events list --limit 10\n"
+                    "stripe events resend evt_1OabcD2eZvKYlo2C0X8YzABC\n"
+                    "heroku logs -t -a enderai-backend "
+                    "| grep stripe.webhook\n"
+                    "```\n\n"
+                    "Expected duplicate behavior on a healthy build: "
+                    "the second webhook retry returns 200 and logs a "
+                    "dedup hit before any fulfillment handler runs. If "
+                    "the plan upgrade side effect runs twice, "
+                    "`record_stripe_event_or_skip` in "
+                    "`app/core/stripe_billing.py` is being called too "
+                    "late in the route.\n"
+                ),
+            },
+            {
+                "anchor_id": "dedup-hit-log",
+                "markdown": (
+                    "## Expected duplicate log line\n\n"
+                    "```text\n"
+                    "stripe.webhook.dedup_hit "
+                    "event_id=evt_1OabcD2eZvKYlo2C0X8YzABC\n"
+                    "  is_test_mode=False "
+                    "processed_at_age_seconds=3.2\n"
+                    "```\n\n"
+                    "If the fulfillment log appears after this line on "
+                    "duplicate delivery, the route is not "
+                    "short-circuiting correctly.\n"
+                ),
+            },
+            {
+                "anchor_id": "test-mode-trap",
+                "markdown": (
+                    "## Test mode vs live mode\n\n"
+                    "Always inspect `event.livemode`. Test-mode events "
+                    "can be replayed from local machines and should "
+                    "never suppress live fulfillment.\n"
+                ),
+            },
+        ],
+    },
+    {
+        "title": "Stripe plan upgrade webhook retries — regression test pattern",
+        "description": (
+            "Test strategy for Stripe plan-upgrade side effects under "
+            "webhook replay."
+        ),
+        "created_at": _dt(2026, 5, 3),
+        "updated_at": _dt(2026, 5, 18),
+        "collaborators": ["Alex Lee", "Claude"],
+        "ai_generated_summary": (
+            "For plan upgrades, duplicate "
+            "`customer.subscription.updated` delivery must not re-run "
+            "entitlement or invoice side effects. The regression test "
+            "should patch the fulfillment path or assert persisted "
+            "side effects ran exactly once."
+        ),
+        "human_summary": (
+            "Guide for writing billing replay tests that assert "
+            "downstream side effects, not just successful HTTP "
+            "responses. Created after we realized baseline webhook "
+            "replay tests can miss event-specific fulfillment paths."
+        ),
+        "main_body": [
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Billing replay tests should assert "
+                            "fulfillment side effects ran once, not "
+                            "just that the route returned 200."
+                        ),
+                        "evidence_anchor_id": "side-effect-assertion",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Plan-upgrade paths are high-risk because "
+                            "subscription updates can trigger "
+                            "entitlement, invoice, and tier changes."
+                        ),
+                        "evidence_anchor_id": "plan-upgrade-risk",
+                    }
+                ]
+            },
+        ],
+        "details_file_name": "stripe-plan-upgrade-regression.details.md",
+        "details_markdown_sections": [
+            {
+                "anchor_id": "side-effect-assertion",
+                "markdown": (
+                    "## Side-effect assertion\n\n"
+                    "A passing duplicate replay test should prove the "
+                    "handler in `app/api/routes/billing.py` did not "
+                    "re-run the expensive or customer-visible side "
+                    "effect, even when Stripe webhook retries fire "
+                    "twice for the same `customer.subscription.updated` "
+                    "plan upgrade event.\n\n"
+                    "Acceptable assertions for the regression test in "
+                    "`app/tests/api/routes/test_billing.py`:\n"
+                    "- fulfillment function in "
+                    "`app/core/stripe_billing.py` called once\n"
+                    "- entitlement row written once\n"
+                    "- invoice adjustment created once\n"
+                    "- tier transition recorded once\n"
+                ),
+            },
+            {
+                "anchor_id": "plan-upgrade-risk",
+                "markdown": (
+                    "## Why plan upgrades need targeted coverage\n\n"
+                    "`customer.subscription.updated` can represent "
+                    "many state changes. A generic webhook replay test "
+                    "may pass while a newly-added upgrade branch "
+                    "still re-fires fulfillment. Always include a "
+                    "test that uses the exact event shape for the "
+                    "upgrade path.\n"
+                ),
+            },
+            {
+                "anchor_id": "targeted-regression-test",
+                "markdown": (
+                    "## The targeted test\n\n"
+                    "```text\n"
+                    "tests/api/routes/test_billing.py::"
+                    "test_plan_upgrade_webhook_retry_short_circuits_before_dispatch\n"
+                    "```\n\n"
+                    "Pattern:\n\n"
+                    "1. Build a Stripe `customer.subscription.updated` "
+                    "event for a plan upgrade.\n"
+                    "2. Patch (or observe) the plan-upgrade "
+                    "fulfillment function.\n"
+                    "3. POST the same signed payload twice.\n"
+                    "4. Assert the fulfillment function was called "
+                    "exactly once across both deliveries.\n"
+                ),
+            },
+        ],
+    },
 ]
 
 
