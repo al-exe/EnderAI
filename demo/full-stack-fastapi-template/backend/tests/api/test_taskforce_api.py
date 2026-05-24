@@ -7,11 +7,21 @@ response/DB state.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
+    MetricsEvent,
+    ModelPricing,
+    User,
+)
 from tests.utils.utils import random_email, random_lower_string
 
 REFERENCE_SESSION_ID = "123e4567-e89b-12d3-a456-426614174000"
@@ -30,6 +40,10 @@ def _signup(client: TestClient) -> tuple[str, dict[str, str]]:
 
     headers = user_authentication_headers(client=client, email=email, password=password)
     return email, headers
+
+
+def _user_by_email(db: Session, email: str) -> User:
+    return db.exec(select(User).where(User.email == email)).one()
 
 
 def _create_document(
@@ -324,6 +338,114 @@ def test_session_log_filters_by_session(client: TestClient) -> None:
         assert entry["title"]
     for entry in beta.json()["entries"]:
         assert entry["title"]
+
+
+def test_session_savings_empty_session_returns_zeroes(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/session-savings",
+        headers=headers,
+        params={"session_id": "missing-session"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "session_id": "missing-session",
+        "doc_count": 0,
+        "net_saved_tokens": 0,
+        "usd_saved": "0.000000",
+        "pricing_model_id": None,
+        "occurred_at_first": None,
+        "occurred_at_last": None,
+    }
+
+
+def test_session_savings_sums_consult_events(client: TestClient, db: Session) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    doc_a = uuid.UUID(_create_document(client, headers, title="Savings doc A"))
+    doc_b = uuid.UUID(_create_document(client, headers, title="Savings doc B"))
+
+    for document_id, tokens, usd in (
+        (doc_a, 1000, Decimal("0.010000")),
+        (doc_b, 2000, Decimal("0.020000")),
+    ):
+        db.add(
+            MetricsEvent(
+                occurred_at=datetime(
+                    2026, 5, 23, 19, tokens // 1000, tzinfo=timezone.utc
+                ),
+                user_id=user.id,
+                document_id=document_id,
+                kind=METRICS_EVENT_DOCUMENT_CONSULTED,
+                input_tokens=tokens,
+                usd_amount=usd,
+                payload={"session_id": "savings-session"},
+            )
+        )
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/session-savings",
+        headers=headers,
+        params={"session_id": "savings-session"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["session_id"] == "savings-session"
+    assert body["doc_count"] == 2
+    assert body["net_saved_tokens"] == 3000
+    assert body["usd_saved"] == "0.030000"
+    assert body["pricing_model_id"] is None
+    assert body["occurred_at_first"] == "2026-05-23T19:01:00Z"
+    assert body["occurred_at_last"] == "2026-05-23T19:02:00Z"
+
+
+def test_session_savings_pricing_model_override_reprices_tokens(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    document_id = uuid.UUID(_create_document(client, headers, title="Override doc"))
+    pricing_model_id = f"test-session-savings-{random_lower_string()}"
+    db.add(
+        ModelPricing(
+            provider="test",
+            model_id=pricing_model_id,
+            effective_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            input_per_mtok=Decimal("10.0000"),
+            output_per_mtok=Decimal("20.0000"),
+        )
+    )
+    db.add(
+        MetricsEvent(
+            occurred_at=datetime(2026, 5, 23, 19, 4, tzinfo=timezone.utc),
+            user_id=user.id,
+            document_id=document_id,
+            kind=METRICS_EVENT_DOCUMENT_CONSULTED,
+            input_tokens=3000,
+            usd_amount=Decimal("0.001000"),
+            payload={"session_id": "override-session"},
+        )
+    )
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/session-savings",
+        headers=headers,
+        params={
+            "session_id": "override-session",
+            "pricing_model_id": pricing_model_id,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["net_saved_tokens"] == 3000
+    assert body["usd_saved"] == "0.030000"
+    assert body["pricing_model_id"] == pricing_model_id
 
 
 # ----- TF-186: append referenced-by rows to consulted documents ------------

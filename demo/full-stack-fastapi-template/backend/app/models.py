@@ -1416,6 +1416,18 @@ class TaskforceSessionLogResponse(SQLModel):
     entries: list[TaskforceSessionLogEntry]
 
 
+class TaskforceSessionSavingsResponse(SQLModel):
+    """Response from GET /v2/taskforce/session-savings?session_id=…"""
+
+    session_id: str
+    doc_count: int = Field(default=0, ge=0)
+    net_saved_tokens: int = Field(default=0, ge=0)
+    usd_saved: Decimal = Decimal(0)
+    pricing_model_id: str | None = None
+    occurred_at_first: datetime | None = None
+    occurred_at_last: datetime | None = None
+
+
 class TaskforceReferenceRequest(SQLModel):
     """Request body for POST /v2/taskforce/reference."""
 
