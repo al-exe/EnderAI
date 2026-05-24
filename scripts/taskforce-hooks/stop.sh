@@ -42,6 +42,11 @@ trap 'exit 0' EXIT
 command -v jq   >/dev/null 2>&1 || { log "skip: jq missing";   exit 0; }
 command -v curl >/dev/null 2>&1 || { log "skip: curl missing"; exit 0; }
 
+if [[ "${TASKFORCE_HOOKS_DISABLED:-0}" == "1" ]]; then
+    log "skip: TASKFORCE_HOOKS_DISABLED=1"
+    exit 0
+fi
+
 if [[ ! -r "$TOKEN_FILE" ]]; then
     log "skip: no token at $TOKEN_FILE"
     exit 0
