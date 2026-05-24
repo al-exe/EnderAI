@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Sequence
+from collections.abc import Sequence
 
 from sqlmodel import Session
 
@@ -163,6 +163,7 @@ def discover(
             score=round(scored.score, 4),
             confidence_band=scored.band,
             match_reasons=scored.match_reasons,
+            matched_anchor_id=scored.matched_anchor_id,
             summary_markdown=summary,
             last_touched_at=scored.document.updated_at,
             outcome=_outcome_for(scored.document),

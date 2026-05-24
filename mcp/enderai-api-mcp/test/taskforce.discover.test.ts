@@ -74,6 +74,7 @@ describe("callTaskforceDiscover", () => {
             score: 0.81,
             confidence_band: "high",
             match_reasons: ["Title tokens overlap on 'library', 'polish'"],
+            matched_anchor_id: "metrics-card",
             summary_markdown: "Cleanup of the metrics page.",
             last_touched_at: "2026-05-20T17:00:00Z",
             outcome: null,
@@ -87,6 +88,7 @@ describe("callTaskforceDiscover", () => {
     const result = await callTaskforceDiscover({ prompt: "library polish" });
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0].confidence_band).toBe("high");
+    expect(result.matches[0].matched_anchor_id).toBe("metrics-card");
     expect(result.matches[0].rediscovery_cost_tokens).toBe(17000);
   });
 

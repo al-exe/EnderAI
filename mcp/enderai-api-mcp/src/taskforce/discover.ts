@@ -24,6 +24,7 @@ export type TaskforceDiscoverMatch = {
   score: number;
   confidence_band: "high" | "medium" | "low";
   match_reasons: string[];
+  matched_anchor_id: string | null;
   summary_markdown: string;
   last_touched_at: string | null;
   outcome?: string | null;
