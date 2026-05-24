@@ -27,15 +27,17 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Literal, Sequence
+from typing import Literal
 
 from app.models import V2Document, V2DocumentDetailsSection, V2DocumentParagraph
 
 ConfidenceBand = Literal["high", "medium", "low"]
 
 DEFAULT_RECENCY_HALF_LIFE_SECONDS = 30 * 24 * 3600  # 30d
+SUMMARY_ANCHOR_ID = "summary"
 
 # Weights — sum to 1.0 so the final ``score`` lives in [0, 1] without further
 # normalization. Tunable from real-consult data in a follow-up.
@@ -50,9 +52,35 @@ WEIGHTS = {
 
 _STOPWORDS = frozenset(
     {
-        "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "for",
-        "with", "by", "is", "are", "was", "were", "be", "been", "being",
-        "this", "that", "these", "those", "it", "its", "as", "at", "from",
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "but",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "with",
+        "by",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "as",
+        "at",
+        "from",
     }
 )
 
@@ -87,7 +115,11 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 def _flatten_body(paragraphs: Sequence[V2DocumentParagraph]) -> str:
     out: list[str] = []
     for paragraph in paragraphs:
-        segments = paragraph.get("segments") if isinstance(paragraph, dict) else paragraph.segments  # type: ignore[union-attr]
+        segments = (
+            paragraph.get("segments")
+            if isinstance(paragraph, dict)
+            else paragraph.segments
+        )  # type: ignore[union-attr]
         for segment in segments:
             text = segment.get("text") if isinstance(segment, dict) else segment.text  # type: ignore[union-attr]
             if text:
@@ -98,10 +130,26 @@ def _flatten_body(paragraphs: Sequence[V2DocumentParagraph]) -> str:
 def _flatten_details(sections: Sequence[V2DocumentDetailsSection]) -> str:
     out: list[str] = []
     for section in sections:
-        markdown = section.get("markdown") if isinstance(section, dict) else section.markdown  # type: ignore[union-attr]
+        markdown = (
+            section.get("markdown") if isinstance(section, dict) else section.markdown
+        )  # type: ignore[union-attr]
         if markdown:
             out.append(markdown)
     return "\n".join(out)
+
+
+def _details_section_anchor(section: V2DocumentDetailsSection) -> str | None:
+    anchor_id = (
+        section.get("anchor_id") if isinstance(section, dict) else section.anchor_id
+    )  # type: ignore[union-attr]
+    return anchor_id or None
+
+
+def _details_section_markdown(section: V2DocumentDetailsSection) -> str:
+    markdown = (
+        section.get("markdown") if isinstance(section, dict) else section.markdown
+    )  # type: ignore[union-attr]
+    return markdown or ""
 
 
 def _doc_corpus(doc: V2Document) -> str:
@@ -120,7 +168,44 @@ def _doc_corpus(doc: V2Document) -> str:
     )
 
 
-def _substring_match_ratio(needles: Iterable[str], haystack: str) -> tuple[float, list[str]]:
+def _matched_anchor_id(
+    document: V2Document,
+    request: DiscoveryRequest,
+    request_tokens: set[str],
+) -> str:
+    """Pick the Details section that contributed most to the match."""
+
+    best_anchor_id = SUMMARY_ANCHOR_ID
+    best_score = 0.0
+
+    for section in document.details_markdown_sections or []:
+        anchor_id = _details_section_anchor(section)
+        if not anchor_id:
+            continue
+
+        markdown = _details_section_markdown(section)
+        section_tokens = set(tokenize(markdown))
+        corpus_score = _jaccard(section_tokens, request_tokens)
+        files_score, _ = _substring_match_ratio(request.files, markdown)
+        symbols_score, _ = _substring_match_ratio(request.symbols, markdown)
+        errors_score, _ = _substring_match_ratio(request.errors, markdown)
+
+        section_score = (
+            WEIGHTS["corpus"] * corpus_score
+            + WEIGHTS["files"] * files_score
+            + WEIGHTS["symbols"] * symbols_score
+            + WEIGHTS["errors"] * errors_score
+        )
+        if section_score > best_score:
+            best_anchor_id = anchor_id
+            best_score = section_score
+
+    return best_anchor_id
+
+
+def _substring_match_ratio(
+    needles: Iterable[str], haystack: str
+) -> tuple[float, list[str]]:
     """Return ``(ratio_matched, list_of_matched_needles)``.
 
     For file paths we also try the basename so ``app/foo/bar.py`` still
@@ -188,6 +273,7 @@ class ScoredCandidate:
     score: float
     band: ConfidenceBand
     match_reasons: list[str]
+    matched_anchor_id: str
 
 
 def score_document(
@@ -198,6 +284,7 @@ def score_document(
 
     corpus = _doc_corpus(document)
     request_tokens = set(tokenize(request.title or request.prompt))
+    matched_anchor_id = _matched_anchor_id(document, request, request_tokens)
     title_tokens = set(tokenize(document.title))
     corpus_tokens = set(tokenize(corpus))
 
@@ -205,7 +292,11 @@ def score_document(
 
     # --- title overlap ---
     title_score = 0.0
-    if request.title and document.title and request.title.strip().lower() == document.title.strip().lower():
+    if (
+        request.title
+        and document.title
+        and request.title.strip().lower() == document.title.strip().lower()
+    ):
         title_score = 1.0
         reasons.append(f'Exact title match: "{document.title}"')
     else:
@@ -256,6 +347,7 @@ def score_document(
         score=total,
         band=band_for(total),
         match_reasons=reasons,
+        matched_anchor_id=matched_anchor_id,
     )
 
 

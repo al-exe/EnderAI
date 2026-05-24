@@ -51,6 +51,7 @@ describe("callTaskforceSessionStart", () => {
             score: 0.74,
             confidence_band: "high",
             match_reasons: ["Title overlap"],
+            matched_anchor_id: "summary",
             summary_markdown: "Cleanup",
             last_touched_at: "2026-05-21T08:00:00Z",
             outcome: null,
@@ -71,6 +72,7 @@ describe("callTaskforceSessionStart", () => {
     expect(result.session_id).toBe("00000000-0000-0000-0000-000000000001");
     expect(result.suggested_pin).toBe("11111111-1111-1111-1111-111111111111");
     expect(result.matches).toHaveLength(1);
+    expect(result.matches[0].matched_anchor_id).toBe("summary");
 
     const call = mockFetch.mock.calls[0];
     expect(String(call[0])).toContain("/api/v1/v2/taskforce/session/start");

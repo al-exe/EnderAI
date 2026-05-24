@@ -10,8 +10,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from app.core.taskforce.scoring import (
     DEFAULT_RECENCY_HALF_LIFE_SECONDS,
     DiscoveryRequest,
@@ -97,6 +95,39 @@ def test_file_substring_match_contributes_and_uses_basename() -> None:
     result = score_document(doc, request)
     assert result.score > 0
     assert any("Library.tsx" in reason for reason in result.match_reasons)
+
+
+def test_matched_anchor_id_selects_best_details_section() -> None:
+    doc = _doc(
+        title="Infrastructure notes",
+        details_markdown_sections=[
+            {
+                "anchor_id": "api-notes",
+                "markdown": "API work touched src/api/users.py.",
+            },
+            {
+                "anchor_id": "bridge-notes",
+                "markdown": "Bridge refresh touched infra/network/bridge-refresh.sh.",
+            },
+        ],
+    )
+    request = DiscoveryRequest(
+        prompt="investigate bridge refresh",
+        files=("infra/network/bridge-refresh.sh",),
+    )
+
+    result = score_document(doc, request)
+
+    assert result.matched_anchor_id == "bridge-notes"
+
+
+def test_matched_anchor_id_falls_back_to_summary_without_details_match() -> None:
+    doc = _doc(title="Library polish", description="Cleanup of the metrics page.")
+    request = DiscoveryRequest(prompt="library polish")
+
+    result = score_document(doc, request)
+
+    assert result.matched_anchor_id == "summary"
 
 
 def test_recency_boosts_recent_docs() -> None:

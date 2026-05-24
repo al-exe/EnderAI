@@ -1375,6 +1375,7 @@ class TaskforceDiscoverMatch(SQLModel):
     score: float = Field(ge=0, le=1)
     confidence_band: Literal["high", "medium", "low"]
     match_reasons: list[str]
+    matched_anchor_id: str | None = None
     summary_markdown: str
     last_touched_at: datetime | None
     outcome: str | None = None

@@ -136,6 +136,7 @@ def test_taskforce_discover_returns_top_matches_for_owner(client: TestClient) ->
         assert "Library" in top["title"]
         assert top["score"] > 0.0
         assert top["confidence_band"] in {"high", "medium", "low"}
+        assert top["matched_anchor_id"] == "summary"
         assert "rediscovery_cost_tokens" in top
         assert "consult_token_cost" in top
 
@@ -434,6 +435,8 @@ def test_session_start_returns_session_id_and_matches(client: TestClient) -> Non
 
     _uuid.UUID(body["session_id"])
     assert isinstance(body["matches"], list)
+    if body["matches"]:
+        assert "matched_anchor_id" in body["matches"][0]
     # suggested_pin is either null or a UUID matching one of the matches
     if body["suggested_pin"] is not None:
         match_ids = {m["document_id"] for m in body["matches"]}
