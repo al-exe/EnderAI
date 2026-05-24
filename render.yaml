@@ -1,12 +1,13 @@
-# EnderAI Render Blueprint.
+# Taskforce Render Blueprint.
 #
-# This file is the source of truth for both Render services. After
-# committing changes here, click "Sync" on the Blueprint page in the
-# Render dashboard (or run "Manual Deploy" on the specific service)
-# for the new config to take effect. Subsequent merges to `main` then
-# trigger autoDeploy for the matched service.
+# ⚠️  Reality check (2026-05-23): the live Render dashboard owns the values
+# for FRONTEND_HOST, BACKEND_CORS_ORIGINS, and ENVIRONMENT — they're set
+# directly in the dashboard and marked `sync: false`, which means a
+# blueprint sync will NOT push these values. If you need to update them
+# (e.g. the taskforce.tools cutover), do it manually in the dashboard
+# under EnderAI-backend → Environment.
 #
-# Why we have this:
+# Why we still have this file:
 #   - The MCP service's auto-deploy was silently failing after PR #48
 #     because the dashboard-only config didn't watch mcp/. With a
 #     blueprint we get explicit rootDir + autoDeploy + buildCommand,
@@ -15,17 +16,24 @@
 #     installed at build time. The Dockerfile already pulls from
 #     uv.lock, so as long as render.yaml points to it, deploys stay
 #     reproducible.
+#   - render.yaml is also the doc'd shape of the deployment for anyone
+#     onboarding without dashboard access.
 #
-# Secrets (POSTGRES_PASSWORD, STRIPE_SECRET_KEY, OPENAI_API_KEY, ...)
-# stay in the Render dashboard. They're declared with `sync: false`
-# below so the blueprint doesn't overwrite them on sync.
+# Sync model: every env var below is `sync: false` because the live
+# dashboard treats them as manually managed. If you want the blueprint
+# to push a value, switch `sync: false` to `value: <thing>` here AND
+# remove the "manually managed" override in the Render dashboard for
+# that var (otherwise the dashboard wins).
+#
+# Service names match the Render dashboard exactly (case-sensitive).
+# Don't lowercase `EnderAI-backend` — blueprint sync matches by name.
 
 services:
   # -----------------------------------------------------------------
   # Backend API (FastAPI, Python, Docker)
   # -----------------------------------------------------------------
   - type: web
-    name: enderai-backend
+    name: EnderAI-backend
     runtime: docker
     rootDir: demo/full-stack-fastapi-template/backend
     dockerfilePath: ./Dockerfile
@@ -35,29 +43,33 @@ services:
     healthCheckPath: /api/v1/utils/health-check/
     autoDeploy: true
     envVars:
-      # Non-secret config — safe to keep in the blueprint.
+      # Runtime / deploy config — owned by the dashboard so the
+      # taskforce.tools cutover can flip CORS + FRONTEND_HOST without
+      # a new deploy. Don't switch these to `value:` without first
+      # clearing the dashboard override.
       - key: PROJECT_NAME
-        value: EnderAI
+        sync: false
       - key: ENVIRONMENT
-        value: production
-      - key: BACKEND_CORS_ORIGINS
-        # enderai.xyz origins stay through the taskforce.tools cutover so
-        # any tab/agent still sending the old Origin header gets through
-        # CORS. Drop once the enderai.xyz → taskforce.tools redirect has
-        # been live long enough.
-        value: https://taskforce.tools,https://www.taskforce.tools,https://enderai.xyz,https://www.enderai.xyz
+        sync: false
       - key: FRONTEND_HOST
-        value: https://www.taskforce.tools
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+      # Search config — currently dashboard-managed. Safe to promote
+      # to `value:` here if/when we want one canonical model pin.
       - key: STRIPE_API_BASE_URL
-        value: https://api.stripe.com
+        sync: false
       - key: SEARCH_EMBEDDING_MODEL
-        value: text-embedding-3-small
+        sync: false
       - key: SEARCH_ANSWER_MODEL
-        value: claude-sonnet-4-6
+        sync: false
       - key: SEARCH_INDEX_SWEEP_INTERVAL_SECONDS
-        value: "30"
+        sync: false
       - key: SEARCH_INDEX_BATCH_SIZE
-        value: "50"
+        sync: false
+      # Taskforce-side toggles.
+      - key: TASKFORCE_OBSERVE_SHADOW
+        sync: false
       # Secrets — set via the dashboard, blueprint never overwrites.
       - key: SECRET_KEY
         sync: false
@@ -116,6 +128,11 @@ services:
   # -----------------------------------------------------------------
   # MCP server (Node, TypeScript)
   # -----------------------------------------------------------------
+  # NOTE: the 2026-05-23 dashboard export only included EnderAI-backend.
+  # The MCP service may still exist as a separate service or may have
+  # been removed. Leaving this block here is harmless — blueprint sync
+  # never deletes services, only creates/updates. Verify against the
+  # dashboard before relying on this.
   - type: web
     name: enderai-mcp
     runtime: node
