@@ -1415,6 +1415,22 @@ class TaskforceSessionLogResponse(SQLModel):
     entries: list[TaskforceSessionLogEntry]
 
 
+class TaskforceReferenceRequest(SQLModel):
+    """Request body for POST /v2/taskforce/reference."""
+
+    session_id: uuid.UUID
+    document_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+    user_prompt: str = Field(min_length=1, max_length=8000)
+    occurred_at: datetime | None = None
+
+
+class TaskforceReferenceResponse(SQLModel):
+    """Documents updated by POST /v2/taskforce/reference."""
+
+    updated_document_ids: list[uuid.UUID]
+    skipped_document_ids: list[uuid.UUID]
+
+
 # ----- Taskforce observation (Phase 4, TF-178) ----------------------------
 
 
@@ -1711,9 +1727,7 @@ class ByokCredential(SQLModel, table=True):
     last_validated_at: datetime | None = Field(
         default=None, sa_type=DateTime(timezone=True)
     )  # type: ignore[arg-type]
-    revoked_at: datetime | None = Field(
-        default=None, sa_type=DateTime(timezone=True)
-    )  # type: ignore[arg-type]
+    revoked_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=True))  # type: ignore[arg-type]
 
 
 # ---- BYOK request/response shapes ----------------------------
