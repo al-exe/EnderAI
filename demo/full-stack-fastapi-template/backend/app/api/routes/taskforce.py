@@ -11,6 +11,8 @@ See ``~/dev/docs/claude-mcp-brainstorm.md`` §3 for the full design.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -21,6 +23,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
+from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     MetricsEvent,
@@ -28,14 +31,77 @@ from app.models import (
     TaskforceDiscoverResponse,
     TaskforceObserveRequest,
     TaskforceObserveResponse,
+    TaskforceReferenceRequest,
+    TaskforceReferenceResponse,
     TaskforceSessionLogEntry,
+    TaskforceSessionLogResponse,
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
-    TaskforceSessionLogResponse,
     V2Document,
+    V2DocumentDetailsSection,
+    V2DocumentUpdate,
+    get_datetime_utc,
 )
 
 router = APIRouter(prefix="/v2/taskforce", tags=["taskforce"])
+
+REFERENCED_BY_ANCHOR_ID = "referenced-by"
+MAX_REFERENCE_ROWS = 200
+PROMPT_PREVIEW_CHARS = 120
+
+
+def _format_reference_timestamp(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _prompt_preview(prompt: str) -> str:
+    normalized = " ".join(prompt.split())
+    if len(normalized) <= PROMPT_PREVIEW_CHARS:
+        return normalized
+    return normalized[: PROMPT_PREVIEW_CHARS - 3].rstrip() + "..."
+
+
+def _reference_row(body: TaskforceReferenceRequest, occurred_at: datetime) -> str:
+    timestamp = _format_reference_timestamp(occurred_at)
+    session_short = str(body.session_id)[:8]
+    return (
+        f"- **{timestamp}** · session `{session_short}` · "
+        f'"{_prompt_preview(body.user_prompt)}"'
+    )
+
+
+def _document_details_sections(document: V2Document) -> list[V2DocumentDetailsSection]:
+    return [
+        V2DocumentDetailsSection.model_validate(section)
+        for section in document.details_markdown_sections or []
+    ]
+
+
+def _append_reference_row(
+    document: V2Document, row: str
+) -> list[V2DocumentDetailsSection]:
+    sections = _document_details_sections(document)
+    referenced_by = next(
+        (
+            section
+            for section in sections
+            if section.anchor_id == REFERENCED_BY_ANCHOR_ID
+        ),
+        None,
+    )
+    if referenced_by is None:
+        referenced_by = V2DocumentDetailsSection(
+            anchor_id=REFERENCED_BY_ANCHOR_ID,
+            markdown="",
+        )
+        sections.append(referenced_by)
+
+    rows = [line for line in referenced_by.markdown.splitlines() if line.strip()]
+    rows.append(row)
+    referenced_by.markdown = "\n".join(rows[-MAX_REFERENCE_ROWS:])
+    return sections
 
 
 @router.post("/discover", response_model=TaskforceDiscoverResponse)
@@ -61,6 +127,47 @@ def discover_route(
     )
     session.commit()
     return response
+
+
+@router.post("/reference", response_model=TaskforceReferenceResponse)
+def reference_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceReferenceRequest,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Append a bounded "referenced by" row to each accessible document.
+
+    This is intentionally side-effect-only: callers use it after injecting
+    prior-work context so the consulted documents show which sessions reused
+    them. ACL misses are reported as skipped instead of failing the batch.
+    """
+
+    row = _reference_row(body, body.occurred_at or get_datetime_utc())
+    updated_document_ids: list[uuid.UUID] = []
+    skipped_document_ids: list[uuid.UUID] = []
+
+    for document_id in body.document_ids:
+        document = get_v2_document_for_actor(
+            session, current_user, document_id, demo=demo
+        )
+        if document is None:
+            skipped_document_ids.append(document_id)
+            continue
+
+        next_sections = _append_reference_row(document, row)
+        apply_v2_document_update(
+            document,
+            V2DocumentUpdate(details_markdown_sections=next_sections),
+        )
+        session.add(document)
+        session.commit()
+        updated_document_ids.append(document_id)
+
+    return TaskforceReferenceResponse(
+        updated_document_ids=updated_document_ids,
+        skipped_document_ids=skipped_document_ids,
+    )
 
 
 @router.post(

@@ -7,10 +7,15 @@ response/DB state.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from tests.utils.utils import random_email, random_lower_string
+
+REFERENCE_SESSION_ID = "123e4567-e89b-12d3-a456-426614174000"
+REFERENCE_OCCURRED_AT = "2026-05-23T19:00:01Z"
 
 
 def _signup(client: TestClient) -> tuple[str, dict[str, str]]:
@@ -22,6 +27,7 @@ def _signup(client: TestClient) -> tuple[str, dict[str, str]]:
     )
     assert 200 <= response.status_code < 300, response.text
     from tests.utils.user import user_authentication_headers
+
     headers = user_authentication_headers(client=client, email=email, password=password)
     return email, headers
 
@@ -32,14 +38,72 @@ def _create_document(
     *,
     title: str,
     description: str = "",
+    details_markdown_sections: list[dict[str, str]] | None = None,
 ) -> str:
+    payload: dict[str, Any] = {"title": title, "description": description}
+    if details_markdown_sections is not None:
+        payload["details_markdown_sections"] = details_markdown_sections
     response = client.post(
         f"{settings.API_V1_STR}/v2/documents/",
         headers=headers,
-        json={"title": title, "description": description},
+        json=payload,
     )
     assert response.status_code == 201, response.text
     return response.json()["id"]
+
+
+def _get_document(
+    client: TestClient, headers: dict[str, str], document_id: str
+) -> dict[str, Any]:
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/documents/{document_id}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _reference_documents(
+    client: TestClient,
+    headers: dict[str, str],
+    document_ids: list[str],
+    *,
+    prompt: str = "reference prompt",
+) -> dict[str, Any]:
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/reference",
+        headers=headers,
+        json={
+            "session_id": REFERENCE_SESSION_ID,
+            "document_ids": document_ids,
+            "user_prompt": prompt,
+            "occurred_at": REFERENCE_OCCURRED_AT,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _referenced_by_section(document: dict[str, Any]) -> dict[str, str] | None:
+    return next(
+        (
+            section
+            for section in document["details_markdown_sections"]
+            if section["anchor_id"] == "referenced-by"
+        ),
+        None,
+    )
+
+
+def _expected_reference_row(prompt: str) -> str:
+    normalized = " ".join(prompt.split())
+    preview = (
+        normalized if len(normalized) <= 120 else normalized[:117].rstrip() + "..."
+    )
+    return (
+        f"- **{REFERENCE_OCCURRED_AT}** · session `{REFERENCE_SESSION_ID[:8]}` · "
+        f'"{preview}"'
+    )
 
 
 def test_taskforce_discover_returns_top_matches_for_owner(client: TestClient) -> None:
@@ -261,6 +325,90 @@ def test_session_log_filters_by_session(client: TestClient) -> None:
         assert entry["title"]
 
 
+# ----- TF-186: append referenced-by rows to consulted documents ------------
+
+
+def test_reference_route_creates_referenced_by_section_and_truncates_prompt(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    doc_id = _create_document(client, headers, title="Referenced empty doc")
+    prompt = "x" * 130
+
+    body = _reference_documents(client, headers, [doc_id], prompt=prompt)
+
+    assert body == {"updated_document_ids": [doc_id], "skipped_document_ids": []}
+    document = _get_document(client, headers, doc_id)
+    section = _referenced_by_section(document)
+    assert section is not None
+    assert section["markdown"] == _expected_reference_row(prompt)
+
+
+def test_reference_route_appends_to_199_existing_rows(client: TestClient) -> None:
+    _, headers = _signup(client)
+    existing_rows = [f"- existing {index}" for index in range(199)]
+    doc_id = _create_document(
+        client,
+        headers,
+        title="Referenced 199 rows",
+        details_markdown_sections=[
+            {
+                "anchor_id": "referenced-by",
+                "markdown": "\n".join(existing_rows),
+            }
+        ],
+    )
+
+    _reference_documents(client, headers, [doc_id], prompt="append prompt")
+
+    document = _get_document(client, headers, doc_id)
+    section = _referenced_by_section(document)
+    assert section is not None
+    rows = section["markdown"].splitlines()
+    assert len(rows) == 200
+    assert rows[0] == "- existing 0"
+    assert rows[-1] == _expected_reference_row("append prompt")
+
+
+def test_reference_route_caps_existing_rows_at_200(client: TestClient) -> None:
+    _, headers = _signup(client)
+    existing_rows = [f"- existing {index}" for index in range(200)]
+    doc_id = _create_document(
+        client,
+        headers,
+        title="Referenced capped rows",
+        details_markdown_sections=[
+            {
+                "anchor_id": "referenced-by",
+                "markdown": "\n".join(existing_rows),
+            }
+        ],
+    )
+
+    _reference_documents(client, headers, [doc_id], prompt="newest prompt")
+
+    document = _get_document(client, headers, doc_id)
+    section = _referenced_by_section(document)
+    assert section is not None
+    rows = section["markdown"].splitlines()
+    assert len(rows) == 200
+    assert rows[0] == "- existing 1"
+    assert "- existing 0" not in rows
+    assert rows[-1] == _expected_reference_row("newest prompt")
+
+
+def test_reference_route_skips_acl_disallowed_document(client: TestClient) -> None:
+    _, owner_headers = _signup(client)
+    doc_id = _create_document(client, owner_headers, title="Private owner doc")
+    _, outsider_headers = _signup(client)
+
+    body = _reference_documents(client, outsider_headers, [doc_id])
+
+    assert body == {"updated_document_ids": [], "skipped_document_ids": [doc_id]}
+    owner_document = _get_document(client, owner_headers, doc_id)
+    assert _referenced_by_section(owner_document) is None
+
+
 # ----- TF-181 / Phase 7: Tier 2 MCP entry points --------------------------
 
 
@@ -283,6 +431,7 @@ def test_session_start_returns_session_id_and_matches(client: TestClient) -> Non
     assert "session_id" in body
     # session_id is a valid UUID string
     import uuid as _uuid
+
     _uuid.UUID(body["session_id"])
     assert isinstance(body["matches"], list)
     # suggested_pin is either null or a UUID matching one of the matches
@@ -353,7 +502,13 @@ def test_session_observe_without_structured_fields_uses_summarizer_path(
     assert body["structured_path"] is False
     # Likely skipped with no_managed_anthropic_key in test env, but the path is
     # documented as non-structured.
-    assert body["reason"] in {"no_managed_anthropic_key", "cost_capped", "ok", "shadow_mode", "empty_summary_no_active_doc"}
+    assert body["reason"] in {
+        "no_managed_anthropic_key",
+        "cost_capped",
+        "ok",
+        "shadow_mode",
+        "empty_summary_no_active_doc",
+    }
 
 
 def test_avoided_rediscovery_metric_accumulates_from_consults(
@@ -369,7 +524,11 @@ def test_avoided_rediscovery_metric_accumulates_from_consults(
             "description": "Cleanup of the metrics card.",
             "main_body": [
                 {"segments": [{"text": "Removed the lock icon Private badge."}]},
-                {"segments": [{"text": "Fixed click propagation on the actions menu."}]},
+                {
+                    "segments": [
+                        {"text": "Fixed click propagation on the actions menu."}
+                    ]
+                },
             ],
             "details_markdown_sections": [
                 {
