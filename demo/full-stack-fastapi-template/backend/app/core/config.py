@@ -50,6 +50,12 @@ def expand_cors_origin_aliases(origins: list[str]) -> list[str]:
     return list(dict.fromkeys(expanded))
 
 
+DEFAULT_PUBLIC_CORS_ORIGINS = [
+    "https://taskforce.tools",
+    "https://www.taskforce.tools",
+]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Use top level .env file (one level above ./backend/)
@@ -76,7 +82,7 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def all_cors_origins(self) -> list[str]:
-        configured_origins = [
+        configured_origins = DEFAULT_PUBLIC_CORS_ORIGINS + [
             str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS
         ] + [self.FRONTEND_HOST.rstrip("/")]
         return expand_cors_origin_aliases(configured_origins)
