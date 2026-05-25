@@ -18,6 +18,12 @@ from sqlmodel import Session, col, select
 from app.core.v2_documents import ensure_v2_documents_demo_seed
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
+    METRICS_EVENT_DOCUMENT_CREATED,
+    METRICS_EVENT_DOCUMENT_REUSED,
+    METRICS_EVENT_TOKENS_CONSUMED,
+    METRICS_EVENT_TOKENS_SAVED_CACHE,
+    METRICS_EVENT_TOKENS_SAVED_REUSE,
+    METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY,
     AgentSpecialist,
     AgentSpecialistDocumentLink,
     MetricsEvent,
@@ -26,6 +32,37 @@ from app.models import (
 )
 
 MODEL_ID = "claude-opus-4-7"
+
+# $/token rates used to synthesize plausible usd_amount values for
+# seeded events. Numbers match the per-MTok rates the real Taskforce
+# pricing rows carry for these models so the demo dashboard reads in
+# the same ballpark as production.
+_OPUS_INPUT_RATE = Decimal("0.000015")
+_OPUS_OUTPUT_RATE = Decimal("0.000075")
+_SONNET_INPUT_RATE = Decimal("0.000003")
+_SONNET_OUTPUT_RATE = Decimal("0.000015")
+_GPT5_INPUT_RATE = Decimal("0.0000025")
+_GPT5_OUTPUT_RATE = Decimal("0.00001")
+
+_RATES_BY_MODEL: dict[str, tuple[Decimal, Decimal]] = {
+    "claude-opus-4-7": (_OPUS_INPUT_RATE, _OPUS_OUTPUT_RATE),
+    "claude-sonnet-4-7": (_SONNET_INPUT_RATE, _SONNET_OUTPUT_RATE),
+    "gpt-5": (_GPT5_INPUT_RATE, _GPT5_OUTPUT_RATE),
+}
+
+# Per-session model override so "Top models by tokens used" surfaces
+# more than one row. Indices not listed default to MODEL_ID (Opus 4.7).
+_DEMO_MODEL_BY_INDEX: dict[int, str] = {
+    2: "claude-sonnet-4-7",
+    6: "claude-sonnet-4-7",
+    7: "gpt-5",
+    10: "claude-sonnet-4-7",
+}
+
+# Sessions where Alex created a brand-new V2 doc in addition to
+# reusing existing ones. 2 of 12 keeps reuse_rate close to ~93%, which
+# reads as believable rather than perfect on the demo dashboard.
+_CREATED_DOC_SESSIONS: frozenset[int] = frozenset({4, 9})
 
 DOCUMENT_SLUG_TITLES = {
     "stripe-webhook-idempotency-strategy": "Stripe webhook idempotency strategy",
@@ -598,7 +635,19 @@ def _delete_existing_seeded_metrics(session: Session, user: User) -> None:
 
 
 def seed_demo_metrics_for_user(session: Session, user: User) -> MetricsSeedResult:
-    """Seed 12 demo sessions and 24-40 document consult rows for ``user``."""
+    """Seed 12 demo sessions across the full metrics_event surface for ``user``.
+
+    Per session we write:
+      * one ``document.consulted`` + one ``document.reused`` +
+        one ``tokens.saved.summary_only`` per consulted doc
+      * one ``tokens.consumed`` event (drives tokens_consumed, usd_consumed,
+        and the Top Models breakdown — model_id varies by session)
+      * one ``tokens.saved.cache`` event (skipped for the 41d session so
+        the per-source breakdown isn't perfectly uniform)
+      * one ``tokens.saved.reuse`` event for half the sessions
+      * one ``document.created`` event for the two sessions in
+        ``_CREATED_DOC_SESSIONS`` (keeps reuse_rate near 93%)
+    """
 
     seed_agents(session, user)
     session.flush()
@@ -606,44 +655,167 @@ def seed_demo_metrics_for_user(session: Session, user: User) -> MetricsSeedResul
 
     docs_by_slug = _document_by_slug(session, user)
     events_created = 0
+
+    def _add(event: MetricsEvent) -> None:
+        nonlocal events_created
+        session.add(event)
+        events_created += 1
+
     for index, invocation in enumerate(ALEX_DEMO_INVOCATIONS):
         session_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tf-198-{user.id}-{index}"))
-        occurred_at = _event_dt(invocation["days_ago"], 10 + (index % 7))
-        document_slugs = invocation["documents"]
-        per_doc_tokens = max(1, int(invocation["tokens"] / len(document_slugs)))
-        for doc_slug in document_slugs:
-            document = docs_by_slug.get(doc_slug)
-            if document is None:
-                continue
-            session.add(
+        base_occurred_at = _event_dt(invocation["days_ago"], 10 + (index % 7))
+        document_slugs: list[str] = invocation["documents"]
+        documents = [docs_by_slug[s] for s in document_slugs if s in docs_by_slug]
+        if not documents:
+            continue
+        session_tokens = int(invocation["tokens"])
+        per_doc_tokens = max(1, session_tokens // len(documents))
+        model_id = _DEMO_MODEL_BY_INDEX.get(index, MODEL_ID)
+        input_rate, output_rate = _RATES_BY_MODEL.get(
+            model_id, (_OPUS_INPUT_RATE, _OPUS_OUTPUT_RATE)
+        )
+
+        base_payload: dict[str, Any] = {
+            "seeded": True,
+            "source": "tf-198-demo-agent-seed",
+            "specialist_slug": invocation["specialist_slug"],
+            "session_id": session_id,
+            "prompt": invocation["prompt"],
+            "summary": invocation["summary"],
+            "repo": invocation["repo"],
+            "branch": invocation["branch"],
+            "agent_client": "codex",
+            "outcome": "completed",
+            "documents_consulted_count": len(documents),
+            "net_saved_tokens": session_tokens,
+        }
+
+        for doc_idx, document in enumerate(documents):
+            doc_occurred_at = base_occurred_at + timedelta(minutes=5 * doc_idx)
+            _add(
                 MetricsEvent(
-                    occurred_at=occurred_at,
+                    occurred_at=doc_occurred_at,
                     user_id=user.id,
                     organization_id=user.organization_id,
                     document_id=document.id,
                     kind=METRICS_EVENT_DOCUMENT_CONSULTED,
-                    model_id=MODEL_ID,
+                    model_id=model_id,
                     input_tokens=per_doc_tokens,
                     output_tokens=0,
-                    usd_amount=Decimal(per_doc_tokens) * Decimal("0.000015"),
+                    usd_amount=Decimal(per_doc_tokens) * input_rate,
+                    is_demo=True,
+                    payload=base_payload,
+                )
+            )
+            _add(
+                MetricsEvent(
+                    occurred_at=doc_occurred_at + timedelta(seconds=30),
+                    user_id=user.id,
+                    organization_id=user.organization_id,
+                    document_id=document.id,
+                    kind=METRICS_EVENT_DOCUMENT_REUSED,
+                    model_id=model_id,
+                    input_tokens=0,
+                    output_tokens=0,
+                    usd_amount=None,
+                    is_demo=True,
+                    payload=base_payload,
+                )
+            )
+            summary_only_tokens = max(2000, int(per_doc_tokens * 1.5))
+            _add(
+                MetricsEvent(
+                    occurred_at=doc_occurred_at + timedelta(seconds=60),
+                    user_id=user.id,
+                    organization_id=user.organization_id,
+                    document_id=document.id,
+                    kind=METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY,
+                    model_id=model_id,
+                    input_tokens=summary_only_tokens,
+                    output_tokens=0,
+                    usd_amount=Decimal(summary_only_tokens) * input_rate,
                     is_demo=True,
                     payload={
-                        "seeded": True,
-                        "source": "tf-198-demo-agent-seed",
-                        "specialist_slug": invocation["specialist_slug"],
-                        "session_id": session_id,
-                        "prompt": invocation["prompt"],
-                        "summary": invocation["summary"],
-                        "repo": invocation["repo"],
-                        "branch": invocation["branch"],
-                        "agent_client": "codex",
-                        "outcome": "completed",
-                        "documents_consulted_count": len(document_slugs),
-                        "net_saved_tokens": invocation["tokens"],
+                        **base_payload,
+                        "details_tokens": summary_only_tokens + 1500,
                     },
                 )
             )
-            events_created += 1
+
+        consumed_input = int(session_tokens * 0.85)
+        consumed_output = int(session_tokens * 0.18)
+        consumed_usd = (Decimal(consumed_input) * input_rate) + (
+            Decimal(consumed_output) * output_rate
+        )
+        _add(
+            MetricsEvent(
+                occurred_at=base_occurred_at + timedelta(minutes=30),
+                user_id=user.id,
+                organization_id=user.organization_id,
+                document_id=documents[0].id,
+                kind=METRICS_EVENT_TOKENS_CONSUMED,
+                model_id=model_id,
+                input_tokens=consumed_input,
+                output_tokens=consumed_output,
+                usd_amount=consumed_usd,
+                is_demo=True,
+                payload=base_payload,
+            )
+        )
+
+        if invocation["days_ago"] < 40:
+            cache_tokens = int(session_tokens * 0.9)
+            _add(
+                MetricsEvent(
+                    occurred_at=base_occurred_at + timedelta(minutes=32),
+                    user_id=user.id,
+                    organization_id=user.organization_id,
+                    document_id=documents[0].id,
+                    kind=METRICS_EVENT_TOKENS_SAVED_CACHE,
+                    model_id=model_id,
+                    input_tokens=cache_tokens,
+                    cache_read_tokens=cache_tokens,
+                    output_tokens=0,
+                    usd_amount=Decimal(cache_tokens) * input_rate,
+                    is_demo=True,
+                    payload=base_payload,
+                )
+            )
+
+        if index % 2 == 0:
+            reuse_tokens = int(session_tokens * 0.7)
+            _add(
+                MetricsEvent(
+                    occurred_at=base_occurred_at + timedelta(minutes=34),
+                    user_id=user.id,
+                    organization_id=user.organization_id,
+                    document_id=documents[0].id,
+                    kind=METRICS_EVENT_TOKENS_SAVED_REUSE,
+                    model_id=model_id,
+                    input_tokens=reuse_tokens,
+                    output_tokens=0,
+                    usd_amount=Decimal(reuse_tokens) * input_rate,
+                    is_demo=True,
+                    payload=base_payload,
+                )
+            )
+
+        if index in _CREATED_DOC_SESSIONS:
+            _add(
+                MetricsEvent(
+                    occurred_at=base_occurred_at + timedelta(minutes=36),
+                    user_id=user.id,
+                    organization_id=user.organization_id,
+                    document_id=documents[-1].id,
+                    kind=METRICS_EVENT_DOCUMENT_CREATED,
+                    model_id=model_id,
+                    input_tokens=0,
+                    output_tokens=0,
+                    usd_amount=None,
+                    is_demo=True,
+                    payload=base_payload,
+                )
+            )
 
     return MetricsSeedResult(
         sessions_created=len(ALEX_DEMO_INVOCATIONS),
