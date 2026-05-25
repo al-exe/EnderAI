@@ -3118,16 +3118,24 @@ def list_v2_document_folders_for_actor(
     session: Session, actor: User, *, demo: bool
 ) -> list[V2DocumentFolder]:
     if demo:
-        return []
+        statement = (
+            select(V2DocumentFolder)
+            .where(V2DocumentFolder.owner_id == actor.id)
+            .where(V2DocumentFolder.is_demo.is_(True))  # type: ignore[union-attr]
+            .order_by(col(V2DocumentFolder.name).asc())
+        )
+        return list(session.exec(statement).all())
     if actor.organization_id is None:
         statement = (
             select(V2DocumentFolder)
             .where(V2DocumentFolder.owner_id == actor.id)
+            .where(V2DocumentFolder.is_demo.is_(False))  # type: ignore[union-attr]
             .order_by(col(V2DocumentFolder.name).asc())
         )
         return list(session.exec(statement).all())
     statement = (
         select(V2DocumentFolder)
+        .where(V2DocumentFolder.is_demo.is_(False))  # type: ignore[union-attr]
         .where(
             or_(
                 V2DocumentFolder.owner_id == actor.id,
@@ -3145,10 +3153,11 @@ def list_v2_document_folders_for_actor(
 def get_v2_document_folder_for_actor(
     session: Session, actor: User, folder_id: uuid.UUID, *, demo: bool
 ) -> V2DocumentFolder | None:
-    if demo:
-        return None
     statement = select(V2DocumentFolder).where(V2DocumentFolder.id == folder_id)
-    if actor.organization_id is None:
+    statement = statement.where(V2DocumentFolder.is_demo.is_(demo))  # type: ignore[union-attr]
+    if demo:
+        statement = statement.where(V2DocumentFolder.owner_id == actor.id)
+    elif actor.organization_id is None:
         statement = statement.where(V2DocumentFolder.owner_id == actor.id)
     else:
         statement = statement.where(

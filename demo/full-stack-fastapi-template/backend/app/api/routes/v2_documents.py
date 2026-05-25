@@ -80,6 +80,7 @@ def _validate_parent_folder(
     parent_folder_id: uuid.UUID | None,
     *,
     folder_id: uuid.UUID | None = None,
+    demo: bool = False,
 ) -> V2DocumentFolder | None:
     if parent_folder_id is None:
         return None
@@ -87,7 +88,7 @@ def _validate_parent_folder(
         raise HTTPException(status_code=422, detail="Folder cannot contain itself")
 
     parent = get_v2_document_folder_for_actor(
-        session, current_user, parent_folder_id, demo=False
+        session, current_user, parent_folder_id, demo=demo
     )
     if parent is None:
         raise HTTPException(status_code=422, detail="Parent folder not found")
@@ -105,7 +106,7 @@ def _validate_parent_folder(
             )
         seen_folder_ids.add(ancestor_id)
         ancestor = get_v2_document_folder_for_actor(
-            session, current_user, ancestor_id, demo=False
+            session, current_user, ancestor_id, demo=demo
         )
         if ancestor is None:
             break
@@ -159,6 +160,7 @@ def create_v2_document_folder(
     session: SessionDep,
     current_user: CurrentUser,
     folder_in: V2DocumentFolderCreate,
+    demo: bool = Query(default=False),
 ) -> Any:
     visibility = folder_in.visibility
     if visibility == "organization" and current_user.organization_id is None:
@@ -166,8 +168,15 @@ def create_v2_document_folder(
             status_code=422,
             detail="User must belong to an organization to share a folder",
         )
+    if demo and visibility == "organization":
+        # Demo-mode folders are always private to the demo account; the
+        # organization scope would leak demo content to real org members.
+        raise HTTPException(
+            status_code=422,
+            detail="Demo-mode folders cannot be shared with an organization",
+        )
     parent_folder = _validate_parent_folder(
-        session, current_user, folder_in.parent_folder_id
+        session, current_user, folder_in.parent_folder_id, demo=demo
     )
     now = get_datetime_utc()
     folder = V2DocumentFolder(
@@ -178,6 +187,7 @@ def create_v2_document_folder(
         parent_folder_id=parent_folder.id if parent_folder else None,
         name=folder_in.name.strip(),
         visibility=visibility,
+        is_demo=demo,
         created_at=now,
         updated_at=now,
     )
@@ -193,9 +203,10 @@ def update_v2_document_folder(
     current_user: CurrentUser,
     folder_id: uuid.UUID,
     folder_in: V2DocumentFolderUpdate,
+    demo: bool = Query(default=False),
 ) -> Any:
     folder = get_v2_document_folder_for_actor(
-        session, current_user, folder_id, demo=False
+        session, current_user, folder_id, demo=demo
     )
     if folder is None:
         raise HTTPException(status_code=404, detail="Folder not found")
@@ -216,6 +227,11 @@ def update_v2_document_folder(
                 status_code=422,
                 detail="User must belong to an organization to share a folder",
             )
+        if demo and visibility == "organization":
+            raise HTTPException(
+                status_code=422,
+                detail="Demo-mode folders cannot be shared with an organization",
+            )
         folder.visibility = visibility
         folder.organization_id = (
             current_user.organization_id if visibility == "organization" else None
@@ -226,6 +242,7 @@ def update_v2_document_folder(
             current_user,
             folder_in.parent_folder_id,
             folder_id=folder.id,
+            demo=demo,
         )
         folder.parent_folder_id = parent_folder.id if parent_folder else None
     folder.updated_at = get_datetime_utc()
@@ -240,9 +257,10 @@ def delete_v2_document_folder(
     session: SessionDep,
     current_user: CurrentUser,
     folder_id: uuid.UUID,
+    demo: bool = Query(default=False),
 ) -> None:
     folder = get_v2_document_folder_for_actor(
-        session, current_user, folder_id, demo=False
+        session, current_user, folder_id, demo=demo
     )
     if folder is None:
         raise HTTPException(status_code=404, detail="Folder not found")
