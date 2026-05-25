@@ -20,6 +20,16 @@ readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
 readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 
+# When TASKFORCE_DEMO=1, scope the reference call to demo-flagged documents
+# so the ACL filter matches the same library tf-discover.sh consulted. Without
+# this, demo-seed docs are skipped because the default endpoint scope returns
+# only non-demo documents.
+case "${TASKFORCE_DEMO:-0}" in
+    1|true|TRUE|yes) DEMO_FLAG="true" ;;
+    *)               DEMO_FLAG="false" ;;
+esac
+readonly DEMO_FLAG
+
 log() { printf '[%s] tf-reference %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"; }
 emit_error() {
     local reason="$1" detail="${2:-}"
@@ -69,7 +79,7 @@ http_status="$(
         -H "Authorization: Bearer ${token}" \
         -H "Content-Type: application/json" \
         --data "$body" \
-        "${BACKEND_URL}/api/v1/v2/taskforce/reference" 2>>"$LOG_FILE"
+        "${BACKEND_URL}/api/v1/v2/taskforce/reference?demo=${DEMO_FLAG}" 2>>"$LOG_FILE"
 )" || emit_error "backend_down" "curl failed"
 
 if [[ "$http_status" != "200" ]]; then

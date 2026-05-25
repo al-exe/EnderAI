@@ -29,7 +29,17 @@ Before calling anything, print:
 📨 Sending to Taskforce:
 ```
 
-Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, `files`, `git_branch`. Pull `files` from open editor tabs / recently modified paths if available; an empty array is fine when nothing is open.
+Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, `files`, `git_branch`.
+
+To populate `files` honestly (so the preview matches what the script actually sends), run this first with the Bash tool and use its output:
+
+```bash
+git diff --name-only --relative HEAD~1 HEAD 2>/dev/null \
+  | grep -vE '(^|/)(tests?|migrations?|alembic)/' \
+  | head -5
+```
+
+If that returns nothing (not a git repo, or no recent commits), render `files` as `[]`. The discover script applies the same heuristic internally as a fallback, so the rendered payload mirrors the actual HTTP body.
 
 ### Beat 2 — Call discover
 
