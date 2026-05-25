@@ -77,6 +77,10 @@ After a prompt that triggers a match you should see the banner in your Claude Co
 | Banner appears but prompt feels unchanged | Claude Code version doesn't yet inject UserPromptSubmit stdout into the prompt | Upgrade Claude Code |
 | `[Taskforce] hook schema mismatch` (future) | Claude Code's UserPromptSubmit contract changed | Re-run the installer |
 
+## Related: `/tf` slash command
+
+The hooks bundle injects Taskforce context **silently** on every prompt. For the explicit, visible variant — useful for demos or one-off "show me prior work on X" moments — see [`scripts/taskforce-skill/`](../taskforce-skill/README.md) (TF-188). They coexist; for demos, export `TASKFORCE_HOOKS_DISABLED=1` so only the skill emits context.
+
 ## Plan + epic
 
 - Plan: `~/dev/docs/claude-mcp-brainstorm.md` §2.4, §3.4, §3.5, §7.2
