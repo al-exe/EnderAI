@@ -564,6 +564,123 @@ def test_session_start_returns_session_id_and_matches(client: TestClient) -> Non
         match_ids = {m["document_id"] for m in body["matches"]}
         assert body["suggested_pin"] in match_ids
 
+    # TF-196: matched_specialist field is always present in the
+    # response (may be null when no specialist is seeded for this
+    # actor). When non-null, the shape includes slug/name/role/band
+    # plus a clickable href to the Agents detail page.
+    assert "matched_specialist" in body
+    if body["matched_specialist"] is not None:
+        ms = body["matched_specialist"]
+        assert ms["slug"]
+        assert ms["band"] in {"high", "medium", "low"}
+        assert ms["href"] == f"/v2/agents/{ms['slug']}"
+
+
+def test_session_start_routes_to_seeded_specialist(
+    client: TestClient, db: Session
+) -> None:
+    """TF-196: with a relevant AgentSpecialist seeded, session/start
+    surfaces it as matched_specialist and tags the resulting
+    document.consulted metrics_event rows with the slug.
+    """
+
+    from app.models import (
+        AgentSpecialist,
+        AgentSpecialistDocumentLink,
+        V2Document,
+    )
+
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    # Seed a V2 document that the specialist will be linked to. The
+    # document body intentionally mirrors the prompt vocabulary so the
+    # document-side score also fires.
+    doc_id_str = _create_document(
+        client,
+        headers,
+        title="Stripe webhook idempotency strategy",
+        description=(
+            "Plan upgrade webhook dedupe via WAL table. "
+            "Files: app/api/routes/billing.py."
+        ),
+    )
+    doc_id = uuid.UUID(doc_id_str)
+    doc = db.exec(select(V2Document).where(V2Document.id == doc_id)).one()
+
+    # Seed a specialist whose routing_triggers fire on the demo prompt.
+    specialist = AgentSpecialist(
+        slug="jensen-test",
+        name="Jensen",
+        role="Billing Reliability Specialist",
+        short_description="Stripe webhooks, subscriptions, dedupe.",
+        description="Specialist for Stripe billing reliability.",
+        status="active",
+        visibility="private",
+        owner_id=user.id,
+        domain_tags=["Stripe", "Billing"],
+        routing_triggers=[
+            "stripe",
+            "webhook",
+            "plan upgrade",
+            "double-charging",
+        ],
+        negative_triggers=[],
+        instructions=[],
+        is_demo=False,
+    )
+    db.add(specialist)
+    db.flush()
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=doc.id,
+            anchor_id=None,
+            is_pinned=True,
+            weight=1.0,
+        )
+    )
+    db.commit()
+
+    prompt = (
+        "Stripe is double-charging some users on plan upgrade — looks "
+        "like webhook retries are getting fulfilled twice."
+    )
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/start",
+        headers=headers,
+        json={
+            "prompt": prompt,
+            "files": ["app/api/routes/billing.py"],
+            "min_score": 0.0,
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+
+    matched = body["matched_specialist"]
+    assert matched is not None, body
+    assert matched["slug"] == "jensen-test"
+    assert matched["band"] in {"high", "medium"}
+    assert matched["confidence"] > 0
+    assert matched["reasons"]
+    # The skill uses href to build a clickable link to the Agents page.
+    assert matched["href"] == "/v2/agents/jensen-test"
+
+    # Every document.consulted event the discover call emitted must
+    # carry the routed specialist_slug so the Agents page can derive
+    # per-specialist invocation counts later.
+    events = db.exec(
+        select(MetricsEvent)
+        .where(MetricsEvent.user_id == user.id)
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+    ).all()
+    assert events, "discover should have emitted at least one consult event"
+    for event in events:
+        assert (
+            event.payload.get("specialist_slug") == "jensen-test"
+        ), event.payload
+
 
 def test_session_observe_with_structured_fields_skips_summarizer(
     client: TestClient,

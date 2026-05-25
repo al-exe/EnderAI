@@ -1661,6 +1661,13 @@ class TaskforceObserveRequest(SQLModel):
     decisions: list[str] = Field(default_factory=list)
     outcome: Literal["shipped", "blocked", "paused", "interrupted"] | None = None
 
+    # TF-196 — when /v2/taskforce/session/start routed this session to a
+    # specialist, the skill threads the slug here so observe-side
+    # metrics_event rows can be tagged the same way the start-side ones
+    # are. The Agents tab reads this slug to compute per-specialist
+    # invocation counts + tokens-saved.
+    specialist_slug: str | None = Field(default=None, max_length=64)
+
 
 class TaskforceObserveResponse(SQLModel):
     """Response from POST /v2/taskforce/observe."""
@@ -1699,6 +1706,46 @@ class TaskforceSessionStartRequest(SQLModel):
     demo: bool = False
 
 
+class MatchedSpecialistLinkedDoc(SQLModel):
+    """One V2 document the routed specialist surfaced for this request.
+
+    Returned inline on the session/start response so the `/tf` skill can
+    build deep-link cards in a single round-trip (no separate fetch per
+    document).
+    """
+
+    document_id: uuid.UUID
+    title: str
+    anchor_id: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    href: str  # f"/v2/library/{document_id}#{anchor_id}"
+
+
+class MatchedSpecialist(SQLModel):
+    """Specialist routed to this session (TF-196).
+
+    Returned by ``POST /v2/taskforce/session/start`` alongside the
+    existing ``matches`` array. ``None`` when no specialist clears the
+    ``medium`` band — the skill falls back to plain document matches in
+    that case.
+
+    The ``href`` field is a frontend-relative path the skill can
+    concatenate onto ``FRONTEND_HOST`` to render a clickable link in
+    chat without having to know the public domain.
+    """
+
+    slug: str = Field(max_length=64)
+    name: str = Field(max_length=80)
+    role: str = Field(max_length=160)
+    confidence: float = Field(ge=0, le=1)
+    band: Literal["high", "medium", "low"]
+    href: str  # f"/v2/agents/{slug}"
+    reasons: list[str] = Field(default_factory=list)
+    linked_documents: list[MatchedSpecialistLinkedDoc] = Field(
+        default_factory=list
+    )
+
+
 class TaskforceSessionStartResponse(SQLModel):
     """Response from POST /v2/taskforce/session/start.
 
@@ -1707,11 +1754,17 @@ class TaskforceSessionStartResponse(SQLModel):
     match's document id when the match cleared the high-confidence band,
     so the agent can adopt it as the active document without a second
     decision step.
+
+    ``matched_specialist`` is the Agents-tab specialist (TF-194) routed
+    to this request, when one clears the ``medium`` confidence band.
+    The `/tf` skill leads with this in chat ("Routed to Jensen — Billing
+    Reliability Specialist") before showing matched documents.
     """
 
     session_id: uuid.UUID
     matches: list[TaskforceDiscoverMatch]
     suggested_pin: uuid.UUID | None = None
+    matched_specialist: MatchedSpecialist | None = None
     reminder: str = (
         "Call taskforce_session_observe with this session_id when the work "
         "is complete or paused. The backend will summarize automatically."
