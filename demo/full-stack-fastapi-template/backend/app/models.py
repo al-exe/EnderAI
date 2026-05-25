@@ -1562,6 +1562,8 @@ class TaskforceSessionSavingsResponse(SQLModel):
     pricing_model_id: str | None = None
     occurred_at_first: datetime | None = None
     occurred_at_last: datetime | None = None
+    specialist_slug: str | None = Field(default=None, max_length=64)
+    specialist_name: str | None = Field(default=None, max_length=120)
 
 
 class TaskforceReferenceRequest(SQLModel):

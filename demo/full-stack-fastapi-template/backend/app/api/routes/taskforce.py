@@ -309,4 +309,6 @@ def session_savings_route(
         pricing_model_id=savings.pricing_model_id,
         occurred_at_first=savings.occurred_at_first,
         occurred_at_last=savings.occurred_at_last,
+        specialist_slug=savings.specialist_slug,
+        specialist_name=savings.specialist_name,
     )
