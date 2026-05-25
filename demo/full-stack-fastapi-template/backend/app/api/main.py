@@ -10,6 +10,7 @@ from app.api.routes import (
     organizations,
     private,
     search,
+    signals,
     skills,
     taskforce,
     topics,
@@ -30,6 +31,7 @@ api_router.include_router(agents.router)
 api_router.include_router(agent_credentials.router)
 api_router.include_router(billing.router)
 api_router.include_router(topics.router)
+api_router.include_router(signals.router)
 api_router.include_router(cases.router)
 api_router.include_router(search.router)
 api_router.include_router(context_packs.router)
