@@ -1,6 +1,6 @@
-import secrets
 import warnings
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AnyUrl,
@@ -23,6 +23,39 @@ def parse_cors(v: Any) -> list[str] | str:
     raise ValueError(v)
 
 
+def expand_cors_origin_aliases(origins: list[str]) -> list[str]:
+    # enderai.xyz aliases stay through the taskforce.tools cutover so
+    # in-flight tabs and cached agent tokens still pass CORS while DNS /
+    # redirects propagate. Drop them once the redirect has been live long
+    # enough that no client is still sending the old Origin header.
+    aliases_by_origin = {
+        "https://taskforce.tools": "https://www.taskforce.tools",
+        "https://www.taskforce.tools": "https://taskforce.tools",
+        "https://enderai.xyz": "https://www.enderai.xyz",
+        "https://www.enderai.xyz": "https://enderai.xyz",
+    }
+    expanded: list[str] = []
+    for origin in origins:
+        normalized_origin = origin.rstrip("/")
+        expanded.append(normalized_origin)
+
+        parsed_origin = urlsplit(normalized_origin)
+        if parsed_origin.path or parsed_origin.query or parsed_origin.fragment:
+            continue
+
+        alias = aliases_by_origin.get(normalized_origin)
+        if alias:
+            expanded.append(alias)
+
+    return list(dict.fromkeys(expanded))
+
+
+DEFAULT_PUBLIC_CORS_ORIGINS = [
+    "https://taskforce.tools",
+    "https://www.taskforce.tools",
+]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Use top level .env file (one level above ./backend/)
@@ -31,9 +64,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # IMPORTANT:
+    # This MUST be set explicitly in deployments. If it is generated per-process,
+    # JWTs issued by one worker won't validate on another worker (e.g. multi-worker setup).
+    # Keep the default as a sentinel and enforce it via _check_default_secret().
+    SECRET_KEY: str = "changethis"
     # 60 minutes * 24 hours * 8 days = 8 days
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    AGENT_CREDENTIAL_EXPIRE_DAYS: int = 365
     FRONTEND_HOST: str = "http://localhost:5173"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
 
@@ -44,9 +82,10 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def all_cors_origins(self) -> list[str]:
-        return [str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS] + [
-            self.FRONTEND_HOST
-        ]
+        configured_origins = DEFAULT_PUBLIC_CORS_ORIGINS + [
+            str(origin).rstrip("/") for origin in self.BACKEND_CORS_ORIGINS
+        ] + [self.FRONTEND_HOST.rstrip("/")]
+        return expand_cors_origin_aliases(configured_origins)
 
     PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None
@@ -76,6 +115,29 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str | None = None
     EMAILS_FROM_EMAIL: EmailStr | None = None
     EMAILS_FROM_NAME: str | None = None
+    STRIPE_SECRET_KEY: str | None = None
+    STRIPE_PRICE_ID: str | None = None
+    STRIPE_PRICE_ID_PRO: str | None = None
+    STRIPE_PRICE_ID_MAX: str | None = None
+    STRIPE_TASKFORCE_PRO: str | None = None
+    STRIPE_TASKFORCE_MAX: str | None = None
+    STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_API_BASE_URL: str = "https://api.stripe.com"
+    FIREBASE_PROJECT_ID: str | None = None
+    FIREBASE_SERVICE_ACCOUNT_JSON: str | None = None
+    # Taskforce Search — managed inference + BYOK + embeddings.
+    # All optional so dev environments without keys can still boot; Search
+    # endpoints surface a clear error when a required key is missing.
+    OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
+    # url-safe base64-encoded 32-byte key (cryptography.fernet.Fernet.generate_key()).
+    # Required when BYOK is enabled in prod; if unset, BYOK endpoints refuse writes.
+    BYOK_ENCRYPTION_KEY: str | None = None
+    SEARCH_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    SEARCH_ANSWER_MODEL: str = "claude-sonnet-4-6"
+    # Cron-sweep cadence for the embedding indexer (seconds between sweeps).
+    SEARCH_INDEX_SWEEP_INTERVAL_SECONDS: int = 30
+    SEARCH_INDEX_BATCH_SIZE: int = 50
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:

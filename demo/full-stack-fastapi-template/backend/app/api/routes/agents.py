@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import func
+from sqlmodel import Session, col, select
+
+from app.api.deps import CurrentUser, SessionDep
+from app.core.agents.access import build_agent_specialist_acl_filter
+from app.core.v2_documents import build_v2_document_acl_filter
+from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
+    AgentsListResponse,
+    AgentSpecialist,
+    AgentSpecialistDetail,
+    AgentSpecialistDocumentLink,
+    AgentSpecialistInvocationSummary,
+    AgentSpecialistLinkedDoc,
+    AgentSpecialistStats,
+    AgentSpecialistSummary,
+    MetricsEvent,
+    V2Document,
+)
+
+router = APIRouter(prefix="/v2/agents", tags=["v2-agents"])
+
+
+def _event_scope(slug: str) -> Any:
+    return (
+        (MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        & (MetricsEvent.payload["specialist_slug"].astext == slug)  # type: ignore[index]
+    )
+
+
+def _agent_stats(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    linked_docs_count: int,
+    current_user_id: Any,
+    demo: bool,
+) -> AgentSpecialistStats:
+    session_id_expr = MetricsEvent.payload["session_id"].astext  # type: ignore[index]
+    statement = (
+        select(
+            func.count(func.distinct(session_id_expr)),
+            func.coalesce(func.sum(MetricsEvent.input_tokens), 0),
+            func.coalesce(func.sum(MetricsEvent.usd_amount), 0),
+        )
+        .where(_event_scope(specialist.slug))
+        .where(MetricsEvent.user_id == current_user_id)
+        .where(MetricsEvent.is_demo.is_(demo))  # type: ignore[union-attr]
+    )
+    invocations_count, tokens_saved, usd_saved = session.exec(statement).one()
+    return AgentSpecialistStats(
+        invocations_count=int(invocations_count or 0),
+        linked_docs_count=linked_docs_count,
+        tokens_saved=int(tokens_saved or 0),
+        usd_saved=Decimal(str(usd_saved or 0)).quantize(Decimal("0.000001")),
+    )
+
+
+def _last_invoked_at(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user_id: Any,
+    demo: bool,
+) -> datetime | None:
+    statement = (
+        select(func.max(MetricsEvent.occurred_at))
+        .where(_event_scope(specialist.slug))
+        .where(MetricsEvent.user_id == current_user_id)
+        .where(MetricsEvent.is_demo.is_(demo))  # type: ignore[union-attr]
+    )
+    return session.exec(statement).one()
+
+
+def _linked_docs(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user: CurrentUser,
+    demo: bool,
+) -> list[AgentSpecialistLinkedDoc]:
+    statement = (
+        select(AgentSpecialistDocumentLink, V2Document)
+        .join(V2Document, V2Document.id == AgentSpecialistDocumentLink.document_id)
+        .where(AgentSpecialistDocumentLink.specialist_id == specialist.id)
+        .where(build_v2_document_acl_filter(current_user, demo=demo))
+        .order_by(
+            col(AgentSpecialistDocumentLink.is_pinned).desc(),
+            col(AgentSpecialistDocumentLink.weight).desc(),
+            col(AgentSpecialistDocumentLink.created_at).asc(),
+        )
+    )
+    linked: list[AgentSpecialistLinkedDoc] = []
+    for link, document in session.exec(statement).all():
+        href = f"/v2/library/{document.id}"
+        if link.anchor_id:
+            href += f"#{link.anchor_id}"
+        linked.append(
+            AgentSpecialistLinkedDoc(
+                document_id=document.id,
+                title=document.title,
+                description=document.description,
+                anchor_id=link.anchor_id,
+                href=href,
+                reason=link.reason,
+            )
+        )
+    return linked
+
+
+def _recent_invocations(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user_id: Any,
+    demo: bool,
+) -> list[AgentSpecialistInvocationSummary]:
+    statement = (
+        select(MetricsEvent)
+        .where(_event_scope(specialist.slug))
+        .where(MetricsEvent.user_id == current_user_id)
+        .where(MetricsEvent.is_demo.is_(demo))  # type: ignore[union-attr]
+        .order_by(col(MetricsEvent.occurred_at).desc())
+        .limit(10)
+    )
+    invocations: list[AgentSpecialistInvocationSummary] = []
+    for event in session.exec(statement).all():
+        payload = event.payload or {}
+        invocations.append(
+            AgentSpecialistInvocationSummary(
+                id=event.id,
+                prompt=str(payload.get("prompt") or ""),
+                summary=payload.get("summary"),
+                session_id=payload.get("session_id"),
+                repo=payload.get("repo"),
+                branch=payload.get("branch"),
+                documents_consulted_count=int(
+                    payload.get("documents_consulted_count") or 1
+                ),
+                tokens_saved=int(event.input_tokens or 0),
+                created_at=event.occurred_at,
+            )
+        )
+    return invocations
+
+
+def _linked_docs_count(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user: CurrentUser,
+    demo: bool,
+) -> int:
+    statement = (
+        select(func.count())
+        .select_from(AgentSpecialistDocumentLink)
+        .join(V2Document, V2Document.id == AgentSpecialistDocumentLink.document_id)
+        .where(AgentSpecialistDocumentLink.specialist_id == specialist.id)
+        .where(build_v2_document_acl_filter(current_user, demo=demo))
+    )
+    return int(session.exec(statement).one() or 0)
+
+
+def _summary_for(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user: CurrentUser,
+    demo: bool,
+) -> AgentSpecialistSummary:
+    linked_docs_count = _linked_docs_count(
+        session,
+        specialist=specialist,
+        current_user=current_user,
+        demo=demo,
+    )
+    stats = _agent_stats(
+        session,
+        specialist=specialist,
+        linked_docs_count=linked_docs_count,
+        current_user_id=current_user.id,
+        demo=demo,
+    )
+    return AgentSpecialistSummary(
+        id=specialist.id,
+        slug=specialist.slug,
+        name=specialist.name,
+        role=specialist.role,
+        short_description=specialist.short_description,
+        domain_tags=list(specialist.domain_tags or []),
+        status=specialist.status,
+        linked_docs_count=linked_docs_count,
+        invocations_count=stats.invocations_count,
+        tokens_saved=stats.tokens_saved,
+        last_invoked_at=_last_invoked_at(
+            session,
+            specialist=specialist,
+            current_user_id=current_user.id,
+            demo=demo,
+        ),
+    )
+
+
+@router.get("", response_model=AgentsListResponse)
+def list_agents(
+    session: SessionDep,
+    current_user: CurrentUser,
+    demo: bool = Query(default=False),
+) -> Any:
+    specialists = session.exec(
+        select(AgentSpecialist)
+        .where(build_agent_specialist_acl_filter(current_user, demo=demo))
+        .where(AgentSpecialist.status == "active")
+    ).all()
+    items = [
+        _summary_for(
+            session,
+            specialist=specialist,
+            current_user=current_user,
+            demo=demo,
+        )
+        for specialist in specialists
+    ]
+    items.sort(
+        key=lambda item: (
+            item.last_invoked_at is None,
+            -(item.last_invoked_at.timestamp() if item.last_invoked_at else 0),
+            item.name.lower(),
+        )
+    )
+    return AgentsListResponse(items=items)
+
+
+@router.get("/{slug}", response_model=AgentSpecialistDetail)
+def get_agent(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    demo: bool = Query(default=False),
+) -> Any:
+    specialist = session.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == slug)
+    ).first()
+    if specialist is None:
+        raise HTTPException(status_code=404, detail="Agent specialist not found")
+
+    accessible = session.exec(
+        select(AgentSpecialist)
+        .where(AgentSpecialist.id == specialist.id)
+        .where(build_agent_specialist_acl_filter(current_user, demo=demo))
+    ).first()
+    if accessible is None:
+        raise HTTPException(status_code=403, detail="Agent specialist access denied")
+
+    linked_knowledge = _linked_docs(
+        session,
+        specialist=specialist,
+        current_user=current_user,
+        demo=demo,
+    )
+    stats = _agent_stats(
+        session,
+        specialist=specialist,
+        linked_docs_count=len(linked_knowledge),
+        current_user_id=current_user.id,
+        demo=demo,
+    )
+    return AgentSpecialistDetail(
+        id=specialist.id,
+        slug=specialist.slug,
+        name=specialist.name,
+        role=specialist.role,
+        description=specialist.description,
+        domain_tags=list(specialist.domain_tags or []),
+        routing_triggers=list(specialist.routing_triggers or []),
+        negative_triggers=list(specialist.negative_triggers or []),
+        instructions=list(specialist.instructions or []),
+        linked_knowledge=linked_knowledge,
+        recent_invocations=_recent_invocations(
+            session,
+            specialist=specialist,
+            current_user_id=current_user.id,
+            demo=demo,
+        ),
+        stats=stats,
+    )

@@ -3,6 +3,7 @@ from pwdlib.hashers.bcrypt import BcryptHasher
 from sqlmodel import Session
 
 from app import crud
+from app.core.db import is_v2_enabled_identity
 from app.core.security import verify_password
 from app.models import User, UserCreate, UserUpdate
 from tests.utils.utils import random_email, random_lower_string
@@ -34,7 +35,7 @@ def test_not_authenticate_user(db: Session) -> None:
     assert user is None
 
 
-def test_check_if_user_is_active(db: Session) -> None:
+def test_create_user_defaults_to_active_legacy_flag(db: Session) -> None:
     email = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=email, password=password)
@@ -42,12 +43,19 @@ def test_check_if_user_is_active(db: Session) -> None:
     assert user.is_active is True
 
 
-def test_check_if_user_is_active_inactive(db: Session) -> None:
+def test_create_user_defaults_to_v2_disabled(db: Session) -> None:
     email = random_email()
     password = random_lower_string()
-    user_in = UserCreate(email=email, password=password, is_active=False)
+    user_in = UserCreate(email=email, password=password)
     user = crud.create_user(session=db, user_create=user_in)
-    assert user.is_active is False
+    assert user.v2 is False
+
+
+def test_v2_enabled_identity_only_matches_alexlee4190() -> None:
+    assert is_v2_enabled_identity("alexlee4190") is True
+    assert is_v2_enabled_identity("alexlee4190@example.com") is True
+    assert is_v2_enabled_identity("notalexlee4190@example.com") is False
+    assert is_v2_enabled_identity("alex@example.com") is False
 
 
 def test_check_if_user_is_superuser(db: Session) -> None:

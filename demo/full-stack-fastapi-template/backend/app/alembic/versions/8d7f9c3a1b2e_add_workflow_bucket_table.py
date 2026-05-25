@@ -66,4 +66,3 @@ def upgrade():
 
 def downgrade():
     op.execute("drop table if exists public.workflow_bucket")
-

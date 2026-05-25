@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.api.deps import SessionDep
 from app.core.security import get_password_hash
+from app.core.tiering import resolve_public_tier
 from app.models import (
     User,
     UserPublic,
@@ -35,4 +36,6 @@ def create_user(user_in: PrivateUserCreate, session: SessionDep) -> Any:
     session.add(user)
     session.commit()
 
-    return user
+    return UserPublic.model_validate(user).model_copy(
+        update={"subscription_tier": resolve_public_tier(user)}
+    )

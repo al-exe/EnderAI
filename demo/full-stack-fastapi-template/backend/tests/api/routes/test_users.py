@@ -6,9 +6,10 @@ from sqlmodel import Session, select
 
 from app import crud
 from app.core.config import settings
+from app.core.db import is_v2_enabled_identity
 from app.core.security import verify_password
-from app.models import User, UserCreate
-from tests.utils.user import create_random_user
+from app.models import CaseRecord, Skill, Topic, User, UserCreate
+from tests.utils.user import create_random_user, user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
 
@@ -18,9 +19,9 @@ def test_get_users_superuser_me(
     r = client.get(f"{settings.API_V1_STR}/users/me", headers=superuser_token_headers)
     current_user = r.json()
     assert current_user
-    assert current_user["is_active"] is True
     assert current_user["is_superuser"]
     assert current_user["email"] == settings.FIRST_SUPERUSER
+    assert current_user["v2"] is is_v2_enabled_identity(settings.FIRST_SUPERUSER)
 
 
 def test_get_users_normal_user_me(
@@ -29,9 +30,56 @@ def test_get_users_normal_user_me(
     r = client.get(f"{settings.API_V1_STR}/users/me", headers=normal_user_token_headers)
     current_user = r.json()
     assert current_user
-    assert current_user["is_active"] is True
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
+    assert current_user["v2"] is False
+    assert current_user["subscription_tier"] == "free"
+
+
+def test_get_users_me_sanitizes_admin_tier(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(settings, "STRIPE_PRICE_ID", "price_admin_test")
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    user.stripe_subscription_status = "active"
+    user.stripe_price_id = "price_admin_test"
+    db.add(user)
+    db.commit()
+    headers = user_authentication_headers(client=client, email=email, password=password)
+
+    r = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["subscription_tier"] == "max"
+
+
+def test_user_last_seen_updates_on_authenticated_page_access(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+    user = crud.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    assert user.last_seen_at is None
+
+    headers = user_authentication_headers(client=client, email=email, password=password)
+    r = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+
+    assert r.status_code == 200
+    current_user = r.json()
+    assert current_user["last_seen_at"] is not None
+
+    db.refresh(user)
+    assert user.last_seen_at is not None
 
 
 def test_create_user_new_email(
@@ -55,6 +103,90 @@ def test_create_user_new_email(
         user = crud.get_user_by_email(session=db, email=username)
         assert user
         assert user.email == created_user["email"]
+
+
+def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
+    email = random_email()
+    password = random_lower_string()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/users/signup",
+        json={
+            "email": email,
+            "password": password,
+            "full_name": "Demo Seeded User",
+        },
+    )
+    assert 200 <= response.status_code < 300, response.text
+
+    db.expire_all()
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.v2 is False
+    assert user.demo_seeded_at is not None
+
+    demo_topics = [
+        topic
+        for topic in db.exec(select(Topic).where(Topic.is_demo.is_(True))).all()
+        if str(user.id) in topic.owner_ids
+    ]
+    assert len(demo_topics) >= 1
+
+    demo_topic_ids = {topic.id for topic in demo_topics}
+    demo_cases = db.exec(select(CaseRecord).where(CaseRecord.actor_id == user.id)).all()
+    assert len(demo_cases) >= 1
+    assert any(case.topic_id in demo_topic_ids for case in demo_cases)
+
+    demo_skills = [
+        skill
+        for skill in db.exec(select(Skill).where(Skill.is_demo.is_(True))).all()
+        if str(user.id) in skill.owner_ids
+    ]
+    assert len(demo_skills) >= 1
+
+
+def test_signup_user_can_read_and_write(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+
+    signup_res = client.post(
+        f"{settings.API_V1_STR}/users/signup",
+        json={"email": email, "password": password, "full_name": "Pending User"},
+    )
+    assert signup_res.status_code == 200, signup_res.text
+
+    login_res = client.post(
+        f"{settings.API_V1_STR}/login/access-token",
+        data={"username": email, "password": password},
+    )
+    assert login_res.status_code == 200, login_res.text
+    headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+    read_res = client.get(f"{settings.API_V1_STR}/users/me", headers=headers)
+    assert read_res.status_code == 200, read_res.text
+    assert read_res.json()["email"] == email
+
+    update_res = client.patch(
+        f"{settings.API_V1_STR}/users/me",
+        headers=headers,
+        json={"full_name": "Updated User"},
+    )
+    assert update_res.status_code == 200, update_res.text
+    assert update_res.json()["full_name"] == "Updated User"
+
+    topic_res = client.post(
+        f"{settings.API_V1_STR}/topics/",
+        headers=headers,
+        json={"title": "Signed up user topic"},
+    )
+    assert topic_res.status_code == 201, topic_res.text
+    assert topic_res.json()["title"] == "Signed up user topic"
+
+    user = crud.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.full_name == "Updated User"
 
 
 def test_get_existing_user_as_superuser(
@@ -196,6 +328,12 @@ def test_retrieve_users(
     assert "count" in all_users
     for item in all_users["data"]:
         assert "email" in item
+        assert "last_seen_at" in item
+        assert "stripe_subscription_status" in item
+        assert "stripe_subscription_current_period_end" in item
+        assert "stripe_subscription_cancel_at_period_end" in item
+        assert "stripe_price_id" in item
+        assert "subscription_tier" in item
 
 
 def test_update_user_me(

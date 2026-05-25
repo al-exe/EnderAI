@@ -1,0 +1,169 @@
+# Taskforce Render Blueprint.
+#
+# ⚠️  Reality check (2026-05-23): the live Render dashboard owns the values
+# for FRONTEND_HOST, BACKEND_CORS_ORIGINS, and ENVIRONMENT — they're set
+# directly in the dashboard and marked `sync: false`, which means a
+# blueprint sync will NOT push these values. If you need to update them
+# (e.g. the taskforce.tools cutover), do it manually in the dashboard
+# under EnderAI-backend → Environment.
+#
+# Why we still have this file:
+#   - The MCP service's auto-deploy was silently failing after PR #48
+#     because the dashboard-only config didn't watch mcp/. With a
+#     blueprint we get explicit rootDir + autoDeploy + buildCommand,
+#     so future MCP changes propagate without dashboard babysitting.
+#   - The API service needs pgvector + the new search dependencies
+#     installed at build time. The Dockerfile already pulls from
+#     uv.lock, so as long as render.yaml points to it, deploys stay
+#     reproducible.
+#   - render.yaml is also the doc'd shape of the deployment for anyone
+#     onboarding without dashboard access.
+#
+# Sync model: every env var below is `sync: false` because the live
+# dashboard treats them as manually managed. If you want the blueprint
+# to push a value, switch `sync: false` to `value: <thing>` here AND
+# remove the "manually managed" override in the Render dashboard for
+# that var (otherwise the dashboard wins).
+#
+# Service names match the Render dashboard exactly (case-sensitive).
+# Don't lowercase `EnderAI-backend` — blueprint sync matches by name.
+
+services:
+  # -----------------------------------------------------------------
+  # Backend API (FastAPI, Python, Docker)
+  # -----------------------------------------------------------------
+  - type: web
+    name: EnderAI-backend
+    runtime: docker
+    rootDir: demo/full-stack-fastapi-template/backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: standard
+    region: oregon
+    healthCheckPath: /api/v1/utils/health-check/
+    autoDeploy: true
+    envVars:
+      # Runtime / deploy config — owned by the dashboard so the
+      # taskforce.tools cutover can flip CORS + FRONTEND_HOST without
+      # a new deploy. Don't switch these to `value:` without first
+      # clearing the dashboard override.
+      - key: PROJECT_NAME
+        sync: false
+      - key: ENVIRONMENT
+        sync: false
+      - key: FRONTEND_HOST
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+      # Search config — currently dashboard-managed. Safe to promote
+      # to `value:` here if/when we want one canonical model pin.
+      - key: STRIPE_API_BASE_URL
+        sync: false
+      - key: SEARCH_EMBEDDING_MODEL
+        sync: false
+      - key: SEARCH_ANSWER_MODEL
+        sync: false
+      - key: SEARCH_INDEX_SWEEP_INTERVAL_SECONDS
+        sync: false
+      - key: SEARCH_INDEX_BATCH_SIZE
+        sync: false
+      # Taskforce-side toggles.
+      - key: TASKFORCE_OBSERVE_SHADOW
+        sync: false
+      # Secrets — set via the dashboard, blueprint never overwrites.
+      - key: SECRET_KEY
+        sync: false
+      - key: POSTGRES_SERVER
+        sync: false
+      - key: POSTGRES_PORT
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_DB
+        sync: false
+      - key: FIRST_SUPERUSER
+        sync: false
+      - key: FIRST_SUPERUSER_PASSWORD
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: EMAILS_FROM_EMAIL
+        sync: false
+      # Stripe billing.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: STRIPE_PRICE_ID_PRO
+        sync: false
+      - key: STRIPE_PRICE_ID_MAX
+        sync: false
+      - key: STRIPE_TASKFORCE_PRO
+        sync: false
+      - key: STRIPE_TASKFORCE_MAX
+        sync: false
+      # Firebase auth.
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # Managed LLM + BYOK encryption.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: BYOK_ENCRYPTION_KEY
+        sync: false
+
+  # -----------------------------------------------------------------
+  # MCP server (Node, TypeScript)
+  # -----------------------------------------------------------------
+  # NOTE: the 2026-05-23 dashboard export only included EnderAI-backend.
+  # The MCP service may still exist as a separate service or may have
+  # been removed. Leaving this block here is harmless — blueprint sync
+  # never deletes services, only creates/updates. Verify against the
+  # dashboard before relying on this.
+  - type: web
+    name: enderai-mcp
+    runtime: node
+    rootDir: mcp/enderai-api-mcp
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:http
+    plan: starter
+    region: oregon
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: MCP_PATH
+        value: /mcp
+      # Points the MCP at the API service. Use the public URL because
+      # the MCP currently authenticates via the user's MCP token and
+      # the backend exposes /api/v1/v2/* endpoints we re-call.
+      - key: ENDERAI_BASE_URL
+        value: https://enderai-backend.onrender.com
+      # Render injects PORT automatically — the MCP's httpServer.ts
+      # already reads process.env.PORT (defaults to 8080), so no
+      # override needed here.
+
+# -------------------------------------------------------------------
+# Notes on the V2 Search migration's pgvector dependency:
+#
+#   The alembic migration a1b2c3d4e5f6 runs `CREATE EXTENSION IF NOT
+#   EXISTS vector;` against the prod database. The Postgres role used
+#   by the API service needs CREATE privilege for this to succeed.
+#   On Render Postgres the default role already has CREATE, but if
+#   alembic fails on the next deploy with "extension … must be
+#   installed by superuser," ask Render support to flip the bit (or
+#   create the extension manually from the Render web shell).
+# -------------------------------------------------------------------

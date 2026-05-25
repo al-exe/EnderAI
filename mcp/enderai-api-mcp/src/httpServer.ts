@@ -3,7 +3,9 @@ import { randomUUID, webcrypto } from "node:crypto";
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 
+import { validateIncomingMcpBearerToken } from "./mcpAuth.js";
 import { createMcpServer } from "./mcpServer.js";
+import { resolveSessionBackendBearerToken } from "./sessionAuth.js";
 
 // The MCP SDK's Streamable HTTP implementation expects a global `crypto` with `randomUUID()`.
 // Some Node runtimes (and some TS loaders) do not expose `globalThis.crypto` by default.
@@ -15,6 +17,7 @@ type Session = {
   id: string;
   transport: WebStandardStreamableHTTPServerTransport;
   server: ReturnType<typeof createMcpServer>;
+  backendBearerToken?: string;
   createdAtMs: number;
   lastUsedAtMs: number;
 };
@@ -68,13 +71,14 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (mcpBearerToken) {
-      const got = readBearer(req);
-      if (!got || got !== mcpBearerToken) {
-        res.writeHead(401, { "content-type": "text/plain" });
-        res.end("Unauthorized");
-        return;
-      }
+    const mcpAuth = await validateIncomingMcpBearerToken({
+      providedBearerToken: readBearer(req),
+      sharedBearerToken: mcpBearerToken,
+    });
+    if (!mcpAuth.ok) {
+      res.writeHead(mcpAuth.statusCode, { "content-type": "text/plain" });
+      res.end(mcpAuth.message);
+      return;
     }
 
     const sessionIdHeader = getHeaderString(req, "mcp-session-id");
@@ -83,12 +87,15 @@ async function main(): Promise<void> {
     // GET/DELETE must include an existing session id.
     const method = (req.method ?? "GET").toUpperCase();
     if (!sessionIdHeader && method !== "POST") {
-      // The Streamable HTTP client transport may probe the endpoint with a GET to try to
-      // establish an SSE stream *before* initialization. Per the spec, servers that don't
-      // support (or can't currently support) the SSE stream can reply 405.
+      // Some MCP clients probe the endpoint with a GET before initialization.
+      // Returning 405 is allowed by the spec, but some client implementations treat it
+      // as a hard failure and never attempt the POST initialize flow.
       if (method === "GET") {
-        res.writeHead(405, { "content-type": "text/plain" });
-        res.end("Method Not Allowed");
+        res.writeHead(200, {
+          "content-type": "text/plain",
+          "cache-control": "no-store",
+        });
+        res.end("ok");
         return;
       }
 
@@ -115,8 +122,20 @@ async function main(): Promise<void> {
       // Some clients (Cursor) send Mcp-Session-Id even on the initial initialize.
       // Allow creating the session in that case.
       if (isInitialize) {
-        session = await createSession(sessionIdHeader);
+        session = await createSession(
+          sessionIdHeader,
+          resolveSessionBackendBearerToken({ mcpAuth }),
+        );
         createdSession = true;
+      } else if (sessionIdHeader && method === "GET") {
+        // Some clients probe with a GET *and* include a random Mcp-Session-Id header
+        // before initialization. Treat this as a harmless capability check.
+        res.writeHead(200, {
+          "content-type": "text/plain",
+          "cache-control": "no-store",
+        });
+        res.end("ok");
+        return;
       } else if (sessionIdHeader) {
         res.writeHead(404, { "content-type": "text/plain" });
         res.end("Not Found");
@@ -127,6 +146,10 @@ async function main(): Promise<void> {
         return;
       }
     }
+
+    // Allow rotating/updating the per-user MCP-derived session token mid-session.
+    const backendBearerToken = resolveSessionBackendBearerToken({ mcpAuth });
+    if (backendBearerToken) session.backendBearerToken = backendBearerToken;
 
     session.lastUsedAtMs = Date.now();
 
@@ -175,8 +198,9 @@ function assertValidSessionId(id: string): void {
   if (/[\u0000-\u001f\u007f]/.test(id)) throw new Error("Invalid Mcp-Session-Id");
 }
 
-async function createSession(forcedId?: string): Promise<Session> {
+async function createSession(forcedId?: string, backendBearerToken?: string): Promise<Session> {
   const id = forcedId ?? randomUUID();
+  const tokenRef: { value?: string } = { value: backendBearerToken };
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => id,
     enableJsonResponse: true,
@@ -188,11 +212,21 @@ async function createSession(forcedId?: string): Promise<Session> {
     },
   });
 
-  const server = createMcpServer();
+  const server = createMcpServer({ backendBearerTokenProvider: () => tokenRef.value });
   await server.connect(transport);
 
   const now = Date.now();
-  return { id, transport, server, createdAtMs: now, lastUsedAtMs: now };
+  const session: Session = { id, transport, server, backendBearerToken, createdAtMs: now, lastUsedAtMs: now };
+  // Keep tokenRef in sync with the Session's token for rotations.
+  Object.defineProperty(session, "backendBearerToken", {
+    get: () => tokenRef.value,
+    set: (v: string | undefined) => {
+      tokenRef.value = v;
+    },
+    enumerable: true,
+    configurable: false,
+  });
+  return session;
 }
 
 function nodeRequestToWebRequest(req: http.IncomingMessage, url: URL): Request {

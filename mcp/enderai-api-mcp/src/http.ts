@@ -62,7 +62,10 @@ export async function enderaiFetch(args: RequestArgs): Promise<ResponseSummary> 
 
   const bearerToken = args.bearerToken ?? cfg.bearerToken;
   if (bearerToken && !("authorization" in lowerKeys(headers))) {
-    headers.authorization = `Bearer ${bearerToken}`;
+    // Be tolerant: callers sometimes include the "Bearer " prefix already.
+    headers.authorization = /^Bearer\s+/i.test(bearerToken)
+      ? bearerToken
+      : `Bearer ${bearerToken}`;
   }
 
   let body: BodyInit | undefined;
@@ -116,4 +119,3 @@ function lowerKeys(obj: Record<string, string>): Record<string, string> {
   for (const [k, v] of Object.entries(obj)) out[k.toLowerCase()] = v;
   return out;
 }
-
