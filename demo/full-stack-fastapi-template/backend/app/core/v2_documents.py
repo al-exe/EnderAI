@@ -1912,23 +1912,93 @@ DEMO_SEED: list[dict[str, Any]] = [
             "regression tests."
         ),
         "human_summary": (
-            "Stripe retries webhook delivery on non-2xx responses and "
-            "can redeliver events during service recovery. After the "
-            "2026-04-11 Pro upgrade double-charge incident, we captured "
-            "the invariant: inbound Stripe events must be deduped at "
-            "the route boundary before fulfillment. Baseline replay "
-            "coverage exists; newer plan-upgrade paths still need "
-            "targeted regression tests (see "
-            "stripe-plan-upgrade-regression-coverage)."
+            "The 2026-04-11 Pro upgrade incident charged about 30 customers "
+            "twice in a 90-minute window. Root cause: Stripe redelivered "
+            "customer.subscription.updated webhooks during their us-west-2 "
+            "recovery, and our fulfillment handler ran to completion twice "
+            "for each duplicate event. This document captures the decision "
+            "we made afterwards — a dedicated stripe_webhook_event WAL "
+            "table checked at the route boundary before any handler "
+            "dispatches — plus the rationale for ruling out the alternatives "
+            "we considered, the test-vs-live-mode gotcha that bit us two "
+            "weeks later, and the remaining gap in plan-upgrade regression "
+            "coverage that bit us again in May."
         ),
         "main_body": [
             {
                 "segments": [
                     {
                         "text": (
-                            "Stripe may redeliver webhook events. "
-                            "Inbound handlers must be idempotent at "
-                            "the route boundary."
+                            "Stripe documents webhook redelivery as "
+                            "\"best-effort up to 3 days,\" but the "
+                            "real-world failure mode is more aggressive "
+                            "than that. During provider-side recovery "
+                            "from regional outages, the same event.id "
+                            "can arrive 2–5 times within minutes — the "
+                            "8-second timeout on a non-2xx response is "
+                            "only the minimum retry trigger. Any handler "
+                            "that mutates customer state has to assume "
+                            "redelivery."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Before this incident, billing.py trusted "
+                            "that each event would be delivered once. "
+                            "Each handler — checkout completion, "
+                            "subscription update, invoice paid — was "
+                            "idempotent against Stripe's outbound API "
+                            "using event.id as the Idempotency-Key "
+                            "header. That covered our outbound calls "
+                            "(refunds, voided charges) but did nothing "
+                            "about inbound side effects (entitlement "
+                            "writes, invoice rows, tier transitions). "
+                            "When the same event arrived twice, "
+                            "fulfillment ran twice."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "On 2026-04-11 at 14:37 UTC, Stripe's "
+                            "us-west-2 had a partial outage. Their "
+                            "retry queue drained when service recovered "
+                            "around 15:10 UTC. Over the next 90 minutes "
+                            "we processed customer.subscription.updated "
+                            "events twice for ~30 Pro upgrades. Each "
+                            "customer was charged a second invoice for "
+                            "the same billing period. Sentry alerted on "
+                            "stripe.upgrade.duplicate_invoice; we caught "
+                            "it within 12 minutes, started manual "
+                            "refunds, and shipped the WAL the same week."
+                        ),
+                        "evidence_anchor_id": "incident-2026-04-11",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "The decision: a dedicated "
+                            "stripe_webhook_event WAL table, checked in "
+                            "app/api/routes/billing.py before any "
+                            "handler dispatches. Handlers stay "
+                            "non-idempotent — they don't have to know "
+                            "about retry semantics. The route boundary "
+                            "owns dedup. Primary key on (event_id, "
+                            "is_test_mode); the WAL row is inserted in "
+                            "the same transaction as fulfillment but "
+                            "before dispatch, so even a crashed handler "
+                            "leaves an audit trail and the duplicate "
+                            "delivery never reaches the handler at all."
                         ),
                         "evidence_anchor_id": "decision-wal-table",
                     }
@@ -1938,11 +2008,25 @@ DEMO_SEED: list[dict[str, Any]] = [
                 "segments": [
                     {
                         "text": (
-                            "The stripe_webhook_event WAL must be "
-                            "written before fulfillment dispatch, not "
-                            "after."
+                            "We considered three alternatives before "
+                            "landing on the WAL approach. In-handler "
+                            "dedup via ON CONFLICT DO NOTHING worked "
+                            "for invoice.payment_succeeded but failed "
+                            "for customer.subscription.updated, where "
+                            "the side effect has no natural unique key "
+                            "across all upgrade paths. Redis SETNX with "
+                            "a TTL would have added an external "
+                            "dependency to the critical path of payment "
+                            "processing — hard pass. Stripe's "
+                            "Idempotency-Key header applies to outbound "
+                            "calls we make to Stripe, not inbound "
+                            "webhooks; this one trips up engineers new "
+                            "to Stripe regularly. The WAL is the only "
+                            "approach where dedup logic stays in one "
+                            "place and the failure mode is \"duplicate "
+                            "persisted but not processed,\" which we "
+                            "can audit and clean up."
                         ),
-                        "evidence_anchor_id": "decision-wal-table",
                     }
                 ]
             },
@@ -1950,23 +2034,45 @@ DEMO_SEED: list[dict[str, Any]] = [
                 "segments": [
                     {
                         "text": (
-                            "Baseline replay tests cover duplicate "
-                            "delivery, but event-specific side effects "
-                            "need targeted regression coverage."
-                        ),
-                        "evidence_anchor_id": "targeted-regression-test",
-                    }
-                ]
-            },
-            {
-                "segments": [
-                    {
-                        "text": (
-                            "Test-mode and live-mode events must be "
-                            "scoped separately via event.livemode / "
-                            "is_test_mode."
+                            "Two weeks after the WAL shipped, a "
+                            "developer's test-mode replay during local "
+                            "work looked like it short-circuited "
+                            "fulfillment for a real customer in prod. "
+                            "Stripe's event.id namespace is global per "
+                            "account — test and live events share the "
+                            "ID space, and the random suffixes "
+                            "occasionally collide. The fix was to add "
+                            "is_test_mode to the WAL primary key and "
+                            "read it from event.livemode in the "
+                            "payload. Never trust log text or event id "
+                            "prefixes here — test and live entries "
+                            "look identical until you check the "
+                            "livemode field."
                         ),
                         "evidence_anchor_id": "gotcha-test-vs-live",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Baseline replay coverage exists — duplicate "
+                            "POST returns 200, WAL writes once, simple "
+                            "side effects don't double-fire. But "
+                            "side-effect coverage is per-event-type, and "
+                            "plan upgrades have at least four downstream "
+                            "writes: entitlement, invoice, tier, and "
+                            "audit log. The May 2026 plan-upgrade "
+                            "incident proved we still didn't have "
+                            "targeted assertions that all four side "
+                            "effects run exactly once on duplicate "
+                            "customer.subscription.updated delivery. "
+                            "See \"Stripe plan upgrade webhook retries — "
+                            "regression test pattern\" for the pattern "
+                            "we're now using on every event handler."
+                        ),
+                        "evidence_anchor_id": "targeted-regression-test",
                     }
                 ]
             },
@@ -2088,20 +2194,75 @@ DEMO_SEED: list[dict[str, Any]] = [
             "event.livemode when logs are ambiguous."
         ),
         "human_summary": (
-            "Operational playbook for Stripe webhook flakes. Covers "
-            "replaying events with the Stripe CLI, reading "
-            "stripe_webhook_event, interpreting dedup hits, checking "
-            "test/live mode, and distinguishing duplicate delivery "
-            "from non-idempotent fulfillment."
+            "Operational companion to the idempotency strategy doc. "
+            "When you're paged at 2 AM because Sentry says "
+            "stripe.upgrade.duplicate_invoice is firing, this is the "
+            "playbook. Covers how to confirm dedup is actually "
+            "short-circuiting, how to reproduce the bug locally with "
+            "the Stripe CLI, what a healthy duplicate delivery looks "
+            "like in logs, and the test-mode trap that's responsible "
+            "for at least three on-call false alarms so far."
         ),
         "main_body": [
             {
                 "segments": [
                     {
                         "text": (
-                            "If Stripe double-fires a webhook, first "
-                            "check whether the WAL short-circuits "
-                            "before fulfillment dispatch."
+                            "Three symptoms bring you to this page: a "
+                            "Sentry spike on "
+                            "stripe.upgrade.duplicate_invoice, a "
+                            "customer complaint about being charged "
+                            "twice in the same billing cycle, or two "
+                            "entitlement rows for the same "
+                            "subscription_id showing up in a Metabase "
+                            "query. All three trace back to the same "
+                            "family of bugs — fulfillment ran twice "
+                            "because the WAL check at the route "
+                            "boundary didn't short-circuit, or because "
+                            "a downstream task fired twice even though "
+                            "the route correctly deduped."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Before doing anything else, query the WAL "
+                            "for the event_id you suspect: SELECT * "
+                            "FROM stripe_webhook_event WHERE event_id = "
+                            "'<evt_…>'. If there's only one row, dedup "
+                            "isn't the problem — you have a separate "
+                            "bug. Most likely culprits in that case: "
+                            "the fulfillment handler ran twice from a "
+                            "single delivery (look for Celery retries "
+                            "in the task log), an upstream replay you "
+                            "didn't know about (check the "
+                            "stripe.webhook.received logs by source "
+                            "IP), or a developer manually re-POSTing in "
+                            "a debugging session and forgetting."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "If the WAL shows multiple rows, reproduce "
+                            "locally to confirm the dedup path itself "
+                            "is broken. The Stripe CLI's events resend "
+                            "command is the gold standard — it sends "
+                            "the exact same signed payload the original "
+                            "event had, including the same event.id and "
+                            "livemode flag. Pair it with backend log "
+                            "tailing so you can watch the route's "
+                            "behavior in real time. The dedup-hit log "
+                            "line should appear within ~100ms of the "
+                            "second delivery; if it doesn't, "
+                            "record_stripe_event_or_skip is being "
+                            "called too late in the route."
                         ),
                         "evidence_anchor_id": "repro-with-stripe-cli",
                     }
@@ -2111,8 +2272,16 @@ DEMO_SEED: list[dict[str, Any]] = [
                 "segments": [
                     {
                         "text": (
-                            "A dedup hit should return 200 without "
-                            "re-running the fulfillment path."
+                            "On a working build, the second delivery "
+                            "produces exactly the dedup_hit log line "
+                            "(see the anchor for the verbatim format). "
+                            "Crucially, the fulfillment log line — the "
+                            "one that mentions the actual side effect, "
+                            "like \"subscription.entitlement.written\" "
+                            "— should NOT appear after dedup_hit. If it "
+                            "does, the route is processing fulfillment "
+                            "before checking the WAL, and you're back "
+                            "to the original 2026-04-11 failure mode."
                         ),
                         "evidence_anchor_id": "dedup-hit-log",
                     }
@@ -2122,10 +2291,58 @@ DEMO_SEED: list[dict[str, Any]] = [
                 "segments": [
                     {
                         "text": (
-                            "Test-mode events look similar to live "
-                            "events in logs; check event.livemode."
+                            "The most common false alarm is a developer "
+                            "replaying a test-mode event whose event_id "
+                            "happens to match a real prod event. "
+                            "Stripe's event.id namespace is global per "
+                            "account — the test sandbox uses the same "
+                            "ID space, and random suffixes collide at "
+                            "non-zero rates. The fix is procedural, not "
+                            "code: always set --api-key sk_test_... "
+                            "explicitly on the CLI when replaying test "
+                            "events, and filter Sentry by "
+                            "tags.stripe_livemode:true for prod-only "
+                            "views. Three of the last seven \"duplicate "
+                            "fulfillment\" alerts have been test-mode "
+                            "noise."
                         ),
                         "evidence_anchor_id": "test-mode-trap",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "If you've confirmed the dedup is working "
+                            "and fulfillment is still firing twice for "
+                            "a single event, look upstream. Celery "
+                            "retries are the second most common cause "
+                            "— a task that crashed after writing the "
+                            "WAL row but before completing fulfillment "
+                            "will get re-queued and run again. The WAL "
+                            "covers webhook redelivery, not Celery "
+                            "retries; those need their own task-level "
+                            "idempotency keys keyed on something stable "
+                            "across re-runs (we use the subscription_id "
+                            "+ effective_date pair for plan upgrades)."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "If neither the WAL nor Celery explains it, "
+                            "file an incident and page the billing "
+                            "oncall. Don't try to refund customers "
+                            "yourself — there's a void/refund decision "
+                            "tree in the runbook (search the library "
+                            "for \"stripe-refund-policy\") and the "
+                            "wrong call here generates support tickets "
+                            "that take weeks to unwind."
+                        ),
                     }
                 ]
             },
@@ -2197,19 +2414,86 @@ DEMO_SEED: list[dict[str, Any]] = [
             "side effects ran exactly once."
         ),
         "human_summary": (
-            "Guide for writing billing replay tests that assert "
-            "downstream side effects, not just successful HTTP "
-            "responses. Created after we realized baseline webhook "
-            "replay tests can miss event-specific fulfillment paths."
+            "Test-writing guide for the specific class of bug where "
+            "webhook dedup is correct at the route boundary but a "
+            "downstream side-effect handler still re-fires under "
+            "retry. Created after the May 2026 plan-upgrade incident, "
+            "where the WAL did its job (one row written, route returned "
+            "200 on the duplicate) but customer.subscription.updated "
+            "still wrote two entitlement rows because the handler had a "
+            "separate code path that didn't share the WAL's session. "
+            "This doc is the pattern we're now requiring for every "
+            "event-type handler in billing."
         ),
         "main_body": [
             {
                 "segments": [
                     {
                         "text": (
-                            "Billing replay tests should assert "
-                            "fulfillment side effects ran once, not "
-                            "just that the route returned 200."
+                            "Generic \"POST the same webhook twice, "
+                            "assert 200\" tests pass when the WAL is "
+                            "working — that's the contract of the "
+                            "route. But the WAL only protects against "
+                            "duplicate route invocation. If your "
+                            "handler dispatches to a background job, "
+                            "commits in a separate transaction, or "
+                            "writes to a different table than the WAL "
+                            "row, the duplicate can still produce two "
+                            "side effects even though the route "
+                            "correctly returned 200 both times. Plan "
+                            "upgrades are particularly exposed because "
+                            "customer.subscription.updated touches four "
+                            "tables (entitlement, invoice, tier, "
+                            "audit_log) and historically each had its "
+                            "own commit."
+                        ),
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "On 2026-05-09 we shipped a refactor that "
+                            "moved invoice generation into a separate "
+                            "Celery task triggered by an after_commit "
+                            "hook on the entitlement write. The WAL "
+                            "still short-circuited the second webhook "
+                            "delivery within milliseconds. But the "
+                            "after_commit hook had already fired during "
+                            "the first delivery's transaction, and the "
+                            "Celery task — keyed on subscription_id "
+                            "alone, not event_id — ran twice anyway. "
+                            "Result: 11 customers got two invoices. "
+                            "Same shape as the April incident, "
+                            "different root cause: dedup at the route "
+                            "boundary isn't enough when side effects "
+                            "live outside the route's transaction."
+                        ),
+                        "evidence_anchor_id": "plan-upgrade-risk",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "A passing regression test for this class "
+                            "of bug has to look beyond the HTTP "
+                            "response. The pattern: post the signed "
+                            "duplicate webhook, then assert that each "
+                            "downstream side effect ran exactly once. "
+                            "For plan upgrades that means counting "
+                            "rows in entitlement, invoice, and "
+                            "audit_log scoped to the customer_id and "
+                            "event window — not just checking the "
+                            "route returned 200. Mocking helps: patch "
+                            "the fulfillment function with a Mock(), "
+                            "POST twice, and assert call_count == 1. "
+                            "If you can't mock (because the side "
+                            "effect goes through a Celery broker), "
+                            "seed a known-empty state and assert row "
+                            "counts at the end."
                         ),
                         "evidence_anchor_id": "side-effect-assertion",
                     }
@@ -2219,11 +2503,46 @@ DEMO_SEED: list[dict[str, Any]] = [
                 "segments": [
                     {
                         "text": (
-                            "Plan-upgrade paths are high-risk because "
-                            "subscription updates can trigger "
-                            "entitlement, invoice, and tier changes."
+                            "The naming convention we've settled on: "
+                            "test_<event_type>_webhook_retry_"
+                            "short_circuits_before_dispatch. For plan "
+                            "upgrades specifically, the file is "
+                            "tests/api/test_billing_webhook_replay.py "
+                            "and the test is "
+                            "test_plan_upgrade_webhook_retry_"
+                            "short_circuits_before_dispatch. The body "
+                            "posts a real signed "
+                            "customer.subscription.updated event "
+                            "twice, asserts the WAL has one row, and "
+                            "asserts the entitlement table has one new "
+                            "row. We extended this pattern to the "
+                            "other three high-risk events (invoice."
+                            "paid, customer.subscription.deleted, "
+                            "checkout.session.completed) over the next "
+                            "two sprints."
                         ),
-                        "evidence_anchor_id": "plan-upgrade-risk",
+                        "evidence_anchor_id": "targeted-regression-test",
+                    }
+                ]
+            },
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Required for every new event handler we "
+                            "add. Not optional — billing changes don't "
+                            "get reviewed without one. If the handler "
+                            "dispatches to a background task, the test "
+                            "has to mock the task or assert "
+                            "post-broker state. If the handler writes "
+                            "to multiple tables, the test has to count "
+                            "rows in each. The cost is real (15–30 "
+                            "minutes per handler) but the cost of NOT "
+                            "having it is much higher: every "
+                            "plan-upgrade incident takes ~6 hours of "
+                            "manual refunds and triggers a CS "
+                            "escalation."
+                        ),
                     }
                 ]
             },
