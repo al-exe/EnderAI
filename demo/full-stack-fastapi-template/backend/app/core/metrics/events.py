@@ -450,6 +450,7 @@ def record_document_consulted(
     pricing_model_id: str | None = None,
     session_id: str | None = None,
     specialist_slug: str | None = None,
+    prompt: str | None = None,
 ) -> MetricsEvent:
     """Record one ``document.consulted`` event (TF-175 / Phase 1 + TF-177 / Phase 3).
 
@@ -490,6 +491,11 @@ def record_document_consulted(
     }
     if session_id:
         payload["session_id"] = session_id
+    if prompt:
+        # The Agents profile reads payload->>'prompt' to populate the
+        # Recent Invocations table (app/api/routes/agents.py::_recent_invocations).
+        # Truncate to keep large prompts out of the JSONB column hot path.
+        payload["prompt"] = prompt[:500]
     if specialist_slug:
         # Indexed read path: app/core/agents/routing.py and the Agents
         # page derive per-specialist invocations + tokens_saved from

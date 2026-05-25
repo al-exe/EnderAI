@@ -680,6 +680,10 @@ def test_session_start_routes_to_seeded_specialist(
         assert (
             event.payload.get("specialist_slug") == "jensen-test"
         ), event.payload
+        # TF-201: prompt must also be threaded into the payload so the
+        # Agents page Recent Invocations table shows real queries instead
+        # of "" — _recent_invocations reads payload->>'prompt'.
+        assert event.payload.get("prompt") == prompt, event.payload
 
 
 def test_session_observe_with_structured_fields_skips_summarizer(

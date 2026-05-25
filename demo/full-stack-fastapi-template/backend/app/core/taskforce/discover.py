@@ -187,6 +187,7 @@ def discover(
             is_demo=demo,
             session_id=request.session_id,
             specialist_slug=specialist_slug,
+            prompt=request.prompt,
         )
 
     return TaskforceDiscoverResponse(query_id=query_id, matches=matches)
