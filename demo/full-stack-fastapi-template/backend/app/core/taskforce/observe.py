@@ -433,6 +433,7 @@ def _record_harness_consumption(
         payload={
             "subkind": "agent_session",
             "session_id": request.session_id,
+            "specialist_slug": request.specialist_slug,
             "kind": request.kind,
         },
     )
@@ -455,6 +456,7 @@ def _record_audit(
     payload: dict[str, Any] = {
         "kind": request.kind,
         "session_id": request.session_id,
+        "specialist_slug": request.specialist_slug,
         "checkpoint_index": request.checkpoint_index,
         "action": action,
         "reason": reason,

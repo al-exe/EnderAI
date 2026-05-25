@@ -117,6 +117,7 @@ def discover(
     actor: User,
     request: TaskforceDiscoverRequest,
     demo: bool,
+    specialist_slug: str | None = None,
 ) -> TaskforceDiscoverResponse:
     """Score the actor's library against the request, record consults.
 
@@ -185,6 +186,7 @@ def discover(
             source="discover_endpoint",
             is_demo=demo,
             session_id=request.session_id,
+            specialist_slug=specialist_slug,
         )
 
     return TaskforceDiscoverResponse(query_id=query_id, matches=matches)
