@@ -2184,8 +2184,7 @@ DEMO_SEED: list[dict[str, Any]] = [
     {
         "title": "Stripe plan upgrade webhook retries — regression test pattern",
         "description": (
-            "Test strategy for Stripe plan-upgrade side effects under "
-            "webhook replay."
+            "Test strategy for Stripe plan-upgrade side effects under webhook replay."
         ),
         "created_at": _dt(2026, 5, 3),
         "updated_at": _dt(2026, 5, 18),
@@ -2283,6 +2282,624 @@ DEMO_SEED: list[dict[str, Any]] = [
         ],
     },
 ]
+
+
+def _demo_agent_doc(
+    *,
+    slug: str,
+    title: str,
+    description: str,
+    human_summary: str,
+    ai_generated_summary: str,
+    main_body: list[dict[str, str]],
+    details_markdown_sections: list[dict[str, str]],
+    created_at: datetime,
+    specialist: str,
+) -> dict[str, Any]:
+    return {
+        "slug": slug,
+        "specialist": specialist,
+        "title": title,
+        "description": description,
+        "created_at": created_at,
+        "updated_at": _dt(2026, 5, 24),
+        "collaborators": ["Alex Lee", "Codex"],
+        "ai_generated_summary": ai_generated_summary,
+        "human_summary": human_summary,
+        "main_body": [
+            {
+                "segments": [
+                    {
+                        "text": item["text"],
+                        "evidence_anchor_id": item["evidence_anchor_id"],
+                    }
+                ]
+            }
+            for item in main_body
+        ],
+        "details_file_name": f"{slug}.details.md",
+        "details_markdown_sections": details_markdown_sections,
+    }
+
+
+# TF-198 demo specialist supporting docs. Jensen's three Stripe documents live
+# in DEMO_SEED above (TF-191); these twelve make the rest of the Agents grid
+# credible when the demoer clicks into non-billing specialists.
+DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
+    _demo_agent_doc(
+        slug="search-indexer-drift-sweep-design",
+        specialist="mira",
+        title="Search indexer drift-sweep design",
+        description=(
+            "How the V2 document indexer detects stale embeddings and "
+            "refreshes source_item_embedding rows."
+        ),
+        human_summary=(
+            "The search indexer runs as an async task in the FastAPI process. "
+            "It detects documents whose index markers are missing, stale, or "
+            "on an old index version, then rebuilds summary and details "
+            "chunks for embedding."
+        ),
+        ai_generated_summary=(
+            "Drift is detected from last_indexed_at, updated_at, and "
+            "index_version. DocumentSource emits one summary chunk plus "
+            "details-anchor chunks."
+        ),
+        created_at=_dt(2026, 4, 21),
+        main_body=[
+            {
+                "text": (
+                    "The drift sweep is the source of truth for deciding "
+                    "when a V2 document needs re-indexing."
+                ),
+                "evidence_anchor_id": "drift-sweep-loop",
+            },
+            {
+                "text": (
+                    "Long details sections fan out into multiple chunks but "
+                    "keep their parent anchor link."
+                ),
+                "evidence_anchor_id": "chunking-anchor-contract",
+            },
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "drift-sweep-loop",
+                "markdown": (
+                    "## Drift sweep loop\n\n"
+                    "The indexer selects documents where `last_indexed_at` "
+                    "is null, older than `updated_at`, or where "
+                    "`index_version` no longer matches the current document "
+                    "indexer version."
+                ),
+            },
+            {
+                "anchor_id": "chunking-anchor-contract",
+                "markdown": (
+                    "## Chunking and anchor contract\n\n"
+                    "Each document emits a synthetic summary chunk plus one "
+                    "or more details chunks. If a details section is long, "
+                    "it may fan out into `anchor#1`, `anchor#2`, etc., but "
+                    "the UI should still link back to the original details "
+                    "anchor."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="pgvector-acl-retrieval-gotchas",
+        specialist="mira",
+        title="pgvector retrieval and ACL gotchas",
+        description=(
+            "Why a relevant document can be missing from search results and "
+            "how to debug ACL-filtered retrieval."
+        ),
+        human_summary=(
+            "Search retrieval joins embeddings back to V2 documents and "
+            "applies the same ACL filter as document reads. A good embedding "
+            "hit can disappear if ownership, organization, share, or demo "
+            "flags do not match."
+        ),
+        ai_generated_summary=(
+            "Debug search misses by checking embedding existence, document "
+            "ACL, organization visibility, explicit shares, and demo "
+            "isolation."
+        ),
+        created_at=_dt(2026, 4, 22),
+        main_body=[
+            {
+                "text": (
+                    "ACL is double-enforced: embeddings carry denormalized "
+                    "access fields, but retrieval also joins back to "
+                    "V2Document."
+                ),
+                "evidence_anchor_id": "acl-double-enforcement",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "acl-double-enforcement",
+                "markdown": (
+                    "## ACL double enforcement\n\n"
+                    "Retrieval filters candidate embeddings, then joins "
+                    "back to V2Document and applies document ACL. This "
+                    "means ACL changes take effect without re-embedding the "
+                    "document."
+                ),
+            },
+            {
+                "anchor_id": "demo-isolation",
+                "markdown": (
+                    "## Demo isolation\n\n"
+                    "Demo documents and live user documents should be "
+                    "isolated in both document reads and search retrieval."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="citation-anchor-fanout-playbook",
+        specialist="mira",
+        title="Citation anchor fanout playbook",
+        description=(
+            "How to preserve inspectable citations when details sections are "
+            "split into multiple chunks."
+        ),
+        human_summary=(
+            "Search citations must remain inspectable even when long details "
+            "sections are split for embeddings. Chunks can fan out "
+            "internally, but the user should land on the canonical evidence "
+            "anchor."
+        ),
+        ai_generated_summary=(
+            "Preserve source transparency by mapping chunk-level hits back "
+            "to document detail anchors. Avoid sending users to opaque chunk "
+            "ids."
+        ),
+        created_at=_dt(2026, 4, 23),
+        main_body=[
+            {
+                "text": (
+                    "Citation links should land on canonical details "
+                    "anchors, not internal chunk ids."
+                ),
+                "evidence_anchor_id": "long-section-anchor-fanout",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "long-section-anchor-fanout",
+                "markdown": (
+                    "## Long-section anchor fanout\n\n"
+                    "If a details section exceeds the chunk size, the "
+                    "indexer may create several embedding chunks. The "
+                    "user-facing citation should still point to the parent "
+                    "details anchor."
+                ),
+            }
+        ],
+    ),
+    _demo_agent_doc(
+        slug="claude-code-taskforce-hook-setup",
+        specialist="orin",
+        title="Claude Code Taskforce hook setup",
+        description=(
+            "How Claude Code hooks call Taskforce before and after an agent session."
+        ),
+        human_summary=(
+            "Claude Code can call Taskforce through local hooks. "
+            "UserPromptSubmit runs discovery synchronously before Claude "
+            "sees the prompt. PostToolUse and Stop can send checkpoints and "
+            "final observations."
+        ),
+        ai_generated_summary=(
+            "Hook setup depends on a valid agent bearer token, local "
+            "scripts, and endpoint reachability. Keep UserPromptSubmit fast "
+            "because it is on the prompt path."
+        ),
+        created_at=_dt(2026, 4, 24),
+        main_body=[
+            {
+                "text": (
+                    "UserPromptSubmit calls /v2/taskforce/discover before "
+                    "Claude sees the prompt."
+                ),
+                "evidence_anchor_id": "userpromptsubmit-flow",
+            },
+            {
+                "text": "Stop hook sends the final observation for material sessions.",
+                "evidence_anchor_id": "stop-observe-flow",
+            },
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "userpromptsubmit-flow",
+                "markdown": (
+                    "## UserPromptSubmit flow\n\n"
+                    "The hook captures prompt, cwd, recent files, and "
+                    "branch. It calls Taskforce discovery with a short "
+                    "timeout and prepends related context before Claude "
+                    "Code processes the user's request."
+                ),
+            },
+            {
+                "anchor_id": "stop-observe-flow",
+                "markdown": (
+                    "## Stop observe flow\n\n"
+                    "At session end, the hook sends a final observation. "
+                    "Material sessions can record usage, update documents, "
+                    "and append referenced-by entries."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="hosted-mcp-session-lifecycle",
+        specialist="orin",
+        title="Hosted MCP session lifecycle",
+        description=(
+            "How the MCP bridge validates agent tokens, binds sessions, and "
+            "forwards Taskforce tool calls."
+        ),
+        human_summary=(
+            "The hosted MCP bridge is a protocol adapter. It validates the "
+            "incoming bearer token, binds the backend token to an MCP "
+            "session, and forwards tools through authenticated backend "
+            "requests."
+        ),
+        ai_generated_summary=(
+            "MCP sessions are keyed by Mcp-Session-Id and carry a token "
+            "reference. The bridge is not a source of truth; it forwards to "
+            "FastAPI."
+        ),
+        created_at=_dt(2026, 4, 25),
+        main_body=[
+            {
+                "text": (
+                    "The MCP bridge validates agent credentials before "
+                    "forwarding backend calls."
+                ),
+                "evidence_anchor_id": "streamable-http-session-map",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "streamable-http-session-map",
+                "markdown": (
+                    "## Streamable HTTP session map\n\n"
+                    "Each MCP request carries authorization. After "
+                    "validation, the server stores transport, server, and "
+                    "token reference under the MCP session id so subsequent "
+                    "tool calls can forward with the right bearer."
+                ),
+            },
+            {
+                "anchor_id": "taskforce-mcp-tools",
+                "markdown": (
+                    "## Taskforce MCP tools\n\n"
+                    "Hookless clients can call `taskforce_session_start`, "
+                    "`taskforce_session_observe`, `taskforce_session_log`, "
+                    "and `taskforce_discover`."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="agent-credential-rotation-playbook",
+        specialist="orin",
+        title="Agent credential rotation playbook",
+        description=(
+            "How to safely rotate, revoke, and debug Taskforce agent credentials."
+        ),
+        human_summary=(
+            "Agent credentials are backend JWTs bound to a credential id and "
+            "token version. Rotating or revoking invalidates old tokens and "
+            "may require updating local MCP or hook config."
+        ),
+        ai_generated_summary=(
+            "Debug token failures by checking credential version, "
+            "revoked_at, local config, and whether the token kind is "
+            "agent_mcp."
+        ),
+        created_at=_dt(2026, 4, 26),
+        main_body=[
+            {
+                "text": (
+                    "Revoked or rotated credentials should fail validation "
+                    "even if the JWT has not expired."
+                ),
+                "evidence_anchor_id": "revoke-rotate-debug",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "revoke-rotate-debug",
+                "markdown": (
+                    "## Revoke and rotate debugging\n\n"
+                    "Check:\n"
+                    "- credential exists\n"
+                    "- token version matches\n"
+                    "- revoked_at is null\n"
+                    "- token_kind is `agent_mcp`\n"
+                    "- local hook or MCP config uses the latest token"
+                ),
+            }
+        ],
+    ),
+    _demo_agent_doc(
+        slug="taskforce-session-savings-math",
+        specialist="vega",
+        title="Taskforce session savings math",
+        description=(
+            "How session-level avoided rediscovery tokens and USD savings "
+            "are calculated."
+        ),
+        human_summary=(
+            "Session savings are derived from consulted documents. For each "
+            "document, net saved tokens equal rediscovery_cost_tokens minus "
+            "the summary/context tokens actually read."
+        ),
+        ai_generated_summary=(
+            "Avoided rediscovery is a structural estimate cached on "
+            "documents and reduced by consultation cost. The demo should "
+            "show the same number in chat and on the session-scoped metrics "
+            "page."
+        ),
+        created_at=_dt(2026, 4, 27),
+        main_body=[
+            {
+                "text": (
+                    "Session savings equal rediscovery cost minus "
+                    "consultation cost for consulted documents."
+                ),
+                "evidence_anchor_id": "rediscovery-minus-consult",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "rediscovery-minus-consult",
+                "markdown": (
+                    "## Rediscovery minus consultation\n\n"
+                    "```text\n"
+                    "net_saved_tokens = max(0, rediscovery_cost_tokens - "
+                    "consult_token_cost)\n"
+                    "```"
+                ),
+            },
+            {
+                "anchor_id": "pricing-snapshot",
+                "markdown": (
+                    "## Pricing snapshot\n\n"
+                    "The USD calculation should use the model pricing row "
+                    "that was effective when the event was recorded."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="metrics-event-rollup-architecture",
+        specialist="vega",
+        title="Metrics event rollup architecture",
+        description="Event-sourced metric recording, pricing snapshots, and daily rollups.",
+        human_summary=(
+            "Metrics are stored as append-only events. A registry defines "
+            "public metric names, daily rollups materialize aggregates, and "
+            "composed metrics are calculated on read."
+        ),
+        ai_generated_summary=(
+            "Write raw metric events first, snapshot pricing at write time, "
+            "and roll up by day, user, org, and demo flag."
+        ),
+        created_at=_dt(2026, 4, 28),
+        main_body=[
+            {
+                "text": (
+                    "Pricing is snapshotted at write time so historical USD "
+                    "totals remain stable."
+                ),
+                "evidence_anchor_id": "pricing-snapshot-at-write",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "pricing-snapshot-at-write",
+                "markdown": (
+                    "## Pricing snapshot at write\n\n"
+                    "Each metrics event stores a reference to the pricing "
+                    "row used to compute USD."
+                ),
+            },
+            {
+                "anchor_id": "demo-live-isolation",
+                "markdown": (
+                    "## Demo and live isolation\n\n"
+                    "Rollups include `is_demo` in their key so seeded demo "
+                    "activity never pollutes live user metrics."
+                ),
+            },
+        ],
+    ),
+    _demo_agent_doc(
+        slug="demo-metrics-page-session-filter",
+        specialist="vega",
+        title="Demo metrics page session filter",
+        description=(
+            "How the demo links from a completed Taskforce session into a "
+            "scoped metrics view."
+        ),
+        human_summary=(
+            "The demo savings line should link to a metrics page scoped by "
+            "session_id. The page should show documents consulted, "
+            "estimated rediscovery cost, consultation cost, net tokens "
+            "saved, and USD saved."
+        ),
+        ai_generated_summary=(
+            "Use `/v2/metrics?session_id=<uuid>` for the video. Show a "
+            "banner that the page is filtered to one session, with a link "
+            "back to all metrics."
+        ),
+        created_at=_dt(2026, 4, 29),
+        main_body=[
+            {
+                "text": (
+                    "The metrics page should make the chat savings number inspectable."
+                ),
+                "evidence_anchor_id": "session-id-query-param",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "session-id-query-param",
+                "markdown": (
+                    "## Session id query param\n\n"
+                    "The video should link to:\n\n"
+                    "```text\n"
+                    "/v2/metrics?session_id=<session_id>\n"
+                    "```"
+                ),
+            }
+        ],
+    ),
+    _demo_agent_doc(
+        slug="evidence-anchor-authoring-guide",
+        specialist="nia",
+        title="Evidence anchor authoring guide",
+        description=(
+            "How to write Taskforce details sections that agents can cite "
+            "and users can inspect."
+        ),
+        human_summary=(
+            "Good Taskforce documents use specific anchors for decisions, "
+            "incidents, gotchas, and verification steps. Agents should link "
+            "to anchors, not just whole documents."
+        ),
+        ai_generated_summary=(
+            "Use stable, human-readable anchor ids. Keep decision sections "
+            "separate from incident sections and verification steps."
+        ),
+        created_at=_dt(2026, 4, 30),
+        main_body=[
+            {
+                "text": (
+                    "Anchor names should be stable and explain what the "
+                    "user will see when clicked."
+                ),
+                "evidence_anchor_id": "anchor-naming-rules",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "anchor-naming-rules",
+                "markdown": (
+                    "## Anchor naming rules\n\n"
+                    "Prefer IDs like:\n"
+                    "- `decision-wal-table`\n"
+                    "- `incident-2026-04-11`\n"
+                    "- `gotcha-test-vs-live`\n"
+                    "- `verifying-the-fix`"
+                ),
+            }
+        ],
+    ),
+    _demo_agent_doc(
+        slug="referenced-by-update-policy",
+        specialist="nia",
+        title="Referenced-by update policy",
+        description=(
+            "When Taskforce should append usage back to a document after an "
+            "agent session."
+        ),
+        human_summary=(
+            "Referenced-by entries close the loop after reuse. They show "
+            "that a document was not just stored but actively helped solve "
+            "later work."
+        ),
+        ai_generated_summary=(
+            "Add referenced-by entries after material sessions that "
+            "consulted a doc and used it to make a decision, fix, or test."
+        ),
+        created_at=_dt(2026, 5, 1),
+        main_body=[
+            {
+                "text": (
+                    "Referenced-by entries make reuse visible and strengthen "
+                    "future routing signals."
+                ),
+                "evidence_anchor_id": "close-the-loop",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "close-the-loop",
+                "markdown": (
+                    "## Close the loop\n\n"
+                    "After a material session uses a document, append:\n"
+                    "- session title or prompt summary\n"
+                    "- date\n"
+                    "- files touched\n"
+                    "- outcome\n"
+                    "- token savings if available"
+                ),
+            }
+        ],
+    ),
+    _demo_agent_doc(
+        slug="document-reuse-vs-create-playbook",
+        specialist="nia",
+        title="Document reuse vs create playbook",
+        description=(
+            "How Taskforce decides whether to patch an existing document or "
+            "create a new one."
+        ),
+        human_summary=(
+            "Reusing the right document preserves continuity. Creating a "
+            "new document is better when there are conflicting tenants, "
+            "repos, outcomes, or a fundamentally different problem."
+        ),
+        ai_generated_summary=(
+            "Prefer reuse when title, file, symbol, and intent signals "
+            "align without conflicts. Create a new document when "
+            "terminal-state, repo, tenant, or error-family conflicts fire."
+        ),
+        created_at=_dt(2026, 5, 2),
+        main_body=[
+            {
+                "text": (
+                    "Reuse decisions should consider both positive signals "
+                    "and conflicts."
+                ),
+                "evidence_anchor_id": "reuse-decision-criteria",
+            }
+        ],
+        details_markdown_sections=[
+            {
+                "anchor_id": "reuse-decision-criteria",
+                "markdown": (
+                    "## Reuse decision criteria\n\n"
+                    "Reuse when:\n"
+                    "- same repo\n"
+                    "- same domain\n"
+                    "- overlapping files or symbols\n"
+                    "- no tenant conflict\n"
+                    "- no terminal-state conflict"
+                ),
+            },
+            {
+                "anchor_id": "terminal-state-conflict",
+                "markdown": (
+                    "## Terminal-state conflict\n\n"
+                    "A document with an outcome, finish marker, or "
+                    "resolved incident should not be patched by unrelated "
+                    "future work."
+                ),
+            },
+        ],
+    ),
+]
+
+
+def iter_demo_seed_catalog() -> list[dict[str, Any]]:
+    return [*DEMO_SEED, *DEMO_AGENT_SUPPORTING_SEED]
 
 
 def _share_public(session: Session, share: V2DocumentShare) -> V2DocumentSharePublic:
@@ -2590,19 +3207,21 @@ def refresh_v2_document_token_counts(document: V2Document) -> None:
 def ensure_v2_documents_demo_seed(session: Session, user: User) -> bool:
     """Lazily clone the demo catalog into the user's account.
 
-    Idempotent: if the user already has any is_demo=True v2_document rows we
-    treat the seed as already applied for them. Returns True if any rows were
-    created or refreshed in this call.
+    Idempotent by title so new catalog entries can be added for existing demo
+    users without duplicating the documents they already have.
     """
-    existing_count = session.exec(
-        select(V2Document)
-        .where(V2Document.owner_id == user.id)
-        .where(V2Document.is_demo.is_(True))  # type: ignore[union-attr]
-    ).first()
-    if existing_count is not None:
-        return False
+    existing_titles = set(
+        session.exec(
+            select(V2Document.title)
+            .where(V2Document.owner_id == user.id)
+            .where(V2Document.is_demo.is_(True))  # type: ignore[union-attr]
+        ).all()
+    )
 
-    for seed in DEMO_SEED:
+    created_any = False
+    for seed in iter_demo_seed_catalog():
+        if seed["title"] in existing_titles:
+            continue
         document = V2Document(
             owner_id=user.id,
             organization_id=None,
@@ -2619,5 +3238,8 @@ def ensure_v2_documents_demo_seed(session: Session, user: User) -> bool:
             created_at=seed["created_at"],
             updated_at=seed["updated_at"],
         )
+        refresh_v2_document_token_counts(document)
         session.add(document)
-    return True
+        existing_titles.add(seed["title"])
+        created_any = True
+    return created_any
