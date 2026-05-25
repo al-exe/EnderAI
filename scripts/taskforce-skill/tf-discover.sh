@@ -29,6 +29,14 @@ readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
 readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 readonly FRONTEND_HOST="${TASKFORCE_FRONTEND_HOST:-https://www.taskforce.tools}"
+# When TASKFORCE_DEMO=1, opt the session/start request into demo-flagged
+# specialists + documents (TF-198 seed). Off by default so day-to-day
+# /tf use sees only real, owner-scoped resources.
+case "${TASKFORCE_DEMO:-0}" in
+    1|true|TRUE|yes) DEMO_FLAG="true" ;;
+    *)               DEMO_FLAG="false" ;;
+esac
+readonly DEMO_FLAG
 
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { printf '[%s] tf-discover %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"; }
@@ -71,14 +79,16 @@ body="$(jq -cn \
     --arg prompt "$prompt" \
     --arg cwd "$cwd" \
     --arg git_branch "$git_branch" \
-    --argjson files "$files_json" '
+    --argjson files "$files_json" \
+    --argjson demo "$DEMO_FLAG" '
     {
         prompt: $prompt,
         cwd: (if $cwd == "" then null else $cwd end),
         git_branch: (if $git_branch == "" then null else $git_branch end),
         files: $files,
         k: 3,
-        min_score: 0.3
+        min_score: 0.3,
+        demo: $demo
     }')"
 
 tmp_resp="$(mktemp)"
@@ -119,7 +129,7 @@ for ((i=0; i<match_count; i++)); do
         curl -sS -o "$doc_resp" -w '%{http_code}' \
             --max-time 6 \
             -H "Authorization: Bearer ${token}" \
-            "${BACKEND_URL}/api/v1/v2/documents/${doc_id}" 2>>"$LOG_FILE"
+            "${BACKEND_URL}/api/v1/v2/documents/${doc_id}?demo=${DEMO_FLAG}" 2>>"$LOG_FILE"
     )" || doc_http="000"
 
     if [[ "$doc_http" != "200" ]]; then
