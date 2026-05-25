@@ -30,6 +30,7 @@ from app.models import (
     METRICS_EVENT_TOKENS_SAVED_CACHE,
     METRICS_EVENT_TOKENS_SAVED_REUSE,
     METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY,
+    AgentSpecialist,
     MetricsEvent,
 )
 
@@ -239,6 +240,8 @@ class TaskforceSessionSavings:
     pricing_model_id: str | None
     occurred_at_first: datetime | None
     occurred_at_last: datetime | None
+    specialist_slug: str | None
+    specialist_name: str | None
 
 
 def taskforce_session_savings(
@@ -266,6 +269,25 @@ def taskforce_session_savings(
         session.exec(statement).one()
     )
 
+    # One specialist per session (routing happens once at session/start), so
+    # we read the slug off the first consult event and resolve the display
+    # name from agent_specialist. The slug stays the source of truth for
+    # deep-linking — name is null when the specialist was deleted between
+    # the session and the metrics view.
+    specialist_slug: str | None = session.exec(
+        select(MetricsEvent.payload["specialist_slug"].astext)  # type: ignore[index]
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        .where(MetricsEvent.user_id == user_id)
+        .where(MetricsEvent.payload["session_id"].astext == session_id)  # type: ignore[index]
+        .where(MetricsEvent.payload["specialist_slug"].astext.isnot(None))  # type: ignore[index]
+        .limit(1)
+    ).first()
+    specialist_name: str | None = None
+    if specialist_slug:
+        specialist_name = session.exec(
+            select(AgentSpecialist.name).where(AgentSpecialist.slug == specialist_slug)
+        ).first()
+
     usd = Decimal(str(usd_saved or 0))
     if pricing_model_id and occurred_at_last is not None:
         from app.core.metrics.pricing import pricing_for
@@ -286,6 +308,8 @@ def taskforce_session_savings(
         pricing_model_id=pricing_model_id,
         occurred_at_first=occurred_at_first,
         occurred_at_last=occurred_at_last,
+        specialist_slug=specialist_slug,
+        specialist_name=specialist_name,
     )
 
 
