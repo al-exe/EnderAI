@@ -866,6 +866,7 @@ class V2DocumentFolder(SQLModel, table=True):
     )
     name: str = Field(min_length=1, max_length=255, index=True)
     visibility: str = Field(default="private", index=True, max_length=16)
+    is_demo: bool = Field(default=False, nullable=False, index=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc, sa_type=DateTime(timezone=True)
     )  # type: ignore[arg-type]
