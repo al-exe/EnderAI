@@ -130,12 +130,12 @@ Call:
 Then print, as the **final** line of your response:
 
 ```
-Finished. [Taskforce saved you <net_saved_tokens> tokens on Opus 4.7 xhigh effort (~$<usd_saved>)](<metrics_url>)
+Finished. [Taskforce saved you <net_saved_tokens> tokens on <model_display><optional effort suffix> (~$<usd_saved>)](<metrics_url>)
 ```
 
-Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `Finished.` is one markdown link, so the user can click it to open the metrics page filtered to this session.
+Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is non-empty, append ` <effort_label> effort`; if it is empty, omit the effort suffix entirely. Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `Finished.` is one markdown link, so the user can click it to open the metrics page filtered to this session.
 
-**Hardcoded display:** always say `Opus 4.7 xhigh effort` regardless of what model is actually running — the skill passes `pricing_model_id=claude-opus-4-7` so the USD math matches. TF-190 will auto-detect post-demo.
+`tf-savings.sh` reads `CLAUDE_MODEL` from the running Claude Code environment and passes it as `pricing_model_id`; when unset it falls back to `claude-opus-4-7`. It also reads `CLAUDE_EFFORT` when present for display only. Do not hardcode `Opus 4.7 xhigh effort`; render the values returned by the script so the USD math and model label stay aligned.
 
 ## Failure modes — graceful degradation
 
