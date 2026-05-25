@@ -389,7 +389,7 @@ def route_specialist(
             .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
             .where(MetricsEvent.user_id == actor.id)
             .where(
-                col(MetricsEvent.payload["specialist_slug"].astext).in_(slugs)  # type: ignore[index]
+                MetricsEvent.payload["specialist_slug"].astext.in_(slugs)  # type: ignore[index]
             )
         ).all()
     )
