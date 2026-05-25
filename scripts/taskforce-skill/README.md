@@ -63,15 +63,15 @@ tail -f ~/.claude/taskforce-skill.log
 
 In every failure path the user gets a working session — Taskforce never blocks the work.
 
-## Demo locks
+## Demo behavior
 
-A few things are intentionally hardcoded for reproducible demo recordings (see `~/dev/docs/taskforce-demo-video-plan.md` §0):
+A few things are intentionally constrained for reproducible demo recordings (see `~/dev/docs/taskforce-demo-video-plan.md` §0):
 
-- **Model display** is always `Opus 4.7 xhigh effort` regardless of what's actually running. The skill passes `pricing_model_id=claude-opus-4-7` to `/session-savings` so the USD number is reproducible. TF-190 swaps this for auto-detect post-demo.
+- **Model pricing** follows `CLAUDE_MODEL` when Claude Code exposes it and falls back to `claude-opus-4-7` when unset. `CLAUDE_EFFORT` is display-only and may be empty.
 - **3-line previews** of the matched anchor are rendered under each document card as `>`-quoted lines.
 
 ## Plan + epic
 
 - Plan: `~/dev/docs/taskforce-demo-video-plan.md` §4 (beat-by-beat spec)
 - Epic: TF-183 (/tf skill demo flow)
-- Ticket: TF-188
+- Tickets: TF-188, TF-190

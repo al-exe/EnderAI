@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# /tf — savings step (TF-188).
+# /tf — savings step (TF-188 / TF-190).
 #
-# GET /v2/taskforce/session-savings?session_id=...&pricing_model_id=claude-opus-4-7.
+# GET /v2/taskforce/session-savings?session_id=...&pricing_model_id=$CLAUDE_MODEL.
 # Always exits 0; emits a JSON envelope.
 #
-# Demo-locked decision (plan §0 / TF-190): pricing_model_id is hardcoded
-# to claude-opus-4-7 regardless of what model is actually running so the
-# savings number is reproducible across recording takes. TF-190 swaps
-# this for auto-detect post-demo.
+# Uses CLAUDE_MODEL when present, falling back to claude-opus-4-7. Uses
+# CLAUDE_EFFORT for display when present; Claude Code does not always expose
+# effort in env, so an empty effort label is valid.
 #
 # Flags:
 #   --session-id <uuid>  (required)
 #
 # Output JSON:
 #   { "ok": true, "session_id", "net_saved_tokens", "usd_saved",
-#     "doc_count", "metrics_url" }
+#     "doc_count", "pricing_model_id", "model_display", "effort_label",
+#     "metrics_url" }
 #   { "ok": false, "reason": "...", "detail": "..." }
 
 set -uo pipefail
@@ -23,9 +23,19 @@ readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
 readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 readonly FRONTEND_HOST="${TASKFORCE_FRONTEND_HOST:-https://www.taskforce.tools}"
-readonly PRICING_MODEL_ID="claude-opus-4-7"
+readonly PRICING_MODEL_ID="${CLAUDE_MODEL:-claude-opus-4-7}"
+readonly CLAUDE_EFFORT_LABEL="${CLAUDE_EFFORT:-}"
 
 log() { printf '[%s] tf-savings %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"; }
+model_display_name() {
+    case "$1" in
+        claude-opus-4-7)   printf 'Opus 4.7' ;;
+        claude-sonnet-4-6) printf 'Sonnet 4.6' ;;
+        claude-haiku-4-5)  printf 'Haiku 4.5' ;;
+        *)                printf '%s' "$1" ;;
+    esac
+}
+
 emit_error() {
     local reason="$1" detail="${2:-}"
     log "error: ${reason} ${detail}"
@@ -68,6 +78,9 @@ if [[ "$http_status" != "200" ]]; then
 fi
 
 jq -c \
+    --arg fallback_model_id "$PRICING_MODEL_ID" \
+    --arg model_display "$(model_display_name "$PRICING_MODEL_ID")" \
+    --arg effort_label "$CLAUDE_EFFORT_LABEL" \
     --arg metrics_url "${FRONTEND_HOST}/v2/metrics?session_id=${session_id}" '
     {
         ok: true,
@@ -75,8 +88,10 @@ jq -c \
         net_saved_tokens: (.net_saved_tokens // 0),
         usd_saved: (.usd_saved // 0),
         doc_count: (.doc_count // 0),
-        pricing_model_id: (.pricing_model_id // "claude-opus-4-7"),
+        pricing_model_id: (.pricing_model_id // $fallback_model_id),
+        model_display: $model_display,
+        effort_label: $effort_label,
         metrics_url: $metrics_url
     }' "$tmp_resp"
 
-log "ok: session_id=${session_id}"
+log "ok: session_id=${session_id} pricing_model_id=${PRICING_MODEL_ID}"
