@@ -102,13 +102,13 @@ Otherwise, first print a header line attributing the documents to whoever did th
 - If `.matched_specialist` is non-null:
 
   ```
-  📚 <matched_specialist.name> is bringing in <N> related document<s>:
+  📖 <matched_specialist.name> is bringing in <N> related document<s>:
   ```
 
 - If `.matched_specialist` is null:
 
   ```
-  📚 Taskforce is bringing in <N> related document<s>:
+  📖 Taskforce is bringing in <N> related document<s>:
   ```
 
 Then, for each match print a numbered card:
