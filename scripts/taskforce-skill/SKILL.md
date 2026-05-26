@@ -85,7 +85,7 @@ Parse the JSON result. If `.ok == false`:
 If `.matched_specialist` is non-null, print it FIRST, before listing documents. A "profile" is reusable operating context (routing triggers, linked memory, code touchpoints) that any harness/model can adopt — not an autonomous agent.
 
 ```
-🪪 Bringing in profile: <name> — <role>
+🧑‍💻 Bringing in profile: <name> — <role>
   Confidence: <band> (<confidence>)
   Why: <reasons joined with " · ">
   [→ View profile](<href>)
