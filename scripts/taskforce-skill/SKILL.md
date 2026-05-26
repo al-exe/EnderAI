@@ -179,10 +179,10 @@ Call:
 Then print, as the **final** line of your response:
 
 ```
-Finished. [Taskforce saved you <net_saved_tokens> tokens on <model_display><optional effort suffix> (~$<usd_saved>)](<metrics_url>)
+💰 [Taskforce saved you <net_saved_tokens> tokens on <model_display><optional effort suffix> (~$<usd_saved>)](<metrics_url>)
 ```
 
-Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is non-empty, append ` <effort_label> effort`; if it is empty, omit the effort suffix entirely. Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `Finished.` is one markdown link, so the user can click it to open the metrics page filtered to this session.
+Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is non-empty, append ` <effort_label> effort`; if it is empty, omit the effort suffix entirely. Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `💰 ` is one markdown link, so the user can click it to open the metrics page filtered to this session.
 
 `tf-savings.sh` reads `CLAUDE_MODEL` from the running Claude Code environment and passes it as `pricing_model_id`; when unset it falls back to `claude-opus-4-7`. It also reads `CLAUDE_EFFORT` when present for display only. Do not hardcode `Opus 4.7 xhigh effort`; render the values returned by the script so the USD math and model label stay aligned.
 
@@ -194,7 +194,7 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 | `.matches == []` | Skip Beats 4/6/7/8 (no docs to reference / record savings against), do the work normally |
 | `.matched_specialist == null` | Skip Beat 3, keep all other beats |
 | `tf-reference.sh` returns `ok:false` | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
-| `tf-savings.sh` returns `ok:false` | Print `Finished.` with no savings line |
+| `tf-savings.sh` returns `ok:false` | Print `💰 (savings unavailable)` with no link, then stop |
 
 ## Ordering rules — non-negotiable
 
