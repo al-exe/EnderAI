@@ -150,19 +150,19 @@ Print, before any savings line:
 ✍️ Writing this session back to the referenced documents…
 ```
 
-Then one indented line per `updated_document_ids` entry. You'll need to look up the title from the discover results:
+Then one indented bullet per `updated_document_ids` entry. You'll need to look up the title from the discover results:
 
 ```
-  ✍️ <title> — added "Referenced by" entry
+  • <title> — added "Referenced by" entry
 ```
 
 If the matched specialist was non-null, also print (indented to match):
 
 ```
-  ✍️ <specialist name> — added invocation
+  • Profile <specialist name> — added invocation
 ```
 
-Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document lines are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link.
+Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document bullets are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link. Keep ✍️ on the header line only; child lines stay clean bullets.
 
 (The specialist invocation is recorded server-side by the matched_specialist routing on discover; this line is for the user's benefit.)
 
