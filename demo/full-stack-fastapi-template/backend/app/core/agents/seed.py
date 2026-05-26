@@ -112,7 +112,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
     {
         "slug": "jensen",
         "name": "Jensen",
-        "role": "Billing Reliability Specialist",
+        "role": "Billing Reliability Profile",
         "short_description": (
             "Stripe webhooks, subscriptions, retries, and double-charge prevention."
         ),
@@ -150,7 +150,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
     {
         "slug": "mira",
         "name": "Mira",
-        "role": "Search Retrieval Specialist",
+        "role": "Search Retrieval Profile",
         "short_description": (
             "Search indexing, embeddings, pgvector retrieval, ACLs, and citations."
         ),
@@ -181,7 +181,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
     {
         "slug": "orin",
         "name": "Orin",
-        "role": "Agent Integration Specialist",
+        "role": "Agent Integration Profile",
         "short_description": (
             "MCP, Claude Code hooks, agent credentials, and session lifecycle."
         ),
@@ -214,7 +214,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
     {
         "slug": "vega",
         "name": "Vega",
-        "role": "Metrics Economics Specialist",
+        "role": "Metrics Economics Profile",
         "short_description": (
             "Token savings, pricing snapshots, rollups, and session metrics."
         ),
@@ -246,7 +246,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
     {
         "slug": "nia",
         "name": "Nia",
-        "role": "Knowledge Steward Specialist",
+        "role": "Knowledge Steward Profile",
         "short_description": (
             "Document quality, evidence anchors, referenced-by rows, and reuse."
         ),

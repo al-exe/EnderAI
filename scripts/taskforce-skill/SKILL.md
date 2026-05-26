@@ -57,15 +57,15 @@ Parse the JSON result. If `.ok == false`:
 - `reason == "no_token"` → print `⚠️ Taskforce not connected — set up at https://www.taskforce.tools, then re-run /tf. Continuing without prior work.` and proceed to do the task normally without further /tf beats.
 - Any other failure → print `⚠️ Taskforce unavailable (<reason>). Continuing without prior work.` and proceed normally.
 
-### Beat 3 — Render the matched specialist (if any)
+### Beat 3 — Render the matched profile (if any)
 
-If `.matched_specialist` is non-null, print it FIRST, before listing documents:
+If `.matched_specialist` is non-null, print it FIRST, before listing documents. A "profile" is reusable operating context (routing triggers, linked memory, code touchpoints) that any harness/model can adopt — not an autonomous agent.
 
 ```
-✓ Routed to <name> — <role>
+✓ Selected profile: <name> — <role>
   Confidence: <band> (<confidence>)
   Why: <reasons joined with " · ">
-  [→ View specialist profile](<href>)
+  [→ View profile](<href>)
 ```
 
 If `.matched_specialist` is null, skip this beat silently (no banner, no apology).
