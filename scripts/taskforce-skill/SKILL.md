@@ -59,7 +59,7 @@ Print:
 ```
 ⚡ Checking Taskforce for related prior work…
 
-📨 Sending to Taskforce:
+📬 Sending to Taskforce:
 ```
 
 Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, the `files` from step 1a, and `git_branch`. The payload must match what you pass to `tf-discover.sh` in Beat 2 — no hidden differences.
