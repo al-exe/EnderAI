@@ -41,7 +41,14 @@ Print one line per candidate you'll send, using 🔎:
 🔎 Found candidate file: app/api/routes/billing.py
 ```
 
-Up to 3 files. If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — sending without file hints.` and proceed with `files: []`.
+**Cap at 2 files.** When grep returns more than 2, rank by how "handler-shaped" the path is and keep the top 2:
+1. Files under `routes/`, `handlers/`, `api/`, `controllers/` (the request entry points)
+2. Files under `services/`, `core/`, or whose filename matches a prompt noun (e.g. `stripe_billing.py` for a "stripe" prompt)
+3. Everything else (drop)
+
+Extra files dilute the scorer's per-doc files-match ratio (each match doc is rewarded for how many of the sent files appear in *its* corpus, so unrelated files drag scores down). Two well-chosen paths is the sweet spot.
+
+If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — sending without file hints.` and proceed with `files: []`.
 
 Do **not** Read the file contents here. The paths are scoring signal for Taskforce; full content comes after matches return (Beat 5).
 
