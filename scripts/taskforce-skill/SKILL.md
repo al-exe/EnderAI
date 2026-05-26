@@ -147,20 +147,22 @@ If you consulted all matches (the usual case), pass all their ids. If you skippe
 Print, before any savings line:
 
 ```
-Recording this session in the referenced docs…
+✍️ Writing this session back to the referenced documents…
 ```
 
-Then one line per `updated_document_ids` entry. You'll need to look up the title from the discover results:
+Then one indented line per `updated_document_ids` entry. You'll need to look up the title from the discover results:
 
 ```
-✓ <title> — added Referenced by entry
+  ✍️ <title> — added "Referenced by" entry
 ```
 
-If the matched specialist was non-null, also print:
+If the matched specialist was non-null, also print (indented to match):
 
 ```
-✓ <specialist name> — added invocation
+  ✍️ <specialist name> — added invocation
 ```
+
+Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document lines are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link.
 
 (The specialist invocation is recorded server-side by the matched_specialist routing on discover; this line is for the user's benefit.)
 
