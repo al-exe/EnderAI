@@ -48,7 +48,7 @@ Print one line per candidate you'll send, using 🔎:
 
 Extra files dilute the scorer's per-doc files-match ratio (each match doc is rewarded for how many of the sent files appear in *its* corpus, so unrelated files drag scores down). Two well-chosen paths is the sweet spot.
 
-If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — sending without file hints.` and proceed with `files: []`.
+If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — Sending without file hints.` and proceed with `files: []`.
 
 Do **not** Read the file contents here. The paths are scoring signal for Taskforce; full content comes after matches return (Beat 5).
 
@@ -95,7 +95,7 @@ If `.matched_specialist` is null, skip this beat silently (no banner, no apology
 
 ### Beat 4 — Render the document matches with 3-line previews
 
-If `.matches` is empty, print `No related prior work in Taskforce yet — proceeding from scratch.` and skip ahead to Beat 5.
+If `.matches` is empty, print `No related prior work in Taskforce yet — Proceeding from scratch.` and skip ahead to Beat 5.
 
 Otherwise, first print a header line attributing the documents to whoever did the bringing — the matched profile if there was one, otherwise Taskforce itself. Pluralize `document` based on count.
 
@@ -114,7 +114,7 @@ Otherwise, first print a header line attributing the documents to whoever did th
 Then, for each match print a numbered card:
 
 ```
-N. **<title>** — confidence: <confidence_band> (<score, 2 decimals>)
+N. **<title>** — Confidence: <confidence_band> (<score, 2 decimals>)
    [→ Open at <matched_anchor_id>](<href>)
    Matched on: <match_reasons joined with ", ">
 
@@ -177,13 +177,13 @@ Print, before any savings line:
 Then one indented bullet per `updated_document_ids` entry. Render the title as a markdown link to the document page — construct the URL as `<frontend_host>/v2/library/<doc_id>` (`frontend_host` is on the discover response; `doc_id` matches the entry in `updated_document_ids`):
 
 ```
-  • [<title>](<frontend_host>/v2/library/<doc_id>) — added "Referenced by" entry
+  • [<title>](<frontend_host>/v2/library/<doc_id>) — Added "Referenced by" entry
 ```
 
 If the matched specialist was non-null, also print (indented to match; link the name to the profile page using `matched_specialist.href` from discover):
 
 ```
-  • Profile [<specialist name>](<matched_specialist.href>) — added invocation
+  • Profile [<specialist name>](<matched_specialist.href>) — Added invocation
 ```
 
 Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document bullets are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link. Keep ✍️ on the header line only; child lines stay clean bullets with linked titles.
@@ -219,7 +219,7 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 | `.matched_specialist == null` | Skip Beat 3, keep all other beats |
 | User says no (or anything non-affirmative) at Beat 5b | Skip Beats 6/7/8 entirely; print the "consulted-only mode" line; keep helping the user |
 | `tf-reference.sh` returns `ok:false` (after Beat 5b yes) | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
-| `tf-savings.sh` returns `ok:false` (after Beat 5b yes) | Print `💰 (savings unavailable)` with no link, then stop |
+| `tf-savings.sh` returns `ok:false` (after Beat 5b yes) | Print `💰 (Savings unavailable)` with no link, then stop |
 
 ## Ordering rules — non-negotiable
 
