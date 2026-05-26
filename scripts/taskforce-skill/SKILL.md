@@ -97,7 +97,21 @@ If `.matched_specialist` is null, skip this beat silently (no banner, no apology
 
 If `.matches` is empty, print `No related prior work in Taskforce yet — proceeding from scratch.` and skip ahead to Beat 5.
 
-Otherwise, for each match print a numbered card:
+Otherwise, first print a header line attributing the documents to whoever did the bringing — the matched profile if there was one, otherwise Taskforce itself. Pluralize `document` based on count.
+
+- If `.matched_specialist` is non-null:
+
+  ```
+  📚 <matched_specialist.name> is bringing in <N> related document<s>:
+  ```
+
+- If `.matched_specialist` is null:
+
+  ```
+  📚 Taskforce is bringing in <N> related document<s>:
+  ```
+
+Then, for each match print a numbered card:
 
 ```
 N. **<title>** — confidence: <confidence_band> (<score, 2 decimals>)
