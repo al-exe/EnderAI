@@ -150,19 +150,19 @@ Print, before any savings line:
 ✍️ Writing this session back to the referenced documents…
 ```
 
-Then one indented bullet per `updated_document_ids` entry. You'll need to look up the title from the discover results:
+Then one indented bullet per `updated_document_ids` entry. Render the title as a markdown link to the document page — construct the URL as `<frontend_host>/v2/library/<doc_id>` (`frontend_host` is on the discover response; `doc_id` matches the entry in `updated_document_ids`):
 
 ```
-  • <title> — added "Referenced by" entry
+  • [<title>](<frontend_host>/v2/library/<doc_id>) — added "Referenced by" entry
 ```
 
-If the matched specialist was non-null, also print (indented to match):
+If the matched specialist was non-null, also print (indented to match; link the name to the profile page using `matched_specialist.href` from discover):
 
 ```
-  • Profile <specialist name> — added invocation
+  • Profile [<specialist name>](<matched_specialist.href>) — added invocation
 ```
 
-Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document bullets are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link. Keep ✍️ on the header line only; child lines stay clean bullets.
+Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document bullets are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link. Keep ✍️ on the header line only; child lines stay clean bullets with linked titles.
 
 (The specialist invocation is recorded server-side by the matched_specialist routing on discover; this line is for the user's benefit.)
 
