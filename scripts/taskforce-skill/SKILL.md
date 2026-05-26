@@ -19,27 +19,43 @@ All three return a single JSON envelope on stdout. They always exit 0; check `.o
 
 You MUST execute the beats in this exact order. The skill is load-bearing for a recorded demo — do not skip, reorder, or summarize.
 
-### Beat 1 — Announce + show payload
+### Beat 1 — Find candidate files, then announce + show payload
 
-Before calling anything, print:
+Before calling the discover script, do two things in order.
+
+**1a. Discover candidate files via Grep.**
+
+Pick 1–2 high-signal nouns from the user's prompt (e.g. "Stripe webhook double-charging" → `stripe`, `webhook`; "JWT refresh failing" → `jwt`, `refresh`). Run a single Grep scoped to likely source dirs, excluding tests, migrations, and build artifacts:
+
+```bash
+grep -rln -E "(<kw1>.*<kw2>|<kw2>.*<kw1>)" \
+  --include="*.py" --include="*.ts" --include="*.tsx" --include="*.js" \
+  --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=.git \
+  --exclude-dir=tests --exclude-dir=migrations --exclude-dir=alembic \
+  app/ src/ backend/ 2>/dev/null | head -5
+```
+
+Print one line per candidate you'll send, using 🔎:
 
 ```
-🔎 Checking Taskforce for related prior work…
+🔎 Found candidate file: app/api/routes/billing.py
+```
+
+Up to 3 files. If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — sending without file hints.` and proceed with `files: []`.
+
+Do **not** Read the file contents here. The paths are scoring signal for Taskforce; full content comes after matches return (Beat 5).
+
+**1b. Announce + show payload.**
+
+Print:
+
+```
+🧠 Checking Taskforce for related prior work…
 
 📨 Sending to Taskforce:
 ```
 
-Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, `files`, `git_branch`.
-
-To populate `files` honestly (so the preview matches what the script actually sends), run this first with the Bash tool and use its output:
-
-```bash
-git diff --name-only --relative HEAD~1 HEAD 2>/dev/null \
-  | grep -vE '(^|/)(tests?|migrations?|alembic)/' \
-  | head -5
-```
-
-If that returns nothing (not a git repo, or no recent commits), render `files` as `[]`. The discover script applies the same heuristic internally as a fallback, so the rendered payload mirrors the actual HTTP body.
+Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, the `files` from step 1a, and `git_branch`. The payload must match what you pass to `tf-discover.sh` in Beat 2 — no hidden differences.
 
 ### Beat 2 — Call discover
 
