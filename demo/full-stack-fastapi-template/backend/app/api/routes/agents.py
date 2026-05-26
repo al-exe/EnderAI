@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -122,33 +122,69 @@ def _recent_invocations(
     current_user_id: Any,
     demo: bool,
 ) -> list[AgentSpecialistInvocationSummary]:
+    # One /tf call consults N docs → N document.consulted events with the
+    # same session_id. Collapse them client-side into one invocation row
+    # per session (sum tokens, count docs, pick latest occurred_at as the
+    # row's timestamp). Events that have no session_id (pre-TF-181 legacy
+    # rows, hand-seeded metrics) stay as one row each, keyed by event.id.
     statement = (
         select(MetricsEvent)
         .where(_event_scope(specialist.slug))
         .where(MetricsEvent.user_id == current_user_id)
         .where(MetricsEvent.is_demo.is_(demo))  # type: ignore[union-attr]
         .order_by(col(MetricsEvent.occurred_at).desc())
-        .limit(10)
+        # Fetch wider than the display limit so collapsing doesn't leave
+        # us short on rows when many events share a session_id.
+        .limit(60)
     )
-    invocations: list[AgentSpecialistInvocationSummary] = []
+
+    grouped: dict[str, AgentSpecialistInvocationSummary] = {}
+    order: list[str] = []
     for event in session.exec(statement).all():
         payload = event.payload or {}
-        invocations.append(
-            AgentSpecialistInvocationSummary(
-                id=event.id,
-                prompt=str(payload.get("prompt") or ""),
-                summary=payload.get("summary"),
-                session_id=payload.get("session_id"),
-                repo=payload.get("repo"),
-                branch=payload.get("branch"),
-                documents_consulted_count=int(
-                    payload.get("documents_consulted_count") or 1
-                ),
-                tokens_saved=int(event.input_tokens or 0),
-                created_at=event.occurred_at,
+        session_id = payload.get("session_id")
+        # Group key: session_id when present, else the event id (no dedup).
+        key = str(session_id) if session_id else f"event:{event.id}"
+
+        if key in grouped:
+            existing = grouped[key]
+            grouped[key] = existing.model_copy(
+                update={
+                    "tokens_saved": existing.tokens_saved
+                    + int(event.input_tokens or 0),
+                    "documents_consulted_count": existing.documents_consulted_count
+                    + 1,
+                    # Keep the earliest occurred_at as the row's "when" so
+                    # the time delta shown to the user reflects when the
+                    # session started, not when the last doc was logged.
+                    "created_at": min(existing.created_at, event.occurred_at)
+                    if existing.created_at and event.occurred_at
+                    else existing.created_at or event.occurred_at,
+                }
             )
+            continue
+
+        grouped[key] = AgentSpecialistInvocationSummary(
+            id=event.id,
+            prompt=str(payload.get("prompt") or ""),
+            summary=payload.get("summary"),
+            session_id=session_id,
+            repo=payload.get("repo"),
+            branch=payload.get("branch"),
+            documents_consulted_count=1,
+            tokens_saved=int(event.input_tokens or 0),
+            created_at=event.occurred_at,
         )
-    return invocations
+        order.append(key)
+
+    # Re-sort by created_at desc (collapsing may have moved earliest
+    # timestamps earlier than the fetch order) and cap at 10.
+    collapsed = [grouped[k] for k in order]
+    collapsed.sort(
+        key=lambda inv: inv.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return collapsed[:10]
 
 
 def _linked_docs_count(
