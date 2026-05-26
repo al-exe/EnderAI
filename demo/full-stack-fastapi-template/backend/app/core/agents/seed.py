@@ -167,11 +167,7 @@ SEEDED_SPECIALISTS: list[dict[str, Any]] = [
             "customer.subscription.updated",
             "invoice.payment_succeeded",
         ],
-        "negative_triggers": [
-            "pricing page copy",
-            "frontend billing layout",
-            "non-stripe payment provider",
-        ],
+        "negative_triggers": [],
         "instructions": [
             "Start with route-boundary idempotency before handler internals.",
             "Check whether duplicate events short-circuit before fulfillment.",
