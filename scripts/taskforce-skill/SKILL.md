@@ -57,7 +57,7 @@ Do **not** Read the file contents here. The paths are scoring signal for Taskfor
 Print:
 
 ```
-⚡ Checking Taskforce for related prior work…
+🟪 Checking Taskforce for related prior work…
 
 📬 Sending to Taskforce:
 ```
