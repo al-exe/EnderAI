@@ -146,11 +146,7 @@ REGISTRY: dict[str, MetricDefinition] = {
         name="documents_consulted",
         display_name="Documents Consulted",
         unit="count",
-        description=(
-            "Distinct V2 documents the Taskforce hooks surfaced to the agent in the window. "
-            "Each match returned by POST /v2/taskforce/discover counts once; the discover "
-            "endpoint is fired automatically by the UserPromptSubmit hook (TF-176)."
-        ),
+        description="Memory documents Taskforce surfaced to your agents this period.",
         kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
         composed=True,
         presentation=MetricPresentation(format="count"),
@@ -160,11 +156,7 @@ REGISTRY: dict[str, MetricDefinition] = {
         display_name="Avoided Rediscovery",
         unit="tokens",
         description=(
-            "Tokens Taskforce kept the agent from having to re-derive. For each "
-            "consultation, this is max(0, document.rediscovery_cost - summary_read). "
-            "Rediscovery cost is a structural estimate (commands + files inspected + "
-            "decisions + sections) capped at 50k tokens per doc. v1 coefficients are "
-            "round numbers and will be tuned from real consult data."
+            "Tokens your agents didn't have to spend rediscovering work the team already did."
         ),
         kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
         field_name="input_tokens",
@@ -174,11 +166,7 @@ REGISTRY: dict[str, MetricDefinition] = {
         name="avoided_rediscovery_usd",
         display_name="Avoided Rediscovery (USD)",
         unit="usd",
-        description=(
-            "USD value of avoided_rediscovery, priced at the pricing snapshot effective "
-            "at consultation time. Defaults to claude-opus-4-7 rates when the hook does "
-            "not declare the agent's model."
-        ),
+        description="Dollar value of those skipped tokens at current model pricing.",
         kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
         field_name="usd_amount",
         presentation=MetricPresentation(format="usd", icon="dollar"),
