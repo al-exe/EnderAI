@@ -77,6 +77,39 @@ _CONSUMED_BY_MODEL_PREV_7D: tuple[tuple[str, int, Decimal], ...] = (
     ("claude-sonnet-4-7", 15_700, Decimal("0.14")),
 )
 
+_NIA_BEGIN_REUSE_PROMPTS = (
+    "Reuse an existing V2 document on begin.",
+    "Patch the existing playbook instead of forking it.",
+    "Begin from the matched doc — same incident, same repo.",
+)
+_NIA_BEGIN_CREATE_PROMPTS = (
+    "Create a fresh V2 document on begin.",
+    "Spin up a new doc — the matched one is too divergent.",
+    "Begin a new document; reuse score sat under threshold.",
+)
+_VEGA_DAILY_CONSULT_PROMPTS = (
+    "Pull session savings prior work into today's metrics review.",
+    "Reconcile this discover call's saved-tokens against the rollup.",
+    "Find the pricing snapshot that anchored last run's net savings.",
+    "Surface prior consults that explain this dashboard delta.",
+)
+_MIRA_PREV_FOLLOWUP_PROMPTS = (
+    "Follow up on a retrieval drift case we flagged last week.",
+    "Re-check the citation anchors from last week's indexer touch.",
+    "Confirm the pgvector ACL fix landed without regressing search.",
+    "Review last week's embedding drift sweep findings.",
+)
+_VEGA_CONSUMED_PROMPTS_7D = (
+    "Reconcile this week's model-consumed tokens against billing.",
+    "Audit harness token consumption by model for the demo dashboard.",
+    "Match summarizer model spend to the consumed-by-model table.",
+)
+_VEGA_CONSUMED_PROMPTS_PREV_7D = (
+    "Reconcile last week's model-consumed tokens against billing.",
+    "Audit prior-week harness consumption by model.",
+    "Match prior-week summarizer spend to the rollup.",
+)
+
 DOCUMENT_SLUG_TITLES = {
     "stripe-webhook-idempotency-strategy": "Stripe webhook idempotency strategy",
     "debugging-stripe-webhook-flakes": (
@@ -362,6 +395,11 @@ SPECIALIST_DOCUMENT_LINKS: dict[str, list[tuple[str, str, str]]] = {
             "reuse-decision-criteria",
             "Reuse-vs-create decision criteria.",
         ),
+        (
+            "v2-document-token-count-refresh",
+            "refresh-on-edit",
+            "Token-count refresh policy for edited docs.",
+        ),
     ],
 }
 
@@ -628,6 +666,51 @@ ALEX_DEMO_INVOCATIONS: list[dict[str, Any]] = [
         "days_ago": 31,
     },
     {
+        "specialist_slug": "nia",
+        "documents": [
+            "evidence-anchor-authoring-guide",
+            "referenced-by-update-policy",
+        ],
+        "prompt": (
+            "Two engineers wrote near-duplicate docs on the same incident "
+            "last week — patch one, archive the other, or leave both?"
+        ),
+        "summary": "Archived the older fragment and patched the canonical doc.",
+        "repo": "al-exe/EnderAI",
+        "branch": "docs/incident-doc-dedupe",
+        "tokens": 13800,
+        "days_ago": 2,
+    },
+    {
+        "specialist_slug": "nia",
+        "documents": ["evidence-anchor-authoring-guide"],
+        "prompt": (
+            "Anchor slugs in the new MCP doc keep getting auto-renamed when "
+            "sections move — what's the rule?"
+        ),
+        "summary": "Pinned anchor names to click-target nouns, not section headers.",
+        "repo": "al-exe/EnderAI",
+        "branch": "docs/anchor-stability",
+        "tokens": 7800,
+        "days_ago": 7,
+    },
+    {
+        "specialist_slug": "nia",
+        "documents": [
+            "referenced-by-update-policy",
+            "document-reuse-vs-create-playbook",
+        ],
+        "prompt": (
+            "Should every /tf session that touches a doc add a referenced-by "
+            "row, even if the agent only skimmed the preview?"
+        ),
+        "summary": "Restricted referenced-by writes to material reuse, not preview-only touches.",
+        "repo": "al-exe/EnderAI",
+        "branch": "fix/referenced-by-threshold",
+        "tokens": 9400,
+        "days_ago": 22,
+    },
+    {
         "specialist_slug": "mira",
         "documents": [
             "pgvector-acl-retrieval-gotchas",
@@ -700,7 +783,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "days_ago": days_ago,
                 "hour": 9 + (day_index % 5),
                 "specialist_slug": "vega",
-                "prompt": "Consult prior work for the active incident.",
+                "prompt": _VEGA_DAILY_CONSULT_PROMPTS[
+                    day_index % len(_VEGA_DAILY_CONSULT_PROMPTS)
+                ],
                 "summary": "Surfaced related V2 documents on discover.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/metrics-seed",
@@ -731,7 +816,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "days_ago": days_ago,
                 "hour": 14,
                 "specialist_slug": "mira",
-                "prompt": "Follow up on indexed knowledge from last week.",
+                "prompt": _MIRA_PREV_FOLLOWUP_PROMPTS[
+                    day_offset % len(_MIRA_PREV_FOLLOWUP_PROMPTS)
+                ],
                 "summary": "Reused prior consult summaries.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/metrics-seed-prev",
@@ -752,7 +839,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "days_ago": offset % 8,
                 "hour": 16,
                 "specialist_slug": "nia",
-                "prompt": "Reuse an existing V2 document on begin.",
+                "prompt": _NIA_BEGIN_REUSE_PROMPTS[
+                    offset % len(_NIA_BEGIN_REUSE_PROMPTS)
+                ],
                 "summary": "Congruence engine chose reuse.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/begin-reuse",
@@ -766,7 +855,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "days_ago": (offset + 1) % 8,
                 "hour": 17,
                 "specialist_slug": "nia",
-                "prompt": "Create a fresh V2 document on begin.",
+                "prompt": _NIA_BEGIN_CREATE_PROMPTS[
+                    offset % len(_NIA_BEGIN_CREATE_PROMPTS)
+                ],
                 "summary": "Congruence engine declined reuse.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/begin-create",
@@ -804,13 +895,15 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
         )
 
     consumed_anchor = slugs[0]
-    for model_id, tokens, usd in _CONSUMED_BY_MODEL_7D:
+    for index, (model_id, tokens, usd) in enumerate(_CONSUMED_BY_MODEL_7D):
         specs.append(
             {
                 "days_ago": 3,
                 "hour": 18,
                 "specialist_slug": "vega",
-                "prompt": "Taskforce-mediated turn (current week).",
+                "prompt": _VEGA_CONSUMED_PROMPTS_7D[
+                    index % len(_VEGA_CONSUMED_PROMPTS_7D)
+                ],
                 "summary": "Harness and summarizer usage.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/consumed",
@@ -818,13 +911,15 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "consumed": [{"model_id": model_id, "input_tokens": tokens, "usd": usd}],
             }
         )
-    for model_id, tokens, usd in _CONSUMED_BY_MODEL_PREV_7D:
+    for index, (model_id, tokens, usd) in enumerate(_CONSUMED_BY_MODEL_PREV_7D):
         specs.append(
             {
                 "days_ago": 10,
                 "hour": 18,
                 "specialist_slug": "vega",
-                "prompt": "Taskforce-mediated turn (prior week).",
+                "prompt": _VEGA_CONSUMED_PROMPTS_PREV_7D[
+                    index % len(_VEGA_CONSUMED_PROMPTS_PREV_7D)
+                ],
                 "summary": "Prior-window harness usage.",
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/consumed-prev",

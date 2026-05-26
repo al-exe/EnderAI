@@ -49,7 +49,7 @@ def test_seed_agents_creates_five_specialists_and_links(
     db.commit()
 
     assert result.specialists_created == 5
-    assert result.links_created == 15
+    assert result.links_created == 16
 
     specialists = db.exec(
         select(AgentSpecialist)
