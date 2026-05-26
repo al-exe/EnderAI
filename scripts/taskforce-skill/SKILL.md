@@ -129,9 +129,33 @@ Now read each `match.anchor_full` as additional context for your reasoning. **Do
 
 Tackle the user's task normally — read code, propose a fix, make edits, run tests. Reference the prior decision in your reasoning when it applies ("Based on the prior decision in *<title>* (<anchor_id>), …") so the viewer sees the context shaped the work.
 
-### Beat 6 — Record the consultation
+### Beat 5b — Confirm with the user before recording
 
-When the work is done (tests pass, edit applied, or you've otherwise reached a stopping point), call:
+After your edits land and tests pass (or you've otherwise reached a stopping point), print a short recap and ask one yes/no question:
+
+```
+Recap of this session:
+  • Applied: <one-line summary of what changed and where>
+  • Verified: <test name(s)>, passed
+
+Did this resolve the issue?
+```
+
+Then **wait** for the user's response. Do NOT call `tf-reference.sh` or `tf-savings.sh` until the user replies.
+
+- If the user replies with any affirmation (yes, y, yep, looks good, ship it, etc.): proceed to Beat 6.
+- If the user replies with any negation (no, n, not yet, undo, etc.) or asks for further changes:
+  - Print: `Got it — leaving Taskforce in "consulted-only" mode. The matches stayed in your context for this session; no reference rows added, no session recorded as resolved.`
+  - Do NOT call `tf-reference.sh` or `tf-savings.sh`.
+  - Continue the conversation normally — the user wants to keep iterating.
+
+If the reply is ambiguous (a follow-up question, not a clear yes/no), ask once more: `Just to confirm — is this issue resolved, or do you want to keep iterating?`
+
+This gate is the only thing standing between Taskforce and a false-positive save. Don't skip it, don't pre-fire references, don't print savings before the user agrees the fix landed.
+
+### Beat 6 — Record the consultation (only after Beat 5b confirms)
+
+Once the user has confirmed in Beat 5b that the fix resolved the issue, call:
 
 ```bash
 ~/.claude/skills/tf/tf-reference.sh \
@@ -190,15 +214,17 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 
 | Scenario | Behavior |
 |---|---|
-| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/6/7/8, do the work normally |
-| `.matches == []` | Skip Beats 4/6/7/8 (no docs to reference / record savings against), do the work normally |
+| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/5b/6/7/8, do the work normally |
+| `.matches == []` | Skip Beats 4/5b/6/7/8 (nothing to confirm, reference, or score), do the work normally |
 | `.matched_specialist == null` | Skip Beat 3, keep all other beats |
-| `tf-reference.sh` returns `ok:false` | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
-| `tf-savings.sh` returns `ok:false` | Print `💰 (savings unavailable)` with no link, then stop |
+| User says no (or anything non-affirmative) at Beat 5b | Skip Beats 6/7/8 entirely; print the "consulted-only mode" line; keep helping the user |
+| `tf-reference.sh` returns `ok:false` (after Beat 5b yes) | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
+| `tf-savings.sh` returns `ok:false` (after Beat 5b yes) | Print `💰 (savings unavailable)` with no link, then stop |
 
 ## Ordering rules — non-negotiable
 
-- **Do not** call `tf-reference.sh` before the work is done. The user must see the edits + test pass before the "Referenced by" banner.
+- **Do not** call `tf-reference.sh` before the user explicitly confirms at Beat 5b. The "Referenced by" rows are evidence the consultation was useful; pre-firing them lies about that.
 - **Do not** call `tf-savings.sh` before `tf-reference.sh`. The savings number is computed from consultation events, but the order also matters for the demo recording flow.
-- **Do not** call `tf-discover.sh` more than once per `/tf` invocation. One discover → one session_id → one reference call → one savings call.
+- **Do not** call `tf-discover.sh` more than once per `/tf` invocation. One discover → one session_id → one Beat 5b confirmation → one reference call → one savings call.
 - **Do not** render `match.anchor_full` to the user. That content is for your reasoning only — the user sees the 3-line preview.
+- **Do not** assume yes at Beat 5b. Wait for an explicit reply; "I think that's it" or "looks reasonable" without a yes/no should trigger the clarification prompt, not auto-proceed.
