@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Landing — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; position: relative; }
+.bar { padding: 12px 22px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px solid var(--tf-hairline); position: relative; z-index: 2; background: white; }
+.bar .b { font-weight: 600; font-size: 14px; display:flex; align-items:center; gap: 8px; }
+.bar .nav { display:flex; gap: 14px; align-items:center; font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg); }
+.bar .nav .a.solid { background: var(--tf-ink); color: white; padding: 5px 10px; }
+
+/* split hero: copy left, live demo right */
+.hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  min-height: 0;
+}
+.hero .left {
+  padding: 32px 22px 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  border-right: 1px solid var(--tf-border);
+  position: relative;
+}
+.hero .left .eye {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--tf-primary);
+}
+.hero .left h1 {
+  margin: 0;
+  font-size: 44px;
+  line-height: 0.96;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  max-width: 14ch;
+  text-wrap: balance;
+}
+.hero .left h1 em { font-style: normal; color: var(--tf-primary); }
+.hero .left .lede {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--tf-muted-fg);
+  max-width: 48ch;
+  text-wrap: pretty;
+}
+.hero .left .lede b { color: var(--tf-fg); font-weight: 500; }
+.hero .left .ctas { display: flex; gap: 8px; }
+.hero .left .ctas .c { font-family:"JetBrains Mono",monospace; font-size: 11px; padding: 8px 14px; border: 1px solid var(--tf-ink); letter-spacing: 0.04em; }
+.hero .left .ctas .c.solid { background: var(--tf-ink); color: white; }
+
+.hero .left .seal {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--tf-hairline);
+  display: flex; align-items: center; gap: 18px;
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px;
+  color: var(--tf-faint-fg);
+}
+.hero .left .seal b { color: var(--tf-fg); font-weight: 500; }
+
+/* RIGHT — the "showpiece": a stylized terminal showing taskforce replaying memory */
+.hero .right {
+  background: oklch(0.985 0 0);
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 8px;
+  border-left: 1px solid var(--tf-border);
+}
+.hero .right .lbl {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.term {
+  background: oklch(0.16 0 0); color: oklch(0.95 0 0);
+  border: 1px solid var(--tf-ink);
+  padding: 12px 14px;
+  font-family:"JetBrains Mono",monospace; font-size: 10.5px;
+  line-height: 1.55;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.term .head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid color-mix(in oklch, white 18%, transparent); margin-bottom: 6px; }
+.term .head .dot { width: 6px; height: 6px; background: oklch(0.6 0.1 150); }
+.term .head .nm { color: oklch(0.85 0 0); }
+.term .head .sp { flex: 1; }
+.term .head .meta { color: oklch(0.6 0 0); font-size: 9.5px; }
+.term .l { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: baseline; }
+.term .l .n { color: oklch(0.45 0 0); }
+.term .you { color: oklch(0.85 0 0); }
+.term .prompt { color: oklch(0.95 0 0); }
+.term .pri { color: #c9a8ff; }
+.term .green { color: oklch(0.78 0.14 150); }
+.term .dim { color: oklch(0.55 0 0); }
+.term .cite { color: #c9a8ff; text-decoration: underline; text-underline-offset: 2px; }
+.term .save {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, white 18%, transparent);
+  display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+  align-items: center;
+  background: color-mix(in oklch, white 4%, transparent);
+}
+.term .save .k { font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; color: oklch(0.55 0 0); }
+.term .save .v { color: oklch(0.95 0 0); font-variant-numeric: tabular-nums; }
+.term .save .v.pri { color: #c9a8ff; font-size: 14px; }
+
+.bg-mark {
+  position: absolute; right: -120px; bottom: -120px;
+  width: 420px; height: 420px;
+  background: color-mix(in oklch, var(--tf-primary) 8%, white);
+  pointer-events: none;
+  z-index: 0;
+}
+.hero .left > * { position: relative; z-index: 1; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="nav"><span>Docs</span><span>Pricing</span><span>Customers</span><span>Log in</span><span class="a solid">Sign up →</span></div>
+  </div>
+
+  <section class="hero">
+    <div class="left">
+      <div class="bg-mark"></div>
+      <div class="eye">AI work memory · for engineering teams</div>
+      <h1>Stop <em>re-explaining</em> your codebase to every new chat.</h1>
+      <p class="lede">Taskforce reads what your team did in Cursor and Claude Code, distills the decisions into linkable <b>documents</b>, and replays just the relevant parts as context — so the next prompt picks up where the last one stopped.</p>
+      <div class="ctas">
+        <div class="c solid">Start free →</div>
+        <div class="c">90-second demo</div>
+      </div>
+      <div class="seal">
+        <div><b>412K tokens</b> saved / team / week</div>
+        <div><b>73%</b> rediscovery avoided</div>
+        <div><b>4-min</b> MCP setup</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="lbl">Live · Cursor + Taskforce MCP</div>
+      <div class="term">
+        <div class="head"><span class="dot"></span><span class="nm">cursor — feat/checkout-tax</span><span class="sp"></span><span class="meta">2:14 PM</span></div>
+        <div class="l"><span class="n">you</span><span class="prompt">how do we handle stripe tax for new subscribers?</span></div>
+        <div class="l"><span class="n pri">tf</span><span class="dim">recalling from <span class="cite">Stripe checkout wiring</span> + <span class="cite">tax-rates rollout</span>…</span></div>
+        <div class="l"><span class="n pri">tf</span><span class="you">on signup we attach <span class="pri">automatic_tax: { enabled: true }</span> to the subscription, then check <span class="pri">tax_id_collection</span> for B2B accounts. <span class="dim">— see anchor §3</span></span></div>
+        <div class="l"><span class="n pri">tf</span><span class="you">edge case from last sprint: <span class="green">EU customers with no VAT</span> get blocked at confirm; <span class="cite">tax-rates rollout §5</span> documents the fallback.</span></div>
+        <div class="l"><span class="n">you</span><span class="prompt">apply that pattern to the new annual plan</span></div>
+        <div class="l"><span class="n pri">tf</span><span class="dim">writing patch · referencing 2 docs · 0 tokens spent on rediscovery</span></div>
+
+        <div class="save">
+          <div><div class="k">this turn</div><div class="v">2 docs replayed · @alex</div></div>
+          <div><div class="k">saved</div><div class="v pri num">38,420</div></div>
+          <div><div class="k">vs cold start</div><div class="v">5.6×</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

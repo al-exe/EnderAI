@@ -1,0 +1,413 @@
+/* ---------------------------------------------------------------
+   Taskforce — UI/UX Critique
+   Design doc styles. Engineering-memo aesthetic that embodies
+   the refined Taskforce DNA.
+   --------------------------------------------------------------- */
+
+:root {
+  --bg: #ffffff;
+  --bg-soft: oklch(0.985 0 0);
+  --bg-tint: oklch(0.97 0 0);
+  --fg: oklch(0.145 0 0);
+  --muted: oklch(0.45 0 0);
+  --faint: oklch(0.62 0 0);
+  --border: oklch(0.88 0 0);
+  --hair: oklch(0.93 0 0);
+  --primary: #8447ff;
+  --primary-soft: color-mix(in oklch, #8447ff 10%, white);
+  --primary-ink: color-mix(in oklch, #8447ff 60%, black);
+  --rust: oklch(0.58 0.16 35);
+  --rust-soft: oklch(0.96 0.04 35);
+  --green: oklch(0.55 0.14 150);
+  --green-soft: oklch(0.96 0.04 150);
+  --max: 1480px;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "zero"; }
+.num  { font-variant-numeric: tabular-nums; }
+
+a { color: inherit; }
+::selection { background: var(--primary); color: white; }
+
+/* -------- Top bar -------- */
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 28px;
+  background: color-mix(in oklch, var(--bg) 85%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+  border-bottom: 1px solid var(--hair);
+}
+.topbar .brand { font-weight: 600; letter-spacing: -0.01em; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.topbar .brand .mark {
+  width: 22px; height: 22px;
+  background: url("assets/tf-logo.svg") center / contain no-repeat;
+}
+.topbar .meta { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 11px; color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* -------- Shell -------- */
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 28px; }
+
+/* -------- Hero -------- */
+.hero { padding: 96px 0 64px; }
+.hero .eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--primary); margin-bottom: 22px;
+}
+.hero h1 {
+  font-size: clamp(40px, 6vw, 76px);
+  line-height: 0.98;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  margin: 0 0 28px;
+  max-width: 18ch;
+  text-wrap: balance;
+}
+.hero h1 em { font-style: normal; color: var(--primary); }
+.hero .lede {
+  font-size: 19px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 62ch;
+  margin: 0 0 36px;
+  text-wrap: pretty;
+}
+.hero .lede strong { color: var(--fg); font-weight: 500; }
+.hero .meta-row {
+  display: flex; flex-wrap: wrap; gap: 24px 36px;
+  padding-top: 24px;
+  border-top: 1px solid var(--hair);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.hero .meta-row b { color: var(--fg); font-weight: 500; }
+
+/* -------- Section -------- */
+section.surface { padding: 88px 0; border-top: 1px solid var(--hair); }
+section.surface:first-of-type { border-top: 0; }
+.section-h {
+  display: grid; grid-template-columns: 220px 1fr; gap: 48px;
+  margin-bottom: 40px; align-items: start;
+}
+@media (max-width: 960px) { .section-h { grid-template-columns: 1fr; gap: 16px; } }
+.section-h .num-tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px; letter-spacing: 0.14em; color: var(--faint);
+  position: sticky; top: 80px;
+}
+.section-h .num-tag .marker { color: var(--primary); }
+.section-h h2 {
+  margin: 0 0 14px;
+  font-size: clamp(28px, 3.4vw, 42px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  max-width: 22ch;
+  text-wrap: balance;
+}
+.section-h .deck {
+  color: var(--muted); font-size: 16.5px; line-height: 1.55; max-width: 64ch;
+  text-wrap: pretty;
+}
+
+/* -------- Issue list -------- */
+.issues { list-style: none; padding: 0; margin: 0; counter-reset: iss; }
+.issues > li {
+  counter-increment: iss;
+  display: grid; grid-template-columns: 56px 1fr;
+  gap: 18px;
+  padding: 22px 0;
+  border-top: 1px solid var(--hair);
+}
+.issues > li:last-child { border-bottom: 1px solid var(--hair); }
+.issues > li::before {
+  content: "0" counter(iss);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px; color: var(--faint); letter-spacing: 0.08em;
+}
+.issues > li h4 {
+  margin: 0 0 6px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+}
+.issues > li p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.55; max-width: 68ch; text-wrap: pretty; }
+
+/* -------- Compare grid (3 mockups side by side) -------- */
+.compare {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 28px 0 36px;
+}
+@media (max-width: 1100px) {
+  .compare { grid-template-columns: 1fr; }
+}
+
+.frame {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.frame .head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.frame .head .label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--faint);
+}
+.frame .head .tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+}
+.frame .head .tag.current { color: var(--rust); border-color: color-mix(in oklch, var(--rust) 40%, var(--border)); }
+.frame .head .tag.minimal { color: var(--fg); border-color: var(--fg); }
+.frame .head .tag.expressive { color: white; background: var(--primary); border-color: var(--primary); }
+.frame .body {
+  position: relative;
+  background: var(--bg-tint);
+  aspect-ratio: 5 / 4;
+}
+.frame .body iframe {
+  width: 100%; height: 100%; border: 0; display: block;
+  background: white;
+}
+.frame .caption {
+  padding: 14px 14px 16px;
+  border-top: 1px solid var(--hair);
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.frame .caption b { color: var(--fg); font-weight: 500; }
+
+/* -------- Callout annotations layered on a mockup -------- */
+.frame .body .callouts {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+.callout {
+  position: absolute;
+  width: 22px; height: 22px;
+  background: var(--rust); color: white;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; font-weight: 600;
+  display: grid; place-items: center;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px var(--rust);
+}
+.callout.fix { background: var(--green); box-shadow: 0 0 0 1px var(--green); }
+
+/* -------- Annotated bullets under a compare row -------- */
+.deltas {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+@media (max-width: 1100px) { .deltas { grid-template-columns: 1fr; } }
+.deltas .col {
+  padding: 4px 4px 0;
+}
+.deltas .col .col-h {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 10px;
+}
+.deltas ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.deltas li {
+  display: grid; grid-template-columns: 22px 1fr; gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.deltas li .n {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  height: 18px; width: 18px;
+  display: grid; place-items: center;
+  background: var(--rust);
+  color: white;
+}
+.deltas .col[data-kind="fix"] li .n { background: var(--green); }
+.deltas .col[data-kind="minimal"] li .n { background: var(--fg); }
+.deltas .col[data-kind="expressive"] li .n { background: var(--primary); }
+.deltas li b { color: var(--fg); font-weight: 500; }
+.deltas li .desc { color: var(--muted); }
+
+/* -------- Callout cards (sidebar-style notes) -------- */
+.note {
+  border: 1px solid var(--border);
+  padding: 22px 24px;
+  background: var(--bg-soft);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 28px 0;
+}
+.note .kicker {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--primary);
+}
+.note h4 { margin: 0; font-size: 18px; letter-spacing: -0.01em; font-weight: 600; }
+.note p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; text-wrap: pretty; }
+
+/* -------- Inline diagram (no iframe) -------- */
+.diagram {
+  margin: 24px 0 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  padding: 22px;
+  display: grid;
+  gap: 14px;
+}
+.diagram h5 {
+  margin: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 500;
+}
+
+/* -------- TOC -------- */
+.toc {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 24px 0 8px;
+  padding: 16px 0;
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+}
+.toc a {
+  text-decoration: none;
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--fg);
+  border-bottom: 1px solid transparent;
+  transition: border-color .12s ease;
+}
+.toc a:hover { border-bottom-color: var(--primary); }
+.toc a .n {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; color: var(--faint); letter-spacing: 0.1em;
+}
+
+/* -------- Inline label tokens -------- */
+.tok {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.86em;
+  padding: 1px 6px;
+  background: var(--bg-tint);
+  border: 1px solid var(--hair);
+  color: var(--ink);
+}
+
+/* -------- Footer / close -------- */
+.close {
+  padding: 88px 0 120px;
+  border-top: 1px solid var(--hair);
+}
+.close h2 { font-size: 32px; letter-spacing: -0.02em; margin: 0 0 18px; }
+.close p { color: var(--muted); max-width: 72ch; font-size: 16px; }
+
+.rollout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0;
+  margin-top: 28px;
+  border: 1px solid var(--border);
+}
+.rollout .step {
+  padding: 18px 20px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.rollout .step:last-child { border-right: 0; }
+@media (max-width: 800px) { .rollout .step { border-right: 0; border-bottom: 1px solid var(--border); } }
+.rollout .step .order {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; color: var(--faint);
+}
+.rollout .step h4 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
+.rollout .step p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+/* -------- Tiny sigils -------- */
+.dot {
+  width: 7px; height: 7px; display: inline-block;
+  background: var(--primary);
+  margin-right: 8px; vertical-align: 1px;
+}
+
+/* =====================================================================
+   Dark mode — swaps bg / fg / border tokens, brightens primary slightly.
+   --ink stays dark (it's a contrast surface, used for emphasis chrome).
+   ===================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        oklch(0.135 0 0);
+    --bg-soft:   oklch(0.175 0 0);
+    --bg-tint:   oklch(0.22 0 0);
+    --fg:        oklch(0.96 0 0);
+    --muted:     oklch(0.66 0 0);
+    --faint:     oklch(0.5 0 0);
+    --border:    oklch(0.28 0 0);
+    --hair:      oklch(0.22 0 0);
+    --primary:        #a574ff;
+    --primary-soft:   color-mix(in oklch, #a574ff 18%, oklch(0.135 0 0));
+    --primary-ink:    color-mix(in oklch, #a574ff 80%, white);
+    --rust:      oklch(0.72 0.16 35);
+    --rust-soft: oklch(0.24 0.04 35);
+    --green:     oklch(0.72 0.16 150);
+    --green-soft:oklch(0.22 0.04 150);
+  }
+
+  body { background: var(--bg); color: var(--fg); }
+  ::selection { background: var(--primary); color: oklch(0.135 0 0); }
+
+  /* topbar backdrop tweak so blur over dark reads correctly */
+  .topbar { background: color-mix(in oklch, var(--bg) 80%, transparent); }
+
+  /* tag chips on frames — keep semantics, adjust contrast */
+  .frame .head .tag.current { color: var(--rust); }
+  .frame .head .tag.minimal { color: var(--fg); border-color: var(--fg); }
+
+  /* compare body well — slightly elevated rather than tinted */
+  .frame .body { background: var(--bg-soft); }
+
+  /* note callouts read as cards on dark */
+  .note { background: var(--bg-soft); }
+  .diagram { background: var(--bg-soft); }
+  .rollout { border-color: var(--border); }
+
+  /* callout pins — keep saturated against dark */
+  .callout       { box-shadow: 0 0 0 1px var(--rust); border-color: oklch(0.135 0 0); }
+  .callout.fix   { box-shadow: 0 0 0 1px var(--green); border-color: oklch(0.135 0 0); }
+
+  /* deltas list n-bullets — dark-mode contrast adjustment for "minimal" col */
+  .deltas .col[data-kind="minimal"] li .n { background: var(--fg); color: var(--bg); }
+}

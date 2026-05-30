@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agents — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:240px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+/* Page header with display-heavy headline */
+.head { padding: 22px 22px 6px; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 18px; }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--tf-faint-fg); }
+.head h1 { margin: 8px 0 0; font-size: 30px; line-height: 0.95; letter-spacing: -0.03em; font-weight: 600; }
+.head h1 em { font-style: normal; color: var(--tf-primary); }
+.head .actions { display:flex; gap:6px; }
+.head .btn { font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:5px 10px; border:1px solid var(--tf-ink); }
+.head .btn.solid { background:var(--tf-ink); color:white; }
+
+/* Team strip — a low-data hero */
+.strip {
+  margin: 14px 22px 16px;
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 1fr;
+  border: 1px solid var(--tf-ink);
+  background: var(--tf-ink);
+  color: white;
+  gap: 1px;
+}
+.strip .cell { background: var(--tf-ink); padding: 12px 14px; }
+.strip .k {
+  font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.16em; text-transform:uppercase;
+  color: color-mix(in oklch, white 60%, transparent);
+}
+.strip .v { margin-top: 6px; font-size: 22px; font-weight: 600; letter-spacing:-0.02em; line-height:1; font-variant-numeric: tabular-nums; }
+.strip .v small { font-size: 11px; opacity: 0.7; font-weight: 500; margin-left: 4px; }
+.strip .delta { font-family:"JetBrains Mono",monospace; font-size: 10px; margin-top: 4px; color: oklch(0.75 0.14 150); }
+.strip .spark { margin-top: 6px; }
+.strip .spark svg { display: block; }
+.strip .actives { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.strip .actives .av {
+  width: 16px; height: 16px; border: 1px solid color-mix(in oklch, white 40%, transparent);
+  background: color-mix(in oklch, white 15%, transparent); color: white;
+  display: grid; place-items: center; font-size: 8.5px; font-weight: 600;
+}
+
+/* Two-up grid of richer cards */
+.grid { margin: 4px 22px 14px; display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.spec {
+  position: relative;
+  border: 1px solid var(--tf-border);
+  background: white;
+  padding: 14px 14px 12px 18px;
+}
+.spec::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--tf-primary);
+}
+.spec .row1 { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.spec h3 { margin: 0; font-size: 14px; letter-spacing: -0.01em; font-weight: 600; }
+.spec .role { font-size: 10px; color: var(--tf-muted-fg); margin-top: 1px; }
+.spec .owners { display:flex; gap:-4px; }
+.spec .owners .av {
+  width: 18px; height: 18px; border:1px solid white; outline: 1px solid var(--tf-border);
+  background: var(--tf-card-2); display:grid; place-items:center; font-size:9px; font-weight:600;
+  margin-left: -4px;
+}
+.spec .owners .av:first-child { margin-left: 0; }
+
+.spec .rule {
+  margin-top: 10px;
+  font-family:"JetBrains Mono",monospace;
+  font-size: 10px; color: var(--tf-muted-fg);
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+}
+.spec .rule .lbl { color: var(--tf-faint-fg); }
+.spec .rule .chip { padding: 1px 5px; border: 1px solid var(--tf-border); color: var(--tf-fg); }
+
+.spec .metrics {
+  margin-top: 12px;
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr;
+  border-top: 1px solid var(--tf-hairline);
+  padding-top: 10px;
+}
+.spec .metrics .m { padding-right: 10px; border-right: 1px solid var(--tf-hairline); }
+.spec .metrics .m:last-child { border-right: 0; padding-right: 0; padding-left: 10px; }
+.spec .metrics .m:nth-child(2) { padding-left: 10px; }
+.spec .metrics .v { font-family:"JetBrains Mono",monospace; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.spec .metrics .k { font-family:"JetBrains Mono",monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.spec .metrics .v small { font-size: 9.5px; color: var(--tf-positive); margin-left: 4px; font-family:"JetBrains Mono",monospace; }
+
+.spec .foot {
+  margin-top: 10px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.spec .foot .open { color: var(--tf-fg); }
+.spec .foot .open::after { content: " →"; color: var(--tf-primary); }
+
+.spec .sparkline { margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <header class="head">
+    <div>
+      <div class="crumb">Agents</div>
+      <h1>Reusable <em>specialists</em>, packaged from your work.</h1>
+    </div>
+    <div class="actions">
+      <span class="btn">Sort: impact</span>
+      <span class="btn solid">+ New specialist</span>
+    </div>
+  </header>
+
+  <section class="strip">
+    <div class="cell">
+      <div class="k">Team tokens saved · 7d</div>
+      <div class="v num">412K <small>= $7.84</small></div>
+      <div class="spark">
+        <svg width="160" height="22" viewBox="0 0 160 22"><polyline fill="none" stroke="white" stroke-width="1.2" points="0,18 14,16 28,13 42,14 56,9 70,11 84,7 98,8 112,4 126,5 140,2 154,5" /></svg>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="k">Active</div>
+      <div class="v num">7</div>
+      <div class="actives"><div class="av">A</div><div class="av">J</div><div class="av">M</div><div class="av">+4</div></div>
+    </div>
+    <div class="cell">
+      <div class="k">Reuse rate</div>
+      <div class="v num">68%</div>
+      <div class="delta">▲ 12% vs prev</div>
+    </div>
+    <div class="cell">
+      <div class="k">Idle &gt; 30d</div>
+      <div class="v num">2</div>
+      <div class="delta" style="color: oklch(0.7 0.12 60);">needs cleanup</div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <article class="spec">
+      <div class="row1">
+        <div>
+          <h3>Stripe Checkout Specialist</h3>
+          <div class="role">Billing &amp; subscriptions</div>
+        </div>
+        <div class="owners"><div class="av">A</div><div class="av">J</div><div class="av">+2</div></div>
+      </div>
+      <div class="rule">
+        <span class="lbl">route_when:</span>
+        <span class="chip">stripe</span><span class="chip">checkout</span><span class="chip">subscription</span><span class="chip">+2</span>
+      </div>
+      <div class="metrics">
+        <div class="m">
+          <div class="k">Tokens saved</div>
+          <div class="v num">142K <small>▲22%</small></div>
+          <div class="sparkline"><svg width="100" height="16" viewBox="0 0 100 16"><polyline fill="none" stroke="#8447ff" stroke-width="1.2" points="0,12 10,10 20,11 30,8 40,9 50,6 60,7 70,4 80,5 90,3 100,2"/></svg></div>
+        </div>
+        <div class="m">
+          <div class="k">Runs</div>
+          <div class="v num">28</div>
+        </div>
+        <div class="m">
+          <div class="k">Docs</div>
+          <div class="v num">12</div>
+        </div>
+      </div>
+      <div class="foot"><span>Last invoked 2h ago · @alex</span><span class="open">Open</span></div>
+    </article>
+
+    <article class="spec">
+      <div class="row1">
+        <div>
+          <h3>Postgres Migrations</h3>
+          <div class="role">Database &amp; schema</div>
+        </div>
+        <div class="owners"><div class="av">N</div><div class="av">M</div></div>
+      </div>
+      <div class="rule">
+        <span class="lbl">route_when:</span>
+        <span class="chip">postgres</span><span class="chip">migration</span><span class="chip">rls</span><span class="chip">+1</span>
+      </div>
+      <div class="metrics">
+        <div class="m">
+          <div class="k">Tokens saved</div>
+          <div class="v num">87K <small>▲8%</small></div>
+          <div class="sparkline"><svg width="100" height="16" viewBox="0 0 100 16"><polyline fill="none" stroke="#8447ff" stroke-width="1.2" points="0,10 10,11 20,9 30,10 40,8 50,9 60,7 70,8 80,6 90,7 100,5"/></svg></div>
+        </div>
+        <div class="m">
+          <div class="k">Runs</div>
+          <div class="v num">14</div>
+        </div>
+        <div class="m">
+          <div class="k">Docs</div>
+          <div class="v num">7</div>
+        </div>
+      </div>
+      <div class="foot"><span>Last invoked yesterday · @ana</span><span class="open">Open</span></div>
+    </article>
+  </div>
+</div>
+</body>
+</html>

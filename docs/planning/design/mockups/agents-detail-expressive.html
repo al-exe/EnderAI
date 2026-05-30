@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agent · Jensen — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 12px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; display:inline-flex; align-items:center; }
+.bar .sp { flex:1 }
+.bar .search { width:220px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+/* Crumb row */
+.crumb-row { padding: 12px 22px 0; }
+.crumb-row .c { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.crumb-row .c .sep { padding: 0 5px; color: oklch(0.8 0 0); }
+.crumb-row .c .here { color: var(--tf-fg); }
+
+/* HERO — big avatar, display name, dark stat strip */
+.hero {
+  margin: 8px 22px 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+}
+.hero .av {
+  width: 92px; height: 92px;
+  background: var(--tf-primary); color: white;
+  display: grid; place-items: center;
+  font-family:"JetBrains Mono",monospace; font-size: 44px; font-weight: 700;
+  letter-spacing: -0.04em;
+  position: relative;
+}
+.hero .av::after {
+  content: "v3"; position: absolute; right: -6px; bottom: -6px;
+  background: var(--tf-ink); color: white;
+  font-family:"JetBrains Mono",monospace; font-size: 9px; letter-spacing: 0.1em;
+  padding: 2px 6px;
+}
+.hero .id { min-width: 0; }
+.hero .id .ek {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--tf-primary); font-weight: 500;
+}
+.hero .id h1 {
+  margin: 4px 0 4px;
+  font-size: 44px; line-height: 0.95;
+  letter-spacing: -0.03em; font-weight: 600;
+}
+.hero .id h1 em { font-style: normal; color: var(--tf-primary); }
+.hero .id .desc {
+  font-size: 13.5px; line-height: 1.5; color: var(--tf-muted-fg);
+  max-width: 64ch; margin: 0;
+}
+.hero .id .desc b { color: var(--tf-fg); font-weight: 500; }
+.hero .id .meta {
+  margin-top: 8px;
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  font-family:"JetBrains Mono",monospace; font-size: 10px;
+  letter-spacing: 0.04em; color: var(--tf-muted-fg);
+}
+.hero .id .meta b { color: var(--tf-fg); font-weight: 500; }
+.hero .id .meta .pill {
+  padding: 2px 7px; border: 1px solid var(--tf-border);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.hero .id .meta .pill.live { color: var(--tf-positive); border-color: color-mix(in oklch, var(--tf-positive) 35%, var(--tf-border)); }
+.hero .id .meta .pill .d { width: 6px; height: 6px; background: var(--tf-positive); }
+
+.hero .id .actions { margin-top: 12px; display: flex; gap: 6px; }
+.hero .id .act {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 6px 12px; border: 1px solid var(--tf-ink); color: var(--tf-fg);
+}
+.hero .id .act.solid { background: var(--tf-ink); color: white; }
+.hero .id .act.primary { background: var(--tf-primary); color: white; border-color: var(--tf-primary); }
+
+/* Dark stat strip */
+.strip {
+  margin: 18px 22px 0;
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  border: 1px solid var(--tf-ink);
+  background: var(--tf-ink);
+  color: white;
+  gap: 1px;
+}
+.strip .cell { background: var(--tf-ink); padding: 12px 16px; }
+.strip .k { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.72; }
+.strip .v { margin-top: 6px; font-size: 26px; font-weight: 600; line-height: 1; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; }
+.strip .v small { font-size: 11px; opacity: 0.7; font-weight: 500; margin-left: 4px; }
+.strip .delta { margin-top: 5px; font-family:"JetBrains Mono",monospace; font-size: 10px; color: oklch(0.78 0.14 150); letter-spacing: 0.04em; }
+.strip .sparkbox { margin-top: 8px; }
+
+/* Two-column body */
+.body {
+  margin: 18px 22px;
+  display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px;
+  align-items: start;
+}
+
+/* Section base */
+.sec { border-top: 1px solid var(--tf-border); padding-top: 12px; }
+.sec.first { border-top: 0; padding-top: 0; }
+.sh { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.sh h2 { margin: 0; font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 600; }
+.sh .mt { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); letter-spacing: 0.06em; }
+
+/* Routing rule block — typography forward */
+.routing { padding: 4px 0; }
+.routing .row {
+  display: grid; grid-template-columns: 86px 1fr;
+  gap: 12px; align-items: baseline;
+  padding: 8px 0;
+}
+.routing .row + .row { border-top: 1px solid var(--tf-hairline); }
+.routing .lk { font-family:"JetBrains Mono",monospace; font-size: 10.5px; color: var(--tf-faint-fg); letter-spacing: 0.04em; }
+.routing .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-family:"JetBrains Mono",monospace; font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--tf-border); color: var(--tf-fg); }
+.chip.pri { color: var(--tf-primary); border-color: color-mix(in oklch, #8447ff 35%, var(--tf-border)); }
+.chip.neg { color: var(--tf-muted-fg); border-color: var(--tf-hairline); text-decoration: line-through; }
+
+/* Instructions block, expressive */
+.instr {
+  margin-top: 6px;
+  border: 1px solid var(--tf-ink);
+  background: oklch(0.13 0 0);
+  color: oklch(0.92 0 0);
+  font-family:"JetBrains Mono",monospace;
+}
+.instr .h {
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in oklch, white 14%, transparent);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: color-mix(in oklch, white 60%, transparent);
+}
+.instr .h .v { color: #c9a8ff; }
+.instr pre {
+  margin: 0; padding: 12px 14px;
+  font-size: 11.5px; line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 200px; overflow: hidden; position: relative;
+}
+.instr pre .pri { color: #c9a8ff; }
+.instr pre .gn { color: oklch(0.78 0.14 150); }
+.instr pre::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 44px;
+  background: linear-gradient(to bottom, transparent, oklch(0.13 0 0));
+}
+.instr .more {
+  padding: 7px 12px; border-top: 1px solid color-mix(in oklch, white 14%, transparent);
+  font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  display: flex; align-items: center; justify-content: space-between;
+  color: color-mix(in oklch, white 75%, transparent);
+}
+.instr .more .open { color: #c9a8ff; }
+
+/* Linked knowledge as cards */
+.docs { display: grid; gap: 8px; margin-top: 6px; }
+.dc {
+  position: relative;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid var(--tf-border); background: white;
+}
+.dc::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--tf-primary); }
+.dc.amber::before { background: oklch(0.72 0.16 70); }
+.dc.green::before { background: var(--tf-positive); }
+.dc.gray::before { background: var(--tf-border); }
+.dc h3 { margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: -0.005em; }
+.dc .desc { margin-top: 2px; font-size: 10.5px; color: var(--tf-muted-fg); line-height: 1.5; }
+.dc .meta {
+  margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--tf-hairline);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg);
+}
+.dc .meta b { color: var(--tf-fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dc .meta .scope {
+  letter-spacing: 0.1em; text-transform: uppercase; font-size: 9px;
+}
+.dc .meta .scope.org { color: var(--tf-primary); }
+
+/* Today reel — recent invocations as sentences */
+.reel { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.reel .it {
+  border-top: 1px solid var(--tf-hairline);
+  padding: 8px 0;
+}
+.reel .it:first-child { border-top: 0; padding-top: 0; }
+.reel .it .t {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.reel .it .e {
+  margin-top: 3px; font-size: 12.5px; line-height: 1.5; color: var(--tf-fg);
+}
+.reel .it .e b { font-weight: 600; }
+.reel .it .e .q { font-family:"JetBrains Mono",monospace; color: var(--tf-muted-fg); }
+.reel .it .e .save { color: var(--tf-primary); font-family:"JetBrains Mono",monospace; }
+
+/* Co-routes — specialists this one bumps into */
+.coroutes { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.cr {
+  display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid var(--tf-hairline);
+}
+.cr:last-child { border-bottom: 0; }
+.cr .av {
+  width: 22px; height: 22px; background: var(--tf-card-2);
+  display: grid; place-items: center;
+  font-family:"JetBrains Mono",monospace; font-size: 10px; font-weight: 700;
+  border: 1px solid var(--tf-border);
+}
+.cr .nm { font-size: 12px; font-weight: 500; }
+.cr .role { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 1px; }
+.cr .ov { font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-faint-fg); letter-spacing: 0.04em; }
+.cr .ov b { color: var(--tf-fg); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <div class="crumb-row">
+    <div class="c"><a href="#" style="color:var(--tf-faint-fg); text-decoration:none;">Agents</a><span class="sep">/</span><span class="here">jensen</span></div>
+  </div>
+
+  <header class="hero">
+    <div class="av">J</div>
+    <div class="id">
+      <div class="ek">Specialist · Database &amp; migrations</div>
+      <h1>Jensen, the <em>database</em> brain.</h1>
+      <p class="desc">A senior engineer's playbook for Ender's Postgres tier — packaged once, called from any Cursor or Claude Code session. Knows <b>RLS</b>, <b>tenant_id</b> backfills, <b>idempotency keys</b>, and the rollback path for every long-running migration we've shipped.</p>
+      <div class="meta">
+        <span>owned by <b>@jensen</b>, <b>@ana</b></span>
+        <span>created <b>Mar 12, 2026</b></span>
+        <span>updated <b>4d ago</b></span>
+        <span class="pill live"><span class="d"></span>Active</span>
+        <span class="pill">v3</span>
+      </div>
+      <div class="actions">
+        <span class="act primary">▶ Invoke</span>
+        <span class="act solid">↗ Share</span>
+        <span class="act">✎ Edit prompt</span>
+        <span class="act">⇣ Fork as draft</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="strip">
+    <div class="cell">
+      <div class="k">Tokens saved · 30d</div>
+      <div class="v num">87,420 <small>= $1.66</small></div>
+      <div class="delta">▲ 8% vs prev 30d</div>
+      <div class="sparkbox">
+        <svg width="220" height="22" viewBox="0 0 220 22"><polyline fill="none" stroke="#c9a8ff" stroke-width="1.4" points="0,18 22,16 44,14 66,15 88,11 110,12 132,8 154,9 176,5 198,7 220,3"/></svg>
+      </div>
+    </div>
+    <div class="cell">
+      <div class="k">Invocations</div>
+      <div class="v num">14</div>
+      <div class="delta">▲ 3 vs prev</div>
+    </div>
+    <div class="cell">
+      <div class="k">Reuse rate</div>
+      <div class="v num">72%</div>
+      <div class="delta">routes that fired</div>
+    </div>
+    <div class="cell">
+      <div class="k">Last invoked</div>
+      <div class="v" style="font-size: 16px;">2h ago</div>
+      <div class="delta">@ana · billing/migrations</div>
+    </div>
+  </section>
+
+  <div class="body">
+    <!-- LEFT column -->
+    <div>
+      <section class="sec first">
+        <div class="sh"><h2>Routing rules</h2><span class="mt">fires when ANY trigger and NO negative match</span></div>
+        <div class="routing">
+          <div class="row">
+            <div class="lk">route_when</div>
+            <div class="chips">
+              <span class="chip pri">postgres</span>
+              <span class="chip pri">migration</span>
+              <span class="chip pri">schema</span>
+              <span class="chip pri">rls</span>
+              <span class="chip pri">tenant_id</span>
+              <span class="chip pri">ALTER TABLE</span>
+              <span class="chip pri">idempotent</span>
+              <span class="chip pri">backfill</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="lk">but_not</div>
+            <div class="chips">
+              <span class="chip neg">stripe</span>
+              <span class="chip neg">frontend</span>
+              <span class="chip neg">css</span>
+              <span class="chip neg">react</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h2>Operating instructions</h2><span class="mt">v3 · 96 lines · edited 4d ago by @jensen</span></div>
+        <div class="instr">
+          <div class="h"><span>system prompt</span><span class="v">v3 · 96 lines</span></div>
+<pre>You are <span class="pri">Jensen</span>, a senior database engineer at Ender. Your job is
+to help the team make safe, reversible changes to PostgreSQL —
+schema migrations, RLS policies, and the boring-but-critical
+playbook for live tables.
+
+<span class="gn">Hard rules:</span>
+  1. <span class="pri">Never</span> suggest dropping a column on a live table without
+     an inline-rewrite plan and a rollback. Always recommend
+     <span class="pri">SET STATEMENT_TIMEOUT</span> and a concurrent index path.
+  2. Every multi-tenant table MUST have RLS enabled. If a
+     migration adds a new table referenced by <span class="pri">tenant_id</span>,
+     generate the policy stanza too.
+  3. Treat idempotency keys as part of the schema; reuse Ender's…</pre>
+          <div class="more"><span>96 lines · 2,840 tokens</span><span class="open">Expand · ↗ Copy</span></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h2>Co-routes with</h2><span class="mt">specialists that often run nearby</span></div>
+        <div class="coroutes">
+          <div class="cr">
+            <div class="av">S</div>
+            <div><div class="nm">Stripe Checkout Specialist</div><div class="role">when billing migrations touch subscription tables</div></div>
+            <div class="ov">overlap · <b>14%</b></div>
+          </div>
+          <div class="cr">
+            <div class="av">A</div>
+            <div><div class="nm">Auth0 → Clerk migration</div><div class="role">on auth tables and session schema</div></div>
+            <div class="ov">overlap · <b>9%</b></div>
+          </div>
+          <div class="cr">
+            <div class="av">T</div>
+            <div><div class="nm">Tailwind v4 upgrade</div><div class="role">never · negative match</div></div>
+            <div class="ov">overlap · <b>0%</b></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- RIGHT column -->
+    <div>
+      <section class="sec first">
+        <div class="sh"><h2>Recent invocations</h2><span class="mt">today reel</span></div>
+        <div class="reel">
+          <div class="it">
+            <div class="t">2H AGO · CURSOR · @ANA</div>
+            <div class="e">Asked <span class="q">"is RLS enabled on the new audit_logs table?"</span> while editing <span class="q">infra/migrations/041_audit.sql</span>. <span class="save">+6K saved</span></div>
+          </div>
+          <div class="it">
+            <div class="t">YESTERDAY · CLAUDE CODE · @ALEX</div>
+            <div class="e">Asked <span class="q">"safe to drop a column on a live table?"</span> — Jensen replied with the inline-rewrite playbook from <b>Migration runbook §3</b>. <span class="save">+4K saved</span></div>
+          </div>
+          <div class="it">
+            <div class="t">2D AGO · CURSOR · @JIN</div>
+            <div class="e">Asked about FK cascades in tenant migrations. Jensen cited <b>Postgres RLS audit §2</b> and <b>tenant_id rollout §4</b>. <span class="save">+8K saved</span></div>
+          </div>
+          <div class="it">
+            <div class="t">MAY 15 · MCP · @ANA</div>
+            <div class="e">Wanted the RLS policy for <span class="q">user_sessions.tenant_id</span> — generated and tested with sample rows. <span class="save">+5K saved</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h2>Linked knowledge</h2><span class="mt">4 documents</span></div>
+        <div class="docs">
+          <article class="dc">
+            <h3>Postgres RLS audit</h3>
+            <div class="desc">Row-level policies across tenant tables, tested with sample data.</div>
+            <div class="meta"><span><b>11</b> reuses · <b>64K</b> saved</span><span class="scope org">ORG</span></div>
+          </article>
+          <article class="dc amber">
+            <h3>Idempotency conventions</h3>
+            <div class="desc">Ender's standard idempotency keys for webhook + retry handlers.</div>
+            <div class="meta"><span><b>8</b> reuses · <b>38K</b> saved</span><span class="scope org">ORG</span></div>
+          </article>
+          <article class="dc green">
+            <h3>Migration runbook</h3>
+            <div class="desc">Pre-flight, deploy window, rollback. Updated quarterly.</div>
+            <div class="meta"><span><b>5</b> reuses · <b>22K</b> saved</span><span class="scope org">ORG</span></div>
+          </article>
+          <article class="dc gray">
+            <h3>tenant_id rollout <small style="color:var(--tf-muted-fg); font-weight:500;">— draft</small></h3>
+            <div class="desc">Backfill plan for the missing FK constraints.</div>
+            <div class="meta"><span><b>2</b> reuses · <b>7K</b> saved</span><span class="scope">PRIV</span></div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+</body>
+</html>

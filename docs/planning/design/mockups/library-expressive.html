@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Library — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:280px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.head { padding: 16px 22px 0; display: grid; grid-template-columns: 1fr auto; align-items:end; gap:14px; }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--tf-faint-fg); }
+.head h1 { margin:6px 0 0; font-size: 26px; letter-spacing:-0.025em; font-weight:600; line-height: 1; }
+.head h1 em { font-style: normal; color: var(--tf-primary); }
+.head .actions { display:flex; gap:6px; }
+.head .a { font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:5px 10px; border:1px solid var(--tf-border); }
+.head .a.solid { background: var(--tf-ink); color:white; border-color: var(--tf-ink); }
+
+/* TODAY REEL — horizontal feed of reuse moments */
+.reel {
+  margin: 14px 22px 14px;
+  border: 1px solid var(--tf-ink);
+  display: grid;
+  grid-template-columns: 140px 1fr;
+}
+.reel .lab {
+  background: var(--tf-ink); color: white;
+  padding: 14px;
+  display: flex; flex-direction: column; justify-content: space-between;
+}
+.reel .lab .k { font-family:"JetBrains Mono",monospace; font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.7; }
+.reel .lab .v { font-size: 22px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.reel .lab .sub { font-size: 10px; opacity: 0.7; margin-top: 4px; font-family:"JetBrains Mono",monospace; }
+.reel .items {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+}
+.reel .item {
+  padding: 12px 14px;
+  border-right: 1px solid var(--tf-border);
+}
+.reel .item:last-child { border-right: 0; }
+.reel .item .t { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); letter-spacing: 0.06em; }
+.reel .item .e { font-size: 12px; line-height: 1.4; margin-top: 4px; }
+.reel .item .e b { font-weight: 600; }
+.reel .item .e .doc { color: var(--tf-primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.reel .item .meta { margin-top: 6px; font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-muted-fg); }
+
+/* The list, denser and richer */
+.body { display:grid; grid-template-columns: 156px 1fr; flex:1; min-height:0; }
+.nav { border-right: 1px solid var(--tf-border); padding: 8px 0; }
+.nav .group { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.16em; text-transform:uppercase; color:var(--tf-faint-fg); padding: 6px 14px 4px; }
+.nav .item { display:flex; align-items:center; justify-content:space-between; padding: 6px 14px; font-size: 11.5px; }
+.nav .item.on { background: var(--tf-card-2); box-shadow: inset 2px 0 0 var(--tf-primary); font-weight:500; }
+.nav .item .ct { font-family:"JetBrains Mono",monospace; font-size:9.5px; color:var(--tf-faint-fg); }
+
+.gridc { padding: 12px 14px; display:grid; grid-template-columns: 1fr 1fr; gap: 10px; align-self: start; }
+.docc {
+  position: relative;
+  padding: 12px 14px 10px 16px;
+  border: 1px solid var(--tf-border);
+  background: white;
+}
+.docc::before {
+  content:""; position:absolute; left:0; top:0; bottom: 0; width: 3px;
+  background: var(--tf-primary);
+}
+.docc::before { background: var(--tf-primary); }
+.docc.amber::before { background: oklch(0.72 0.16 70); }
+.docc.green::before { background: var(--tf-positive); }
+.docc.gray::before { background: var(--tf-border); }
+
+.docc .row1 { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.docc h3 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.docc .desc { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 3px; line-height: 1.5; }
+.docc .row2 {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--tf-hairline);
+  display: grid; grid-template-columns: 1fr auto;
+  gap: 6px; align-items: center;
+}
+.docc .stats {
+  display: flex; gap: 12px;
+  font-family:"JetBrains Mono",monospace;
+  font-size: 10px; color: var(--tf-muted-fg);
+}
+.docc .stats b { color: var(--tf-fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.docc .ow { display: flex; align-items:center; }
+.docc .ow .av {
+  width: 18px; height: 18px; border: 1px solid white; outline: 1px solid var(--tf-border);
+  margin-left: -4px; background: var(--tf-card-2); display:grid; place-items:center; font-size:9px; font-weight: 600;
+}
+.docc .ow .av:first-child { margin-left: 0; }
+
+.docc .scope {
+  position: absolute; top: 10px; right: 12px;
+  font-family:"JetBrains Mono",monospace; font-size: 9px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.docc .scope.org { color: var(--tf-primary); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search 28 documents</div></div>
+
+  <header class="head">
+    <div>
+      <div class="crumb">Library · 28 documents · 4 active today</div>
+      <h1>Your team's <em>working memory</em>.</h1>
+    </div>
+    <div class="actions">
+      <span class="a">+ Folder</span>
+      <span class="a solid">+ New document</span>
+    </div>
+  </header>
+
+  <section class="reel">
+    <div class="lab">
+      <div>
+        <div class="k">Today</div>
+        <div class="v num">73K</div>
+        <div class="sub">tokens saved · 6 reuses</div>
+      </div>
+      <div class="sub">view all →</div>
+    </div>
+    <div class="items">
+      <div class="item">
+        <div class="t">2H AGO · CURSOR</div>
+        <div class="e"><b>@alex</b> reused <span class="doc">Stripe checkout wiring</span> while editing <span class="mono">billing.ts</span></div>
+        <div class="meta">+38K saved · summary only</div>
+      </div>
+      <div class="item">
+        <div class="t">4H AGO · CLAUDE</div>
+        <div class="e"><b>@ana</b> updated <span class="doc">Postgres RLS audit</span> with new <span class="mono">tenant_id</span> policy</div>
+        <div class="meta">+12 anchor edits</div>
+      </div>
+      <div class="item">
+        <div class="t">6H AGO · MCP</div>
+        <div class="e"><b>@jin</b> created <span class="doc">Auth0 → Clerk plan</span> · 22 evidence anchors</div>
+        <div class="meta">shared with @alex, @ana</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="body">
+    <aside class="nav">
+      <div class="group">Quick</div>
+      <div class="item on">All <span class="ct">28</span></div>
+      <div class="item">Favorites <span class="ct">4</span></div>
+      <div class="item">Unfiled <span class="ct">9</span></div>
+      <div class="group">Folders</div>
+      <div class="item">Billing <span class="ct">5</span></div>
+      <div class="item">Infra <span class="ct">7</span></div>
+      <div class="item">Auth <span class="ct">3</span></div>
+      <div class="item">Frontend <span class="ct">4</span></div>
+    </aside>
+
+    <div class="gridc">
+      <article class="docc">
+        <span class="scope org">ORG</span>
+        <div class="row1"><div>
+          <h3>Stripe checkout wiring</h3>
+          <div class="desc">Subscription decisions, price IDs, validation notes.</div>
+        </div></div>
+        <div class="row2">
+          <div class="stats"><span><b>142K</b> saved</span><span><b>14</b> reuses</span><span>2h ago</span></div>
+          <div class="ow"><div class="av">A</div><div class="av">J</div><div class="av">+2</div></div>
+        </div>
+      </article>
+
+      <article class="docc amber">
+        <span class="scope org">ORG</span>
+        <div class="row1"><div>
+          <h3>Postgres RLS audit</h3>
+          <div class="desc">Row-level policies across tenant tables, tested with sample data.</div>
+        </div></div>
+        <div class="row2">
+          <div class="stats"><span><b>87K</b> saved</span><span><b>11</b> reuses</span><span>4h ago</span></div>
+          <div class="ow"><div class="av">N</div><div class="av">M</div></div>
+        </div>
+      </article>
+
+      <article class="docc">
+        <span class="scope">PRIV</span>
+        <div class="row1"><div>
+          <h3>Auth0 → Clerk plan</h3>
+          <div class="desc">JWT mapping, session bridge, migration order.</div>
+        </div></div>
+        <div class="row2">
+          <div class="stats"><span><b>28K</b> saved</span><span><b>6</b> reuses</span><span>6h ago</span></div>
+          <div class="ow"><div class="av">J</div></div>
+        </div>
+      </article>
+
+      <article class="docc green">
+        <span class="scope org">ORG</span>
+        <div class="row1"><div>
+          <h3>Taskforce MCP metrics</h3>
+          <div class="desc">Usage events, token savings, methodology.</div>
+        </div></div>
+        <div class="row2">
+          <div class="stats"><span><b>31K</b> saved</span><span><b>4</b> reuses</span><span>3d ago</span></div>
+          <div class="ow"><div class="av">A</div></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</div>
+</body>
+</html>

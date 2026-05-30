@@ -1,0 +1,159 @@
+/* ---------------------------------------------------------------
+   Shared mockup base — Taskforce refined DNA
+   - Sharp corners (radius 0) — committed, no rounded soup
+   - Purple #8447ff primary, used sparingly
+   - Restrained type: Geist body + JetBrains Mono labels
+   - Light/dark via .dark on <html>; default is light
+   --------------------------------------------------------------- */
+
+:root {
+  --tf-bg: #ffffff;
+  --tf-fg: oklch(0.145 0 0);
+  --tf-muted-fg: oklch(0.45 0 0);
+  --tf-faint-fg: oklch(0.6 0 0);
+  --tf-border: oklch(0.88 0 0);
+  --tf-hairline: oklch(0.93 0 0);
+  --tf-card: oklch(0.985 0 0);
+  --tf-card-2: oklch(0.97 0 0);
+  --tf-primary: #8447ff;
+  --tf-primary-soft: color-mix(in oklch, #8447ff 12%, white);
+  --tf-primary-fg: white;
+  --tf-positive: oklch(0.55 0.13 155);
+  --tf-warn: oklch(0.6 0.16 60);
+  --tf-danger: oklch(0.55 0.2 27);
+  --tf-ink: oklch(0.205 0 0);
+
+  --tf-radius: 0;
+  --tf-shadow-sm: 0 1px 0 oklch(0.88 0 0);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--tf-bg);
+  color: var(--tf-fg);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Mockup canvas — fixed size, the iframe matches */
+.canvas {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  background: var(--tf-bg);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Generic shell pieces reused across mockups */
+.tf-sidebar {
+  width: 168px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--tf-border);
+  background: var(--tf-card);
+  padding: 18px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tf-brand {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 0 8px 8px;
+}
+
+/* Brand mark — scales with current font-size so it works in tiny brand
+   chrome as well as inside an h1. Keep a thin baseline-correcting offset. */
+.tf-mark {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  background: url("../assets/tf-logo.svg") center / contain no-repeat;
+  margin-right: 0.45em;
+  vertical-align: -0.14em;
+  flex-shrink: 0;
+}
+.tf-nav { display: flex; flex-direction: column; gap: 1px; }
+.tf-nav-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 8px;
+  font-size: 12.5px;
+  color: var(--tf-fg);
+  text-decoration: none;
+}
+.tf-nav-item.active { background: var(--tf-card-2); font-weight: 500; }
+.tf-nav-item .ico { width: 14px; height: 14px; flex-shrink: 0; }
+
+.tf-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.tf-topbar {
+  height: 44px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--tf-border);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  background: var(--tf-bg);
+}
+.tf-search {
+  flex: 1; max-width: 360px;
+  height: 26px;
+  border: 1px solid var(--tf-border);
+  padding: 0 10px;
+  color: var(--tf-muted-fg);
+  font-size: 11.5px;
+  display: flex; align-items: center; gap: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.tf-content {
+  flex: 1; min-height: 0;
+  padding: 20px 24px;
+  overflow: hidden;
+}
+
+.tf-page-h {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 14px;
+}
+.tf-h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.tf-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+
+/* Icons (pure CSS minimal glyphs) — most mockups use inline SVG instead */
+.ico { display: inline-block; vertical-align: middle; }
+
+/* Cards / surfaces */
+.card {
+  border: 1px solid var(--tf-border);
+  background: var(--tf-bg);
+}
+.card.muted { background: var(--tf-card); }
+
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.num { font-variant-numeric: tabular-nums; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 1px 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--tf-border);
+  color: var(--tf-muted-fg);
+  text-transform: uppercase;
+}
+.pill.primary { color: var(--tf-primary); border-color: color-mix(in oklch, var(--tf-primary) 35%, var(--tf-border)); }
+.pill.solid { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+.pill.positive { color: var(--tf-positive); border-color: color-mix(in oklch, var(--tf-positive) 35%, var(--tf-border)); }
+
+/* Misc */
+hr.hair { border: 0; border-top: 1px solid var(--tf-hairline); margin: 12px 0; }

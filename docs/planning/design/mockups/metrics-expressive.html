@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Metrics — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:240px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.head { padding: 18px 22px 0; display:grid; grid-template-columns: 1fr auto; gap:14px; align-items:end; }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--tf-faint-fg); }
+.head h1 { margin: 6px 0 0; font-size: 26px; letter-spacing: -0.025em; font-weight: 600; line-height: 1; }
+.head h1 em { font-style: normal; color: var(--tf-primary); }
+.head .range { display:flex; }
+.head .r { padding: 5px 10px; border: 1px solid var(--tf-border); border-right: 0; font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg); }
+.head .r:last-child { border-right: 1px solid var(--tf-border); }
+.head .r.on { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+
+/* HUGE single number */
+.huge {
+  margin: 14px 22px 0;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  border: 1px solid var(--tf-ink);
+  background: var(--tf-ink);
+  color: white;
+  align-items: stretch;
+}
+.huge .l { padding: 22px 24px; }
+.huge .l .k { font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.7; }
+.huge .l .v { font-size: 76px; line-height: 0.9; letter-spacing: -0.04em; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.huge .l .delta { margin-top: 8px; font-family:"JetBrains Mono",monospace; font-size: 11px; color: oklch(0.78 0.14 150); letter-spacing: 0.04em; }
+.huge .l .sub { margin-top: 4px; font-size: 11px; opacity: 0.7; }
+.huge .r { padding: 16px 18px; border-left: 1px solid color-mix(in oklch, white 18%, transparent); display: flex; flex-direction: column; gap: 10px; }
+.huge .r .k { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.7; }
+.huge .r .ratio { display:grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid color-mix(in oklch, white 18%, transparent); }
+.huge .r .ratio .x { padding: 10px 12px; }
+.huge .r .ratio .x.b { border-left: 1px solid color-mix(in oklch, white 18%, transparent); }
+.huge .r .ratio .x .vv { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.huge .r .ratio .x .lk { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; margin-top: 2px; }
+.huge .r .spark { height: 38px; }
+.huge .r .spark svg { width:100%; height:100%; display:block; }
+
+/* Story strip — "what this means" written out */
+.story {
+  margin: 14px 22px 0;
+  border: 1px solid var(--tf-border);
+  display: grid;
+  grid-template-columns: 160px 1fr;
+}
+.story .lab {
+  background: var(--tf-card);
+  padding: 14px 16px;
+  border-right: 1px solid var(--tf-border);
+}
+.story .lab .k {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--tf-primary);
+}
+.story .lab .h { font-size: 14px; font-weight: 600; margin-top: 6px; letter-spacing: -0.01em; }
+.story .copy {
+  padding: 14px 18px;
+  font-size: 12.5px; line-height: 1.55; color: var(--tf-fg);
+  max-width: 78ch;
+  text-wrap: pretty;
+}
+.story .copy b { color: var(--tf-fg); font-weight: 600; }
+.story .copy .pri { color: var(--tf-primary); font-family:"JetBrains Mono",monospace; font-size: 12px; }
+
+/* Bottom: contributors + chart */
+.row { margin: 14px 22px; display:grid; grid-template-columns: 1.5fr 1fr; gap: 14px; }
+.panel { border: 1px solid var(--tf-border); padding: 14px 16px; }
+.panel .sub { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.panel h3 { margin: 4px 0 8px; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
+
+/* daily chart */
+.chart { height: 160px; position: relative; }
+.chart .plot { position: absolute; inset: 0 0 18px 0; }
+.chart .plot svg { width:100%; height:100%; }
+.chart .x { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; display:flex; justify-content: space-between; font-family:"JetBrains Mono",monospace; font-size: 9px; color: var(--tf-faint-fg); }
+
+/* leaderboard */
+.lb { display:flex; flex-direction:column; gap: 8px; margin-top: 4px; }
+.lb .r { display:grid; grid-template-columns: 18px 1fr 60px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--tf-hairline); }
+.lb .r:last-child { border-bottom: 0; }
+.lb .r .rank { font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-faint-fg); }
+.lb .r .b { height: 4px; background: var(--tf-primary); margin-top: 4px; }
+.lb .r .nm { font-size: 11.5px; font-weight: 500; }
+.lb .r .by { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); margin-top: 2px; }
+.lb .r .v { font-family:"JetBrains Mono",monospace; font-variant-numeric: tabular-nums; font-size: 11.5px; text-align: right; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search documents</div></div>
+
+  <header class="head">
+    <div>
+      <div class="crumb">Metrics · 7d · org: ender</div>
+      <h1>You saved <em>412,840 tokens</em> this week.</h1>
+    </div>
+    <div class="range">
+      <div class="r">24h</div>
+      <div class="r on">7d</div>
+      <div class="r">30d</div>
+      <div class="r">QTD</div>
+    </div>
+  </header>
+
+  <section class="huge">
+    <div class="l">
+      <div class="k">tokens saved · 7d</div>
+      <div class="v num">412K</div>
+      <div class="delta">▲ 22.1% vs prev 7d · ≈ $7.84 saved</div>
+      <div class="sub">across 128 reuses · 7 specialists · 5 engineers</div>
+    </div>
+    <div class="r">
+      <div>
+        <div class="k">Daily trend</div>
+        <div class="spark"><svg viewBox="0 0 100 38" preserveAspectRatio="none"><polyline fill="none" stroke="white" stroke-width="1.5" points="0,30 14,28 28,22 42,24 56,16 70,12 84,8 100,4"/></svg></div>
+      </div>
+      <div class="ratio">
+        <div class="x"><div class="vv num">68%</div><div class="lk">reuse rate</div></div>
+        <div class="x b"><div class="vv num">5.6×</div><div class="lk">save / write</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="story">
+    <div class="lab"><div class="k">Plain-English</div><div class="h">What this means</div></div>
+    <div class="copy">
+      Your team wrote <b>4 new documents</b> this week and reused existing ones <span class="pri">128 times</span> — mostly <b>Stripe checkout wiring</b> and <b>Postgres RLS audit</b>, which now pay for themselves <b>5.6×</b> every time they're invoked. <b>2 specialists</b> have been idle for more than 30 days — consider archiving or merging them.
+    </div>
+  </section>
+
+  <div class="row">
+    <div class="panel">
+      <div class="sub">Tokens saved · daily</div>
+      <h3>Reuse trend</h3>
+      <div class="chart">
+        <div class="plot">
+          <svg viewBox="0 0 360 132" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#8447ff" stop-opacity="0.35"/>
+                <stop offset="1" stop-color="#8447ff" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <polyline fill="url(#g)" stroke="none" points="0,110 50,98 100,80 150,86 200,60 250,48 300,40 360,18 360,132 0,132"/>
+            <polyline fill="none" stroke="#8447ff" stroke-width="1.6" points="0,110 50,98 100,80 150,86 200,60 250,48 300,40 360,18"/>
+            <g stroke="#8447ff" fill="white" stroke-width="1.4">
+              <circle cx="360" cy="18" r="3"/>
+            </g>
+          </svg>
+        </div>
+        <div class="x"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="sub">Top contributors · 7d</div>
+      <h3>Where savings came from</h3>
+      <div class="lb">
+        <div class="r"><div class="rank">01</div><div><div class="nm">Stripe checkout wiring</div><div class="b" style="width:85%;"></div><div class="by">@alex · billing</div></div><div class="v">142K</div></div>
+        <div class="r"><div class="rank">02</div><div><div class="nm">Postgres RLS audit</div><div class="b" style="width:52%;"></div><div class="by">@ana · infra</div></div><div class="v">87K</div></div>
+        <div class="r"><div class="rank">03</div><div><div class="nm">Auth0 → Clerk plan</div><div class="b" style="width:38%;"></div><div class="by">@jin · auth</div></div><div class="v">64K</div></div>
+        <div class="r"><div class="rank">04</div><div><div class="nm">Tailwind v4 token map</div><div class="b" style="width:24%;"></div><div class="by">@alex · frontend</div></div><div class="v">41K</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

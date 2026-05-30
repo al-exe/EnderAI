@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stripe webhook idempotency strategy — Taskforce</title>
+<link rel="icon" type="image/svg+xml" href="assets/tf-logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:       #0a0a0b;
+  --bg-soft:  #131316;
+  --bg-card:  #16161a;
+  --bg-hi:    #1c1c21;
+  --fg:       oklch(0.96 0 0);
+  --fg-soft:  oklch(0.84 0 0);
+  --muted:    oklch(0.62 0 0);
+  --faint:    oklch(0.45 0 0);
+  --hint:     oklch(0.32 0 0);
+  --border:   oklch(0.22 0 0);
+  --hair:     oklch(0.18 0 0);
+  --primary:  #a574ff;
+  --primary-ink: #c9a8ff;
+  --primary-soft: color-mix(in oklch, #a574ff 14%, var(--bg));
+  --primary-line: color-mix(in oklch, #a574ff 35%, var(--border));
+  --code-bg:  oklch(0.18 0 0);
+  --positive: oklch(0.72 0.16 150);
+  --amber:    oklch(0.78 0.16 70);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  height: 100vh;
+  overflow: hidden;
+}
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "zero"; }
+.num  { font-variant-numeric: tabular-nums; }
+::selection { background: var(--primary); color: var(--bg); }
+
+a { color: inherit; }
+
+/* =================================================================
+   App shell
+   ================================================================= */
+.app { display: grid; grid-template-columns: 56px 1fr; height: 100vh; min-height: 0; }
+
+/* --- Left rail --- */
+.rail {
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0 12px;
+  gap: 4px;
+}
+.rail .brand {
+  width: 28px; height: 28px;
+  background: url("assets/tf-logo.svg") center / contain no-repeat;
+  margin-bottom: 10px;
+}
+.rail .ic {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+}
+.rail .ic:hover { color: var(--fg); background: var(--bg-soft); }
+.rail .ic.on { color: var(--fg); background: var(--bg-hi); }
+.rail .ic.on::before { content: ""; position: absolute; }
+.rail .spacer { flex: 1; }
+.rail .av {
+  width: 28px; height: 28px;
+  background: var(--bg-hi); color: var(--fg);
+  display: grid; place-items: center;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+/* =================================================================
+   Main column
+   ================================================================= */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* --- Top search bar --- */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.topbar .search {
+  flex: 1; max-width: 560px;
+  height: 32px;
+  padding: 0 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.topbar .search .ico { color: var(--faint); }
+.topbar .search .kbd {
+  margin-left: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+/* =================================================================
+   Document header — COMPACT.
+   - Breadcrumb is the tiny line; "Stripe webhook idempotency strategy"
+     is a regular page heading, not display-scale.
+   - Description sits as deck under the title, max 2 lines.
+   - All metadata + view switcher in a SINGLE row of small chips,
+     not a 2-row sequence.
+   - The wallpapery left/right hairline pushes the whole document
+     up by ~140px versus the screenshot.
+   ================================================================= */
+.doc {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+.doc::-webkit-scrollbar { width: 8px; }
+.doc::-webkit-scrollbar-thumb { background: var(--bg-hi); }
+.doc::-webkit-scrollbar-track { background: var(--bg); }
+
+.doc-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 32px 80px;
+}
+
+/* Breadcrumb + actions row */
+.crumbrow {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--faint);
+}
+.crumbrow a { color: var(--faint); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+.crumbrow a:hover { color: var(--fg); }
+.crumbrow .sep { color: var(--hint); padding: 0 2px; }
+.crumbrow .here { color: var(--muted); }
+.crumbrow .actions { display: flex; gap: 4px; }
+.crumbrow .act {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--fg);
+  cursor: pointer;
+  background: transparent;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+.crumbrow .act:hover { background: var(--bg-soft); }
+.crumbrow .act.icon { padding: 5px 8px; }
+
+/* Title block — much smaller than the current 64px display */
+.title {
+  margin: 14px 0 6px;
+  font-size: 26px; line-height: 1.15;
+  letter-spacing: -0.022em;
+  font-weight: 600;
+  text-wrap: balance;
+  max-width: 30ch;
+}
+
+/* Description / deck — body sized, max 2 lines visible */
+.deck {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px; line-height: 1.55;
+  max-width: 64ch;
+  text-wrap: pretty;
+}
+
+/* Meta strip — single row, hairline above + below.
+   Everything is JetBrains Mono so it reads as "data" not as content. */
+.meta {
+  margin-top: 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--hair);
+  border-bottom: 1px solid var(--hair);
+  display: flex; align-items: center; gap: 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.meta .grp { display: inline-flex; align-items: center; gap: 6px; }
+.meta .grp .k { color: var(--faint); }
+.meta .grp .v { color: var(--fg-soft); }
+.meta .grp.scope-priv .v { color: var(--muted); }
+.meta .grp.scope-org .v { color: var(--primary-ink); }
+.meta .grp.fav .v { color: var(--amber); }
+.meta .dot { width: 3px; height: 3px; background: var(--hint); border-radius: 50%; }
+.meta .spacer { flex: 1; }
+.meta .view {
+  display: flex; align-items: stretch; border: 1px solid var(--border);
+}
+.meta .view .v {
+  padding: 4px 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.meta .view .v:last-child { border-right: 0; }
+.meta .view .v.on { background: var(--bg-hi); color: var(--fg); }
+.meta .view .v:not(.on):hover { background: var(--bg-soft); color: var(--fg); }
+
+/* =================================================================
+   Body — engineering-doc reading rhythm
+   - 15.5px base · 1.65 line-height
+   - 64ch column for prose
+   - mono is 12.5px (smaller than body, matches the "data not content")
+   ================================================================= */
+.body {
+  padding-top: 26px;
+  font-size: 15.5px;
+  line-height: 1.65;
+  color: var(--fg-soft);
+}
+.body > * { max-width: 64ch; }
+.body p { margin: 0 0 16px; text-wrap: pretty; }
+.body p strong { color: var(--fg); font-weight: 600; }
+.body h2 {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 32px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--hair);
+}
+.body h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.body h3 {
+  font-size: 16px;
+  margin: 24px 0 8px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--fg);
+}
+.body code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  color: var(--primary-ink);
+}
+.body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  padding: 14px 16px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  margin: 8px 0 18px;
+  max-width: 70ch;
+}
+.body pre code { background: none; border: 0; padding: 0; color: var(--fg-soft); }
+.body pre .pri { color: var(--primary-ink); }
+.body pre .gn  { color: var(--positive); }
+.body pre .cm  { color: var(--faint); }
+.body ul, .body ol { padding-left: 22px; margin: 0 0 16px; }
+.body li { margin-bottom: 6px; }
+
+/* Callout: the incident block highlighted purple in the screenshot.
+   Keep the moment, but use it as semantic — "concrete event evidence" —
+   not as a wall of color. */
+.callout {
+  border: 1px solid var(--primary-line);
+  background: var(--primary-soft);
+  padding: 12px 16px;
+  margin: 4px 0 20px;
+  max-width: 64ch;
+}
+.callout .k {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 6px;
+}
+.callout p { margin: 0; color: var(--fg-soft); }
+.callout p + p { margin-top: 8px; }
+.callout p strong { color: var(--fg); }
+
+/* Inline anchor link to a Details section */
+.anchor {
+  display: inline-flex; align-items: baseline; gap: 3px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary-line);
+  padding: 0 4px;
+  cursor: pointer;
+  vertical-align: 1px;
+  text-decoration: none;
+}
+.anchor:hover { background: color-mix(in oklch, var(--primary) 22%, var(--bg)); }
+
+/* Footer micro — reuse signal (Taskforce-specific) */
+.foot {
+  margin: 36px 0 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--hair);
+  display: flex; align-items: center; gap: 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  max-width: 64ch;
+}
+.foot .k { color: var(--faint); }
+.foot .v.pri { color: var(--primary-ink); }
+.foot .spacer { flex: 1; }
+
+/* =================================================================
+   Responsive
+   ================================================================= */
+@media (max-width: 720px) {
+  .doc-inner { padding: 20px 18px 60px; }
+  .title { font-size: 22px; }
+  .meta { flex-wrap: wrap; gap: 8px 12px; }
+  .meta .spacer { display: none; }
+  .body { font-size: 15px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============== Left rail ============== -->
+  <aside class="rail">
+    <div class="brand"></div>
+    <div class="ic" title="Search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+    </div>
+    <div class="ic on" title="Library">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+    </div>
+    <div class="ic" title="Agents">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="9" width="18" height="11" rx="1"></rect><path d="M12 4v5M9 4h6"></path><circle cx="9" cy="14" r="1.2"></circle><circle cx="15" cy="14" r="1.2"></circle></svg>
+    </div>
+    <div class="ic" title="Metrics">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="m7 14 4-4 3 3 5-6"></path></svg>
+    </div>
+    <div class="ic" title="Upgrade">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5 12 2l7.5 14.5L12 22Z"></path></svg>
+    </div>
+    <div class="spacer"></div>
+    <div class="ic" title="Settings">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg>
+    </div>
+    <div class="av">AL</div>
+  </aside>
+
+  <!-- ============== Main column ============== -->
+  <div class="main">
+
+    <header class="topbar">
+      <div class="search">
+        <svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path></svg>
+        <span>Search documents, agents, threads…</span>
+        <span class="kbd">⌘K</span>
+      </div>
+    </header>
+
+    <main class="doc">
+      <article class="doc-inner">
+
+        <!-- Top row: breadcrumb (left) · share/edit actions (right) -->
+        <div class="crumbrow">
+          <div>
+            <a href="#"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"></path></svg> Library</a>
+            <span class="sep">/</span>
+            <a href="#">Engineering</a>
+            <span class="sep">/</span>
+            <span class="here">fd9e0222</span>
+          </div>
+          <div class="actions">
+            <button class="act icon" title="Favorited" aria-label="Unfavorite">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="oklch(0.78 0.16 70)" stroke="oklch(0.78 0.16 70)" stroke-width="2"><polygon points="12 2 15 9 22 9.5 17 14.5 18.5 21.5 12 18 5.5 21.5 7 14.5 2 9.5 9 9 12 2"></polygon></svg>
+            </button>
+            <button class="act icon" title="Share">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><polyline points="16 6 12 2 8 6"></polyline><line x1="12" x2="12" y1="2" y2="15"></line></svg>
+            </button>
+            <button class="act">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"></path></svg>
+              Edit
+            </button>
+          </div>
+        </div>
+
+        <!-- Title + deck -->
+        <h1 class="title">Stripe webhook idempotency strategy</h1>
+        <p class="deck">
+          Inbound Stripe webhooks are deduped via a <code style="font-family:'JetBrains Mono',monospace; font-size: 0.86em; background: var(--code-bg); border: 1px solid var(--border); padding: 0 5px; color: var(--primary-ink);">stripe_webhook_event</code> WAL table keyed on <span class="mono" style="color: var(--fg-soft);">event_id</span> + <span class="mono" style="color: var(--fg-soft);">is_test_mode</span>. Baseline replay coverage exists; newer event-specific paths still need targeted regression tests.
+        </p>
+
+        <!-- Meta strip — single line, hairlines top + bottom -->
+        <div class="meta">
+          <span class="grp">
+            <span class="k">CREATED</span>
+            <span class="v">Apr 12, 2026</span>
+          </span>
+          <span class="dot"></span>
+          <span class="grp">
+            <span class="k">UPDATED</span>
+            <span class="v">May 25, 2026</span>
+          </span>
+          <span class="dot"></span>
+          <span class="grp">
+            <span class="k">FOLDER</span>
+            <span class="v">Engineering</span>
+          </span>
+          <span class="dot"></span>
+          <span class="grp scope-priv">
+            <span class="k">VIS</span>
+            <span class="v">Private</span>
+          </span>
+          <span class="spacer"></span>
+          <div class="view" role="tablist" aria-label="View mode">
+            <div class="v on">Summary</div>
+            <div class="v">Details</div>
+            <div class="v">Split</div>
+          </div>
+        </div>
+
+        <!-- Body content -->
+        <div class="body">
+          <p>
+            Stripe documents webhook redelivery as <em>"best-effort up to 3 days,"</em> but the real-world failure mode is more aggressive than that. During provider-side recovery from regional outages the same <code>event.id</code> can arrive 2–5 times within minutes — the 8-second timeout on a non-2xx response is only the <strong>minimum</strong> retry trigger. Any handler that mutates customer state has to assume redelivery.
+          </p>
+
+          <p>
+            Before this incident, <code>billing.py</code> trusted that each event would be delivered once. Each handler — checkout completion, subscription update, invoice paid — was idempotent against Stripe's <em>outbound</em> API using <code>event.id</code> as the <code>Idempotency-Key</code> header. That covered our outbound calls (refunds, voided charges) but did nothing about inbound side effects (entitlement writes, invoice rows, tier transitions). When the same event arrived twice, fulfillment ran twice.
+          </p>
+
+          <div class="callout">
+            <div class="k">Incident · 2026-04-11</div>
+            <p>At <strong>14:37 UTC</strong>, Stripe's <code style="background:transparent; border:0; padding:0; color: var(--primary-ink);">us-west-2</code> had a partial outage. Their retry queue drained when service recovered around <strong>15:10 UTC</strong>. Over the next ~3 minutes we processed <code style="background:transparent; border:0; padding:0; color: var(--primary-ink);">customer.subscription.updated</code> events twice for <strong>~30 Pro upgrades</strong>.</p>
+            <p>Each customer was charged a second invoice for the same upgrade. Refunds went out the next day; the root cause was that we had no <em>inbound</em> idempotency. <a class="anchor" href="#">§3 · postmortem</a></p>
+          </div>
+
+          <h2>The fix · WAL table at the route boundary</h2>
+
+          <p>
+            Decision: dedupe at the route boundary, not inside each handler. A small write-ahead log (the <code>stripe_webhook_event</code> table) records every inbound event before any business logic runs. The handler then becomes a pure function of <em>"first time we've seen this event_id."</em>
+          </p>
+
+          <pre><code><span class="cm">-- stripe_webhook_event: the dedupe boundary</span>
+CREATE TABLE stripe_webhook_event (
+  event_id      <span class="pri">text</span>      PRIMARY KEY,
+  is_test_mode  <span class="pri">boolean</span>   NOT NULL,
+  received_at   <span class="pri">timestamptz</span> NOT NULL DEFAULT now(),
+  outcome       <span class="pri">text</span>      NOT NULL  <span class="cm">-- 'fulfilled' | 'duplicate' | 'failed'</span>
+);
+
+<span class="cm">-- In the route, before dispatch:</span>
+INSERT INTO stripe_webhook_event (event_id, is_test_mode, outcome)
+VALUES ($1, $2, <span class="gn">'pending'</span>)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING xmax = 0 AS is_new;</code></pre>
+
+          <p>
+            If the <code>INSERT</code> returns <code>is_new = true</code>, the handler dispatches. If it doesn't, we log the duplicate and return <code>200 OK</code> with no fulfillment side effects. The primary key gives us correctness under concurrent replays — Stripe will sometimes deliver the same event from two regions within milliseconds and Postgres serializes the conflict for us.
+          </p>
+
+          <p>
+            The choice of <code>(event_id, is_test_mode)</code> as the natural key matters: live and test events share an ID space in Stripe's API, and we have to keep them dedupable independently. Details on the test-mode collision case live in <a class="anchor" href="#">§4 · test mode</a>.
+          </p>
+
+          <h2>What still needs coverage</h2>
+
+          <p>
+            Baseline replay coverage exists for the four oldest handlers — checkout, subscription updated, invoice paid, payment failed. Newer event-specific fulfillment paths (the entitlement bridge, the seat-count reconciler, the dunning state machine) still need targeted regression tests that simulate redelivery and assert "fulfillment runs exactly once."
+          </p>
+
+          <ul>
+            <li>Entitlement bridge · pending — <a class="anchor" href="#">§5</a></li>
+            <li>Seat-count reconciler · pending</li>
+            <li>Dunning state machine · pending</li>
+          </ul>
+
+          <!-- Footer: reuse / value signal -->
+          <div class="foot">
+            <span class="grp"><span class="k">REUSED</span> <span class="v pri num">14×</span></span>
+            <span class="dot" style="background:var(--hint); width:3px;height:3px;border-radius:50%;display:inline-block;"></span>
+            <span class="grp"><span class="k">SAVED</span> <span class="v pri num">142K</span> <span class="k">tokens</span></span>
+            <span class="spacer"></span>
+            <span>Last reuse · 2h ago · @alex</span>
+          </div>
+        </div>
+
+      </article>
+    </main>
+
+  </div>
+</div>
+
+</body>
+</html>

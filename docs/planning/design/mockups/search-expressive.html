@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Search — expressive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 12px; }
+.bar { height:36px; padding:0 14px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; display:inline-flex; align-items:center; }
+.bar .sp { flex:1 }
+.bar .search { width:200px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+/* 3-pane workspace: threads | chat | citation */
+.work {
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: 180px 1fr 280px;
+}
+
+/* ============ Left: threads ============ */
+.threads { border-right: 1px solid var(--tf-border); background: var(--tf-card); overflow:auto; display:flex; flex-direction:column; }
+.threads .h {
+  padding: 10px 14px 8px;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family:"JetBrains Mono",monospace;
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--tf-faint-fg);
+  border-bottom: 1px solid var(--tf-hairline);
+}
+.threads .h .nw {
+  font-size: 9px; padding: 2px 6px; background: var(--tf-ink); color: white; letter-spacing: 0.1em;
+}
+.threads .grp {
+  padding: 10px 14px 4px;
+  font-family:"JetBrains Mono",monospace;
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--tf-faint-fg);
+}
+.threads .it {
+  padding: 6px 14px 8px;
+  border-bottom: 1px solid var(--tf-hairline);
+  cursor: pointer;
+}
+.threads .it.on { background: white; box-shadow: inset 2px 0 0 var(--tf-primary); }
+.threads .it .t { font-size: 11.5px; color: var(--tf-fg); line-height: 1.35; }
+.threads .it .m { margin-top: 3px; font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); letter-spacing: 0.04em; }
+.threads .it .m b { color: var(--tf-fg); font-weight: 500; }
+
+/* ============ Center: chat ============ */
+.chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: white; }
+.chat .head {
+  padding: 10px 22px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--tf-border);
+  background: rgba(255,255,255,0.92);
+}
+.chat .head .l { display:flex; align-items:center; gap: 10px; min-width: 0; }
+.chat .head .l .title { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; }
+.chat .head .l .crumb { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; color: var(--tf-faint-fg); }
+.chat .head .actions { display:flex; gap: 6px; }
+.chat .head .chip {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 3px 8px; border: 1px solid var(--tf-border); color: var(--tf-muted-fg);
+}
+.chat .head .chip.replay {
+  background: color-mix(in oklch, #8447ff 8%, white);
+  color: var(--tf-primary);
+  border-color: color-mix(in oklch, #8447ff 35%, var(--tf-border));
+}
+
+.chat .body { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px; display: flex; flex-direction: column; gap: 18px; }
+
+.qa { display: grid; grid-template-columns: 28px 1fr; gap: 12px; }
+.qa .lbl { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; }
+.qa.you .lbl { color: var(--tf-faint-fg); }
+.qa.tf  .lbl { color: var(--tf-primary); }
+.qa .text { font-size: 13.5px; line-height: 1.65; color: var(--tf-fg); }
+.qa.you .text { font-weight: 500; }
+.qa code { font-family:"JetBrains Mono",monospace; font-size: 0.88em; background: oklch(0.96 0 0); padding: 1px 5px; border: 1px solid var(--tf-hairline); }
+.qa p { margin: 0 0 10px; }
+
+.sup {
+  display: inline-block;
+  font-family:"JetBrains Mono",monospace;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--tf-primary);
+  background: color-mix(in oklch, #8447ff 11%, white);
+  padding: 0 4px;
+  margin: 0 1px;
+  vertical-align: 2px;
+  border-bottom: 1px solid color-mix(in oklch, #8447ff 35%, var(--tf-border));
+  cursor: pointer;
+}
+.sup.on { background: var(--tf-primary); color: white; border-bottom-color: var(--tf-primary); }
+
+/* "Reading" status pip during streaming */
+.reading {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--tf-hairline);
+  background: var(--tf-card);
+  font-family:"JetBrains Mono",monospace; font-size: 10.5px;
+  color: var(--tf-muted-fg);
+  margin: 4px 0 4px 40px;
+}
+.reading .dot {
+  width: 6px; height: 6px;
+  background: var(--tf-primary);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.3; } }
+.reading b { color: var(--tf-fg); font-weight: 500; }
+
+/* Composer */
+.composer-wrap {
+  border-top: 1px solid var(--tf-border);
+  padding: 12px 22px 14px;
+  background: var(--tf-card);
+}
+.composer {
+  display:flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--tf-ink);
+  background: white;
+}
+.composer textarea {
+  flex:1; border:0; background: transparent; resize: none;
+  font: inherit; font-size: 13px; padding: 10px 12px; min-height: 38px; outline: none;
+}
+.composer .send {
+  padding: 0 16px;
+  background: var(--tf-ink); color: white;
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  display: grid; place-items: center;
+  border: 0;
+}
+.quick {
+  display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px;
+}
+.quick .q {
+  padding: 3px 8px; border: 1px solid var(--tf-border);
+  color: var(--tf-muted-fg); letter-spacing: 0.04em;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.quick .q b { color: var(--tf-fg); font-weight: 500; }
+
+/* ============ Right: citation drawer ============ */
+.cite-pane { border-left: 1px solid var(--tf-border); background: oklch(0.985 0 0); overflow:auto; }
+.cite-pane .h {
+  padding: 10px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--tf-hairline);
+}
+.cite-pane .h .lbl {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--tf-primary);
+}
+.cite-pane .h .x { font-size: 11px; color: var(--tf-muted-fg); }
+
+.cite-pane .doc {
+  padding: 12px 14px 4px;
+  border-bottom: 1px solid var(--tf-hairline);
+}
+.cite-pane .doc .t { font-size: 12.5px; font-weight: 600; letter-spacing: -0.005em; }
+.cite-pane .doc .by {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); margin-top: 3px;
+}
+
+.cite-pane .sec { padding: 12px 14px; border-bottom: 1px solid var(--tf-hairline); }
+.cite-pane .sec.active { background: white; box-shadow: inset 3px 0 0 var(--tf-primary); }
+.cite-pane .sec .id {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; color: var(--tf-primary);
+}
+.cite-pane .sec .ti { font-size: 11.5px; font-weight: 600; margin-top: 2px; letter-spacing: -0.005em; }
+.cite-pane .sec .snip { margin-top: 6px; font-size: 11.5px; line-height: 1.5; color: var(--tf-muted-fg); }
+.cite-pane .sec .snip code { font-family:"JetBrains Mono",monospace; font-size: 0.9em; background: oklch(0.95 0 0); padding: 0 4px; }
+
+.cite-pane .open {
+  margin: 10px 14px 14px;
+  padding: 6px 10px;
+  border: 1px solid var(--tf-ink);
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  display: flex; align-items: center; justify-content: space-between;
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <div class="work">
+    <!-- Threads -->
+    <aside class="threads">
+      <div class="h">Threads <span class="nw">+ new</span></div>
+      <div class="grp">Today</div>
+      <div class="it on">
+        <div class="t">Stripe tax for new subscribers</div>
+        <div class="m"><b>3 cites</b> · 38K saved · 2m</div>
+      </div>
+      <div class="it">
+        <div class="t">Postgres RLS for tenant tables</div>
+        <div class="m"><b>5 cites</b> · 64K saved · 1h</div>
+      </div>
+      <div class="grp">Yesterday</div>
+      <div class="it">
+        <div class="t">Tailwind v4 — class renames</div>
+        <div class="m"><b>2 cites</b> · 11K saved</div>
+      </div>
+      <div class="it">
+        <div class="t">Playwright retry policy</div>
+        <div class="m"><b>1 cite</b> · 4K saved</div>
+      </div>
+      <div class="grp">Last week</div>
+      <div class="it">
+        <div class="t">Auth0 → Clerk migration plan</div>
+        <div class="m"><b>4 cites</b> · 28K saved</div>
+      </div>
+    </aside>
+
+    <!-- Chat -->
+    <main class="chat">
+      <div class="head">
+        <div class="l">
+          <div>
+            <div class="crumb">Thread · 2 turns · 2m</div>
+            <div class="title">Stripe tax for new subscribers</div>
+          </div>
+        </div>
+        <div class="actions">
+          <span class="chip">scope: <b style="color:var(--tf-fg);">all docs</b></span>
+          <span class="chip replay">▍ 38K replayed from memory</span>
+          <span class="chip">claude-3-5-sonnet · BYOK</span>
+        </div>
+      </div>
+
+      <div class="body">
+        <div class="qa you">
+          <div class="lbl">YOU</div>
+          <div class="text">how do we handle stripe tax for new subscribers?</div>
+        </div>
+
+        <div class="reading">
+          <div class="dot"></div>
+          Read <b>1 document</b>, <b>3 anchors</b> · <b>Stripe checkout wiring</b> §1 §3 §5
+        </div>
+
+        <div class="qa tf">
+          <div class="lbl">TF</div>
+          <div class="text">
+            <p>On signup we attach <code>automatic_tax: { enabled: true }</code> to every subscription. For business accounts we additionally pass <code>tax_id_collection</code> so customers can input a VAT ID at checkout<span class="sup">§1</span>.</p>
+            <p>Edge case: <strong>EU customers with no VAT</strong> are blocked at confirm — our fallback switches them to the B2C plan<span class="sup on">§3</span>. The full rationale (and why we didn't build a custom tax engine) is in the tax-engine decision<span class="sup">§5</span>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <textarea rows="1" placeholder="Ask a follow-up…">apply that pattern to our new annual plan</textarea>
+          <button class="send">Send ⏎</button>
+        </div>
+        <div class="quick">
+          <span class="q">scope: <b>all docs</b></span>
+          <span class="q">folder: <b>billing</b></span>
+          <span class="q">since: <b>30d</b></span>
+          <span class="q">specialist: <b>Stripe Checkout</b></span>
+          <span class="q">+ filter</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Citation drawer -->
+    <aside class="cite-pane">
+      <div class="h">
+        <span class="lbl">Cited · §3 pinned</span>
+        <span class="x">×</span>
+      </div>
+      <div class="doc">
+        <div class="t">Stripe checkout wiring</div>
+        <div class="by">@alex · org-shared · 142K saved · 14 reuses</div>
+      </div>
+      <div class="sec">
+        <div class="id">§1</div>
+        <div class="ti">Tax flow on signup</div>
+        <div class="snip">Pass <code>automatic_tax</code> on every session. For <code>account.type === 'business'</code> also pass <code>tax_id_collection</code>…</div>
+      </div>
+      <div class="sec active">
+        <div class="id">§3 · pinned</div>
+        <div class="ti">EU customer, no VAT</div>
+        <div class="snip">When a customer in an EU country selects the business plan without a valid VAT ID, Stripe blocks the confirm with <code>tax_id_invalid</code>. Our fallback switches the customer to the B2C plan with gross-of-tax pricing and surfaces a non-blocking notice.</div>
+      </div>
+      <div class="sec">
+        <div class="id">§5</div>
+        <div class="ti">Tax engine decision</div>
+        <div class="snip">Reviewed with @ana on 2026-03-04. Three options considered: Stripe Tax (chosen), Avalara, build-our-own…</div>
+      </div>
+      <div class="open">Open document <span>↗</span></div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

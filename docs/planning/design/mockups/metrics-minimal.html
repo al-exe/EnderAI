@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Metrics — minimal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:240px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.head { padding: 18px 22px 6px; display:grid; grid-template-columns: 1fr auto; align-items: end; gap: 14px; }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.head h1 { margin: 6px 0 0; font-size: 22px; font-weight: 600; letter-spacing: -0.022em; }
+.head .range { display:flex; }
+.head .r { padding: 5px 10px; border: 1px solid var(--tf-border); border-right: 0; font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg); }
+.head .r:last-child { border-right: 1px solid var(--tf-border); }
+.head .r.on { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+
+/* Headline number — one giant figure */
+.hero {
+  margin: 14px 22px 0;
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  border: 1px solid var(--tf-border);
+}
+.hero .c { padding: 16px 18px; border-right: 1px solid var(--tf-border); }
+.hero .c:last-child { border-right: 0; }
+.hero .k { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.hero .v { font-size: 36px; font-weight: 600; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; margin-top: 8px; }
+.hero .v.small { font-size: 24px; }
+.hero .v small { font-size: 13px; color: var(--tf-muted-fg); font-weight: 500; margin-left: 4px; }
+.hero .sub {
+  margin-top: 8px; font-family:"JetBrains Mono",monospace; font-size: 10px;
+  color: var(--tf-positive); letter-spacing: 0.04em;
+}
+.hero .sub.cold { color: var(--tf-muted-fg); }
+.hero .micro { margin-top: 8px; height: 26px; }
+
+/* Main chart row */
+.row { margin: 14px 22px; display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; }
+.panel { border: 1px solid var(--tf-border); padding: 14px 16px; }
+.panel h3 { margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: -0.005em; }
+.panel .sub { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--tf-faint-fg); }
+
+.chart { height: 160px; margin-top: 12px; position: relative; }
+.chart .y { position: absolute; left: 0; top: 0; bottom: 18px; width: 36px; display: flex; flex-direction: column; justify-content: space-between; font-family:"JetBrains Mono",monospace; font-size: 9px; color: var(--tf-faint-fg); }
+.chart .plot { position: absolute; left: 36px; right: 0; top: 0; bottom: 18px; border-left: 1px solid var(--tf-hairline); border-bottom: 1px solid var(--tf-hairline); }
+.chart .plot svg { width: 100%; height: 100%; }
+.chart .x { position: absolute; left: 36px; right: 0; bottom: 0; height: 16px; display: flex; justify-content: space-between; font-family:"JetBrains Mono",monospace; font-size: 9px; color: var(--tf-faint-fg); }
+
+/* Top docs table */
+.tbl { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.tbl th, .tbl td { padding: 7px 4px; text-align: left; border-bottom: 1px solid var(--tf-hairline); font-size: 11px; }
+.tbl th { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tf-faint-fg); font-weight: 500; }
+.tbl td.num { text-align: right; font-family:"JetBrains Mono",monospace; font-variant-numeric: tabular-nums; }
+.tbl tr td:first-child { font-weight: 500; }
+.tbl .bar-wrap { display:flex; align-items:center; gap: 6px; }
+.tbl .bar-wrap .b { height: 4px; background: var(--tf-primary); }
+.tbl .bar-wrap .num { font-family:"JetBrains Mono",monospace; font-variant-numeric: tabular-nums; font-size: 10.5px; color: var(--tf-fg); }
+
+.method {
+  margin: 0 22px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--tf-hairline);
+  background: var(--tf-card);
+  font-size: 10.5px; color: var(--tf-muted-fg);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.method b { color: var(--tf-fg); font-weight: 500; }
+.method .meth { font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-primary); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search documents</div></div>
+
+  <header class="head">
+    <div>
+      <div class="crumb">Metrics · 7-day · org: ender</div>
+      <h1>Token savings</h1>
+    </div>
+    <div class="range">
+      <div class="r">24h</div>
+      <div class="r on">7d</div>
+      <div class="r">30d</div>
+      <div class="r">QTD</div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="c">
+      <div class="k">Tokens saved · 7d</div>
+      <div class="v num">412K</div>
+      <div class="sub">▲ 22.1% vs prev 7d</div>
+    </div>
+    <div class="c">
+      <div class="k">≈ Cost saved</div>
+      <div class="v small num">$7.84</div>
+      <div class="sub">▲ $1.42 vs prev</div>
+      <div class="micro"><svg width="100%" height="26" viewBox="0 0 100 26" preserveAspectRatio="none"><polyline fill="none" stroke="#8447ff" stroke-width="1.4" points="0,20 12,18 24,14 36,16 48,10 60,12 72,7 84,8 100,3"/></svg></div>
+    </div>
+    <div class="c">
+      <div class="k">Reuses</div>
+      <div class="v small num">128</div>
+      <div class="sub">▲ 14 vs prev</div>
+    </div>
+    <div class="c">
+      <div class="k">Active specialists</div>
+      <div class="v small num">7</div>
+      <div class="sub cold">— unchanged</div>
+    </div>
+  </section>
+
+  <div class="row">
+    <div class="panel">
+      <div class="sub">Tokens saved · daily</div>
+      <h3>Reuse trend</h3>
+      <div class="chart">
+        <div class="y"><span>120K</span><span>60K</span><span>0</span></div>
+        <div class="plot">
+          <svg viewBox="0 0 360 132" preserveAspectRatio="none">
+            <!-- ref gridlines -->
+            <line x1="0" y1="44" x2="360" y2="44" stroke="oklch(0.93 0 0)" stroke-dasharray="2 3"/>
+            <line x1="0" y1="88" x2="360" y2="88" stroke="oklch(0.93 0 0)" stroke-dasharray="2 3"/>
+            <!-- bars -->
+            <g fill="#8447ff">
+              <rect x="14" y="78" width="32" height="54"/>
+              <rect x="60" y="62" width="32" height="70"/>
+              <rect x="106" y="48" width="32" height="84"/>
+              <rect x="152" y="54" width="32" height="78"/>
+              <rect x="198" y="34" width="32" height="98"/>
+              <rect x="244" y="22" width="32" height="110"/>
+              <rect x="290" y="14" width="32" height="118"/>
+            </g>
+          </svg>
+        </div>
+        <div class="x"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="sub">Top documents</div>
+      <h3>Where savings came from</h3>
+      <table class="tbl">
+        <thead><tr><th>Document</th><th style="text-align:right;">Saved</th></tr></thead>
+        <tbody>
+          <tr><td>Stripe checkout wiring</td><td class="num"><div class="bar-wrap" style="justify-content:flex-end;"><span class="b" style="width:80px;"></span><span class="num">142K</span></div></td></tr>
+          <tr><td>Postgres RLS audit</td><td class="num"><div class="bar-wrap" style="justify-content:flex-end;"><span class="b" style="width:48px;"></span><span class="num">87K</span></div></td></tr>
+          <tr><td>Auth0 → Clerk plan</td><td class="num"><div class="bar-wrap" style="justify-content:flex-end;"><span class="b" style="width:36px;"></span><span class="num">64K</span></div></td></tr>
+          <tr><td>Tailwind v4 token map</td><td class="num"><div class="bar-wrap" style="justify-content:flex-end;"><span class="b" style="width:22px;"></span><span class="num">41K</span></div></td></tr>
+          <tr><td>Playwright flake notes</td><td class="num"><div class="bar-wrap" style="justify-content:flex-end;"><span class="b" style="width:12px;"></span><span class="num">23K</span></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="method">
+    <div><b>How we calculate:</b> tokens saved = avg context length without doc − context length with doc summary, weighted by reuse count.</div>
+    <div class="meth">view methodology →</div>
+  </div>
+</div>
+</body>
+</html>

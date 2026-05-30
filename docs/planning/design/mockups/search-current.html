@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Search — current</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 12px; }
+.bar { height:36px; padding:0 14px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; display:inline-flex; align-items:center; }
+.bar .sp { flex:1 }
+.bar .search { width:200px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.column { max-width: 720px; margin: 0 auto; padding: 22px; display: flex; flex-direction: column; gap: 16px; height: 100%; }
+.head h1 { margin:0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.head p { margin:6px 0 0; font-size: 12.5px; color: var(--tf-muted-fg); line-height: 1.55; }
+.head .pill {
+  display:inline-flex; align-items:center; gap:4px;
+  font-size: 10.5px; padding: 1px 7px;
+  background: var(--tf-card-2); border-radius: 999px;
+  margin-left: 6px; color: var(--tf-muted-fg);
+}
+
+.messages { display:flex; flex-direction:column; gap: 18px; flex: 1; overflow:auto; }
+.msg { display:flex; gap: 10px; }
+.msg .ico { width: 18px; height: 18px; color: var(--tf-muted-fg); flex-shrink: 0; margin-top: 2px; }
+.msg .body { min-width: 0; flex: 1; }
+.msg .text { font-size: 13px; line-height: 1.6; white-space: pre-wrap; color: var(--tf-fg); }
+.msg .text code { font-family:"JetBrains Mono",monospace; font-size: 11.5px; background: oklch(0.96 0 0); padding: 1px 4px; border-radius: 3px; }
+.msg .cites { display:flex; flex-wrap:wrap; gap: 5px; margin-top: 10px; }
+.msg .cite {
+  display:inline-flex; align-items:center; gap: 5px;
+  font-size: 10.5px; padding: 2px 8px;
+  border: 1px solid var(--tf-border);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--tf-card-2) 40%, white);
+  color: var(--tf-fg);
+}
+.msg .cite .n { color: var(--tf-muted-fg); }
+.msg .cite .anc { color: var(--tf-muted-fg); }
+.msg .meta {
+  margin-top: 6px;
+  font-size: 10.5px; color: var(--tf-muted-fg);
+}
+
+.composer {
+  display:flex; align-items:flex-end; gap: 8px;
+  border: 1px solid var(--tf-border);
+  background: var(--tf-card);
+  border-radius: 8px;
+  padding: 8px;
+}
+.composer textarea {
+  flex:1; border:0; background: transparent; resize: none;
+  font: inherit; font-size: 13px; min-height: 36px; outline: none;
+  color: var(--tf-fg);
+}
+.composer .send {
+  width: 30px; height: 30px;
+  display:grid; place-items:center;
+  background: var(--tf-ink); color: white; border-radius: 6px;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <div class="column">
+    <div class="head">
+      <h1>Search</h1>
+      <p>Ask anything about the work you've captured in Taskforce — your documents are the source of truth. <span class="pill">⌥ Using your Anthropic key</span></p>
+    </div>
+
+    <div class="messages">
+      <div class="msg">
+        <div class="ico">👤</div>
+        <div class="body">
+          <div class="text">how do we handle stripe tax for new subscribers?</div>
+        </div>
+      </div>
+      <div class="msg">
+        <div class="ico">✦</div>
+        <div class="body">
+          <div class="text">On signup we attach <code>automatic_tax: { enabled: true }</code> to every subscription. For business accounts we additionally pass <code>tax_id_collection</code> so customers can input a VAT ID at checkout.
+
+Edge case: EU customers with no VAT are blocked at confirm — our fallback switches them to the B2C plan. The full rationale (and why we didn't build a custom tax engine) is documented in the tax-engine decision note.</div>
+          <div class="cites">
+            <span class="cite"><span class="n">[1]</span><span>Stripe checkout wiring</span><span class="anc">#sec-tax-flow</span></span>
+            <span class="cite"><span class="n">[2]</span><span>Stripe checkout wiring</span><span class="anc">#sec-eu-no-vat</span></span>
+            <span class="cite"><span class="n">[3]</span><span>Stripe checkout wiring</span><span class="anc">#sec-tax-decision</span></span>
+          </div>
+          <div class="meta">BYOK · claude-3-5-sonnet · 1,840 in / 220 out</div>
+        </div>
+      </div>
+    </div>
+
+    <form class="composer">
+      <textarea placeholder="Ask Taskforce…" rows="1">apply that pattern to our new annual plan</textarea>
+      <div class="send">→</div>
+    </form>
+  </div>
+</div>
+</body>
+</html>

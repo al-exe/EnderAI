@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Library — current</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 14px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:200px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.toprow { padding: 14px 14px 8px; display:flex; align-items:end; justify-content:space-between; gap:10px; border-bottom: 1px solid var(--tf-border); background: rgba(255,255,255,0.95); }
+.toprow h1 { margin:0; font-size: 17px; font-weight:600; letter-spacing:-0.01em; }
+.toprow .tabs { display:flex; padding: 2px; background: var(--tf-card-2); border-radius: 6px; }
+.toprow .tabs .t { padding: 3px 10px; font-size: 10px; color: var(--tf-muted-fg); border-radius: 4px; }
+.toprow .tabs .t.on { background: white; color: var(--tf-fg); box-shadow: 0 1px 0 var(--tf-border); }
+.toprow .actions { display:flex; gap:6px; }
+.toprow .actions .b { padding: 3px 8px; font-size: 10px; border: 1px solid var(--tf-border); border-radius: 6px; }
+.toprow .actions .b.primary { background: var(--tf-ink); color:white; border-color: var(--tf-ink); }
+
+.body { display:grid; grid-template-columns: 140px 1fr; gap: 10px; padding: 10px 14px; flex:1; min-height: 0; }
+
+.nav { border: 1px solid var(--tf-border); padding: 6px; align-self: start; }
+.nav .item { display:flex; align-items:center; justify-content:space-between; padding: 5px 6px; font-size: 10.5px; }
+.nav .item .l { display:flex; align-items:center; gap:6px; }
+.nav .item .ic { width: 10px; height:10px; background: var(--tf-faint-fg); }
+.nav .item.on { background: var(--tf-card-2); }
+.nav .item .ct { color: var(--tf-faint-fg); font-size: 9.5px; }
+.nav .sep { border-top:1px solid var(--tf-hairline); margin: 4px 0; }
+
+.list { border: 1px solid var(--tf-border); background: white; align-self: start; }
+.list .head { display: grid; grid-template-columns: 1fr 100px 90px; gap: 10px; padding: 8px 10px; background: var(--tf-card); border-bottom: 1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.list .row { display:grid; grid-template-columns: 1fr 100px 90px; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--tf-hairline); align-items:center; }
+.list .row .title { display:flex; align-items:center; gap:6px; font-size: 11.5px; font-weight: 500; }
+.list .row .title .ic { width: 11px; height: 11px; border: 1px solid var(--tf-faint-fg); }
+.list .row .vis { font-size: 10px; color: var(--tf-muted-fg); }
+.list .row .date { font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search documents</div></div>
+
+  <div class="toprow">
+    <h1>Library</h1>
+    <div style="display:flex; gap:8px;">
+      <div class="tabs"><div class="t on">Owned</div><div class="t">Shared</div></div>
+      <div class="tabs"><div class="t on">Files</div><div class="t">Folders</div></div>
+      <div class="actions"><div class="b primary">+ New document</div><div class="b">+ Folder</div></div>
+    </div>
+  </div>
+
+  <div class="body">
+    <aside class="nav">
+      <div class="item on"><div class="l"><div class="ic"></div>All documents</div><div class="ct">28</div></div>
+      <div class="item"><div class="l"><div class="ic"></div>Favorites</div><div class="ct">4</div></div>
+      <div class="item"><div class="l"><div class="ic"></div>Unfiled</div><div class="ct">9</div></div>
+      <div class="sep"></div>
+      <div class="item"><div class="l"><div class="ic"></div>Billing</div><div class="ct">5</div></div>
+      <div class="item"><div class="l"><div class="ic"></div>Infra</div><div class="ct">7</div></div>
+      <div class="item"><div class="l"><div class="ic"></div>Auth migration</div><div class="ct">3</div></div>
+      <div class="item"><div class="l"><div class="ic"></div>Frontend</div><div class="ct">4</div></div>
+    </aside>
+
+    <div class="list">
+      <div class="head"><div>Title</div><div>Visibility</div><div>Updated</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Stripe checkout wiring</div><div class="vis">Organization</div><div class="date">May 19, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Taskforce MCP metrics</div><div class="vis">Organization</div><div class="date">May 18, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Library sharing rollout</div><div class="vis">Private</div><div class="date">May 17, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Postgres RLS audit</div><div class="vis">Private</div><div class="date">May 17, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Auth0 → Clerk plan</div><div class="vis">Organization</div><div class="date">May 16, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Tailwind v4 token map</div><div class="vis">Private</div><div class="date">May 15, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>Playwright flake notes</div><div class="vis">Private</div><div class="date">May 14, 2026</div></div>
+      <div class="row"><div class="title"><div class="ic"></div>API error taxonomy</div><div class="vis">Organization</div><div class="date">May 13, 2026</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

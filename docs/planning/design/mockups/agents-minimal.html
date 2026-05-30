@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agents — minimal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; }
+
+.bar {
+  height: 36px; padding: 0 16px; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--tf-border);
+}
+.bar .b { font-weight: 600; font-size: 13px; letter-spacing: -0.01em; }
+.bar .sp { flex: 1; }
+.bar .search {
+  flex: 1; max-width: 260px; height: 22px; padding: 0 8px;
+  border: 1px solid var(--tf-border);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; color: var(--tf-muted-fg);
+  display: flex; align-items: center;
+}
+
+.head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 22px 22px 14px;
+  gap: 16px;
+}
+.head .eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--tf-faint-fg); margin-bottom: 4px;
+}
+.head h1 { margin: 0; font-size: 22px; letter-spacing: -0.022em; font-weight: 600; }
+.head .sub { margin-top: 4px; font-size: 11px; color: var(--tf-muted-fg); max-width: 50ch; line-height: 1.5; }
+.head .filters { display: flex; gap: 6px; }
+.head .filter {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 4px 8px; border: 1px solid var(--tf-border); color: var(--tf-muted-fg);
+}
+.head .filter.on { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+
+/* table-like list view, no rounded cards */
+.list {
+  margin: 0 22px 18px;
+  border-top: 1px solid var(--tf-border);
+}
+.row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 84px 96px;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 6px;
+  border-bottom: 1px solid var(--tf-hairline);
+}
+.row.head-row {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--tf-border);
+  background: var(--tf-card);
+}
+.cell-title .name { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+.cell-title .role { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 1px; }
+.cell-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px; padding: 1px 5px; border: 1px solid var(--tf-border); color: var(--tf-muted-fg);
+  letter-spacing: 0.02em;
+}
+.metric {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px; text-align: right;
+}
+.metric .k { font-size: 9px; color: var(--tf-faint-fg); margin-left: 4px; }
+.signal {
+  display: flex; align-items: center; gap: 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; color: var(--tf-muted-fg);
+  justify-content: flex-end;
+}
+.signal .dot { width: 6px; height: 6px; background: var(--tf-positive); }
+.signal .dot.cold { background: var(--tf-border); }
+
+/* Featured strip at top of list — like a focused 'top performer' */
+.feature {
+  margin: 0 22px 14px;
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0;
+  border: 1px solid var(--tf-border);
+}
+.feature .cell {
+  padding: 12px 14px;
+  border-right: 1px solid var(--tf-border);
+}
+.feature .cell:last-child { border-right: 0; }
+.feature .cell .k {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.feature .cell .v {
+  margin-top: 4px;
+  font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+}
+.feature .cell .v small { font-size: 11px; color: var(--tf-muted-fg); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <div class="head">
+    <div>
+      <div class="eyebrow">Agents · 7 active across team</div>
+      <h1>Specialists</h1>
+      <div class="sub">Reusable expertise packaged from your team's prior work. Routing, instructions, evidence, ROI.</div>
+    </div>
+    <div class="filters">
+      <span class="filter on">All</span>
+      <span class="filter">Mine</span>
+      <span class="filter">Org</span>
+      <span class="filter">+ New</span>
+    </div>
+  </div>
+
+  <section class="feature">
+    <div class="cell"><div class="k">This week</div><div class="v num">412K <small>tokens saved</small></div></div>
+    <div class="cell"><div class="k">Top performer</div><div class="v">Stripe Checkout</div></div>
+    <div class="cell"><div class="k">Idle &gt; 30d</div><div class="v num">2 <small>specialists</small></div></div>
+  </section>
+
+  <div class="list">
+    <div class="row head-row">
+      <div>Specialist</div>
+      <div>Routing tags</div>
+      <div style="text-align:right;">Saved · runs</div>
+      <div style="text-align:right;">Last used</div>
+    </div>
+
+    <div class="row">
+      <div class="cell-title"><div class="name">Stripe Checkout Specialist</div><div class="role">Billing &amp; subscriptions · @alex</div></div>
+      <div class="cell-tags"><span class="tag">stripe</span><span class="tag">billing</span><span class="tag">webhooks</span></div>
+      <div class="metric">142K <span class="k">· 28</span></div>
+      <div class="signal"><span class="dot"></span>2h ago</div>
+    </div>
+
+    <div class="row">
+      <div class="cell-title"><div class="name">Postgres Migrations</div><div class="role">Database · @ana</div></div>
+      <div class="cell-tags"><span class="tag">postgres</span><span class="tag">migrations</span><span class="tag">rls</span></div>
+      <div class="metric">87K <span class="k">· 14</span></div>
+      <div class="signal"><span class="dot"></span>Yesterday</div>
+    </div>
+
+    <div class="row">
+      <div class="cell-title"><div class="name">Auth0 → Clerk migration</div><div class="role">Identity · @jin</div></div>
+      <div class="cell-tags"><span class="tag">auth</span><span class="tag">clerk</span><span class="tag">jwt</span></div>
+      <div class="metric">64K <span class="k">· 9</span></div>
+      <div class="signal"><span class="dot"></span>3d ago</div>
+    </div>
+
+    <div class="row">
+      <div class="cell-title"><div class="name">Tailwind v4 upgrade rules</div><div class="role">Frontend · @alex</div></div>
+      <div class="cell-tags"><span class="tag">tailwind</span><span class="tag">css</span></div>
+      <div class="metric">41K <span class="k">· 11</span></div>
+      <div class="signal"><span class="dot cold"></span>18d ago</div>
+    </div>
+
+    <div class="row">
+      <div class="cell-title"><div class="name">Playwright flake triage</div><div class="role">QA · org-shared</div></div>
+      <div class="cell-tags"><span class="tag">playwright</span><span class="tag">flake</span></div>
+      <div class="metric">23K <span class="k">· 6</span></div>
+      <div class="signal"><span class="dot cold"></span>32d ago</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

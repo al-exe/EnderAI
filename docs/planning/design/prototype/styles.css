@@ -1,0 +1,786 @@
+/* ---------------------------------------------------------------
+   Taskforce Document — prototype styles
+   Sharp corners. Hairlines. Purple = Taskforce intelligence.
+   --------------------------------------------------------------- */
+
+:root {
+  --bg: #ffffff;
+  --bg-soft: oklch(0.985 0 0);
+  --bg-tint: oklch(0.97 0 0);
+  --bg-pane: oklch(0.99 0 0);
+  --fg: oklch(0.145 0 0);
+  --fg-soft: oklch(0.27 0 0);
+  --muted: oklch(0.48 0 0);
+  --faint: oklch(0.62 0 0);
+  --hint: oklch(0.78 0 0);
+  --border: oklch(0.88 0 0);
+  --hair: oklch(0.93 0 0);
+  --ink: oklch(0.18 0 0);
+  --primary: #8447ff;
+  --primary-fg: white;
+  --primary-soft: color-mix(in oklch, #8447ff 9%, white);
+  --primary-tint: color-mix(in oklch, #8447ff 16%, white);
+  --primary-ink: color-mix(in oklch, #8447ff 70%, black);
+  --primary-line: color-mix(in oklch, #8447ff 35%, var(--border));
+  --positive: oklch(0.55 0.13 155);
+  --warn: oklch(0.65 0.16 60);
+  --code-bg: oklch(0.96 0 0);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-feature-settings: "zero"; }
+.num  { font-variant-numeric: tabular-nums; }
+
+::selection { background: var(--primary); color: white; }
+
+/* ===================== Top bar ===================== */
+.appbar {
+  height: 44px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.appbar .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
+.appbar .brand .mk {
+  width: 18px; height: 18px;
+  background: url("../assets/tf-logo.svg") center / contain no-repeat;
+}
+.appbar .crumb {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; color: var(--faint); letter-spacing: 0.04em;
+}
+.appbar .crumb a { color: var(--faint); text-decoration: none; }
+.appbar .crumb .sep { padding: 0 6px; color: var(--hint); }
+.appbar .crumb .here { color: var(--fg); }
+.appbar .sp { flex: 1; }
+
+.appbar .search {
+  width: 240px; height: 26px;
+  border: 1px solid var(--border);
+  padding: 0 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+
+/* ===================== Doc header ===================== */
+.dochead {
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: end;
+}
+.dochead .left { min-width: 0; }
+.dochead .crumb {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--faint);
+}
+.dochead h1 {
+  margin: 6px 0 0;
+  font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1;
+}
+.dochead .desc {
+  margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.5; max-width: 72ch;
+}
+
+.meta-row {
+  margin-top: 12px;
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.meta-row b { color: var(--fg); font-weight: 500; }
+.meta-row .chip {
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 9.5px; letter-spacing: 0.14em;
+}
+.meta-row .chip.scope-org { color: var(--primary); border-color: var(--primary-line); }
+.meta-row .chip.scope-priv { color: var(--muted); }
+.meta-row .av {
+  width: 18px; height: 18px;
+  background: var(--bg-tint);
+  display: inline-grid; place-items: center;
+  font-size: 9px; font-weight: 600;
+  border: 1px solid var(--border);
+  margin-left: -3px;
+  color: var(--fg);
+}
+.meta-row .av:first-of-type { margin-left: 0; }
+.meta-row .avs { display: inline-flex; }
+
+.dochead .right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+
+/* segmented controls */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+}
+.seg .opt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.06em;
+  padding: 6px 12px;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+}
+.seg .opt:last-child { border-right: 0; }
+.seg .opt.on { background: var(--ink); color: white; border-right-color: var(--ink); }
+.seg .opt:not(.on):hover { background: var(--bg-soft); color: var(--fg); }
+.seg .opt .gh { width: 14px; height: 14px; opacity: 0.85; }
+
+.btn {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.btn:hover { background: var(--bg-soft); }
+.btn.solid { background: var(--ink); color: white; border-color: var(--ink); }
+.btn.solid:hover { background: black; }
+.btn.primary { background: var(--primary); color: white; border-color: var(--primary); }
+.btn.primary:hover { background: var(--primary-ink); }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--bg-soft); color: var(--fg); }
+
+/* ===================== Workspace ===================== */
+.workspace {
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  position: relative;
+}
+.workspace.summary { grid-template-columns: 1fr; }
+.workspace.details { grid-template-columns: 220px 1fr; }
+.workspace.split {
+  grid-template-columns:
+    var(--split-left, 1fr)
+    6px
+    var(--split-right, 1fr);
+}
+
+.pane {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: var(--bg);
+  position: relative;
+  scroll-behavior: smooth;
+}
+.pane::-webkit-scrollbar { width: 0; height: 0; }
+.pane { scrollbar-width: none; }
+
+.pane.summary-pane { border-right: 1px solid var(--border); }
+.pane.details-pane { background: var(--bg-pane); }
+
+.pane-head {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in oklch, var(--bg) 92%, transparent);
+  backdrop-filter: saturate(140%) blur(8px);
+  -webkit-backdrop-filter: saturate(140%) blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 22px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.pane-head .ttl {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--faint);
+  display: flex; align-items: center; gap: 8px;
+}
+.pane-head .ttl .dot { width: 6px; height: 6px; background: var(--primary); }
+.pane-head .ttl b { color: var(--fg); font-weight: 600; letter-spacing: 0.18em; }
+
+.pane-body {
+  padding: 22px 32px 60px;
+  max-width: 760px;
+}
+.workspace.summary .pane-body { margin: 0 auto; max-width: 720px; }
+.pane.details-pane .pane-body { max-width: 760px; }
+
+/* ===================== Summary content ===================== */
+.summary-content h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; margin: 12px 0 18px; }
+.summary-content h2 {
+  font-size: 15px; font-weight: 600; letter-spacing: -0.005em;
+  margin: 28px 0 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--faint);
+}
+.summary-content p {
+  font-size: 15.5px;
+  line-height: 1.65;
+  margin: 0 0 14px;
+  color: var(--fg-soft);
+  text-wrap: pretty;
+}
+.summary-content p strong, .summary-content p b { color: var(--fg); font-weight: 600; }
+.summary-content code, .details-content code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border: 1px solid var(--hair);
+  color: var(--ink);
+}
+
+/* anchor citation marker */
+.cite {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  padding: 0 4px;
+  margin: 0 1px;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary-line);
+  cursor: pointer;
+  vertical-align: 1px;
+  user-select: none;
+  transition: background 80ms ease;
+}
+.cite:hover { background: var(--primary-tint); }
+.cite.active { background: var(--primary); color: white; border-bottom-color: var(--primary); }
+.cite .glyph { display: inline-block; margin-right: 3px; opacity: 0.85; font-size: 9px; vertical-align: 1px; }
+
+/* selectable anchor target (when anchor mode) */
+.summary-content .anchorable { cursor: text; }
+.summary-content .pick {
+  background: color-mix(in oklch, var(--primary) 25%, transparent);
+  outline: 1px dashed var(--primary);
+  outline-offset: 1px;
+}
+
+/* ===================== Details rail (outline) ===================== */
+.outline {
+  border-right: 1px solid var(--border);
+  background: var(--bg-soft);
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  scrollbar-width: none;
+}
+.outline::-webkit-scrollbar { width: 0; }
+.outline .head {
+  position: sticky; top: 0;
+  padding: 12px 16px 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--faint);
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--hair);
+}
+.outline ul { list-style: none; padding: 6px 0; margin: 0; }
+.outline li { position: relative; }
+.outline li a {
+  display: flex; gap: 8px;
+  padding: 7px 16px 7px 18px;
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  line-height: 1.4;
+  align-items: baseline;
+}
+.outline li a:hover { background: var(--bg-tint); color: var(--fg); }
+.outline li a .id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--primary);
+  font-size: 11px;
+}
+.outline li.active a { background: var(--bg); color: var(--fg); border-left-color: var(--primary); font-weight: 500; }
+
+.outline .foot {
+  margin-top: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--hair);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+.outline .foot b { color: var(--fg); }
+
+/* In split view, outline collapses into a slim rail on the right */
+.split-outline-rail {
+  position: absolute;
+  right: 0; top: 50px; bottom: 0;
+  width: 16px;
+  display: none;
+}
+
+/* ===================== Details content ===================== */
+.details-content section {
+  scroll-margin-top: 56px;
+  padding: 18px 0 26px;
+  border-bottom: 1px solid var(--hair);
+  position: relative;
+}
+.details-content section.flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0%   { background: var(--primary-tint); }
+  100% { background: transparent; }
+}
+.details-content section:last-child { border-bottom: 0; }
+.details-content .sec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.details-content .sec-id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--primary);
+}
+.details-content .backrefs {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.06em; color: var(--faint);
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.details-content .backrefs .br {
+  padding: 1px 5px; border: 1px solid var(--border); color: var(--muted);
+}
+.details-content h2 {
+  font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 4px 0 12px;
+}
+.details-content h3 {
+  font-size: 14px; font-weight: 600; margin: 16px 0 8px;
+}
+.details-content p {
+  font-size: 14px; line-height: 1.6;
+  margin: 0 0 12px;
+  color: var(--fg-soft);
+}
+.details-content ul, .details-content ol {
+  font-size: 14px; line-height: 1.6; color: var(--fg-soft);
+  padding-left: 22px; margin: 0 0 12px;
+}
+.details-content li { margin-bottom: 4px; }
+
+.details-content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--hair);
+  padding: 12px 14px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px; line-height: 1.55;
+  margin: 6px 0 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.details-content pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+
+.details-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0 12px;
+  font-size: 13px;
+}
+.details-content th, .details-content td {
+  text-align: left;
+  border-bottom: 1px solid var(--hair);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.details-content th {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--faint);
+  font-weight: 500;
+  border-bottom-color: var(--border);
+}
+.details-content td code { font-size: 11.5px; }
+
+/* selectable anchor target in details */
+.details-content section.pickable .picked-range {
+  background: color-mix(in oklch, var(--primary) 25%, transparent);
+  outline: 1px dashed var(--primary);
+  outline-offset: 1px;
+}
+
+/* ===================== Resizer (split view) ===================== */
+.resizer {
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: col-resize;
+  position: relative;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1px; height: 28px;
+  background: var(--hint);
+}
+.resizer:hover { background: var(--bg-soft); }
+
+/* ===================== Editor toolbar ===================== */
+.toolbar {
+  position: sticky; top: 38px; z-index: 9;
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 14px;
+  margin: 0 -22px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--bg-soft) 95%, transparent);
+  backdrop-filter: blur(6px);
+}
+.toolbar .group { display: inline-flex; }
+.toolbar .group + .group { margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--hair); }
+.toolbar button {
+  background: transparent;
+  border: 0;
+  width: 28px; height: 26px;
+  display: inline-grid; place-items: center;
+  font-size: 12px; color: var(--muted);
+  cursor: pointer;
+}
+.toolbar button:hover { background: var(--bg-tint); color: var(--fg); }
+.toolbar button.on { background: var(--ink); color: white; }
+.toolbar .sep { width: 1px; height: 16px; background: var(--hair); margin: 0 4px; align-self: center; }
+.toolbar .saved {
+  margin-left: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; color: var(--faint); letter-spacing: 0.04em;
+}
+.toolbar .saved .dot { display: inline-block; width: 6px; height: 6px; background: var(--positive); margin-right: 6px; vertical-align: 1px; }
+
+/* ===================== Anchor mode floating ===================== */
+.anchor-bar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 18px;
+  z-index: 30;
+  background: var(--ink);
+  color: white;
+  border: 1px solid var(--ink);
+  display: grid;
+  grid-template-columns: auto 1fr 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  min-width: min(680px, 90%);
+  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.3);
+}
+.anchor-bar .kicker {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: color-mix(in oklch, white 70%, transparent);
+  display: flex; align-items: center; gap: 6px;
+}
+.anchor-bar .kicker .pulse {
+  width: 7px; height: 7px; background: var(--primary);
+}
+.anchor-bar .slot {
+  border: 1px dashed color-mix(in oklch, white 30%, transparent);
+  padding: 6px 10px;
+  min-height: 32px;
+  font-size: 12px;
+  color: color-mix(in oklch, white 80%, transparent);
+  position: relative;
+  font-family: "Geist", sans-serif;
+  line-height: 1.35;
+}
+.anchor-bar .slot .lbl {
+  position: absolute;
+  top: -8px; left: 8px;
+  background: var(--ink);
+  padding: 0 6px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--primary);
+}
+.anchor-bar .slot.filled {
+  border-style: solid;
+  border-color: var(--primary);
+  color: white;
+}
+.anchor-bar .actions { display: flex; gap: 6px; }
+.anchor-bar .btn.confirm {
+  background: var(--primary); color: white; border-color: var(--primary);
+}
+.anchor-bar .btn.confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+.anchor-bar .btn.cancel {
+  background: transparent; color: color-mix(in oklch, white 75%, transparent);
+  border-color: color-mix(in oklch, white 28%, transparent);
+}
+
+/* ===================== Hover preview popover ===================== */
+.cite-pop {
+  position: absolute;
+  z-index: 40;
+  width: 320px;
+  max-width: 360px;
+  background: var(--ink);
+  color: white;
+  padding: 12px 14px;
+  border: 1px solid var(--ink);
+  box-shadow: 0 10px 30px -10px rgba(0,0,0,0.35);
+  pointer-events: none;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.cite-pop .hd {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--primary); margin-bottom: 6px;
+}
+.cite-pop .body { color: color-mix(in oklch, white 90%, transparent); }
+.cite-pop .body code {
+  background: color-mix(in oklch, white 12%, transparent);
+  padding: 0 4px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.92em;
+  border: 1px solid color-mix(in oklch, white 14%, transparent);
+}
+.cite-pop .ft {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklch, white 14%, transparent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.08em;
+  color: color-mix(in oklch, white 60%, transparent);
+}
+
+/* ===================== Right-side metadata rail (Summary view) ===================== */
+.meta-rail {
+  position: absolute;
+  right: 22px;
+  top: 70px;
+  width: 220px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  display: none;
+}
+.workspace.summary .meta-rail { display: block; }
+.meta-rail .blk {
+  padding: 10px 0;
+  border-top: 1px solid var(--hair);
+}
+.meta-rail .blk:first-child { border-top: 0; }
+.meta-rail .k {
+  font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--faint);
+}
+.meta-rail .v { margin-top: 4px; color: var(--fg); font-size: 12.5px; }
+.meta-rail .v.big { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.meta-rail .v.pri { color: var(--primary); }
+
+/* Hide meta rail on narrow split views */
+@media (max-width: 1100px) { .meta-rail { display: none !important; } }
+
+/* ===================== Bottom inspector (cite click in Summary mode) ===================== */
+.cite-drawer {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 240px;
+  background: var(--bg);
+  border-top: 1px solid var(--primary-line);
+  box-shadow: 0 -10px 24px -16px rgba(0,0,0,0.18);
+  transform: translateY(100%);
+  transition: transform .22s ease;
+  display: flex; flex-direction: column;
+  z-index: 25;
+}
+.cite-drawer.open { transform: translateY(0); }
+.cite-drawer .head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--bg-soft);
+}
+.cite-drawer .head .l {
+  display: flex; align-items: center; gap: 10px;
+}
+.cite-drawer .head .id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--primary);
+}
+.cite-drawer .head h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.cite-drawer .head .actions { display: flex; gap: 6px; }
+.cite-drawer .body { padding: 12px 22px 18px; overflow: auto; flex: 1; }
+.cite-drawer .body { font-size: 13.5px; line-height: 1.55; }
+.cite-drawer .body p { margin: 0 0 8px; color: var(--fg-soft); }
+.cite-drawer .body code, .cite-drawer .body pre { font-size: 12px; }
+.cite-drawer .body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--hair);
+  padding: 10px 12px;
+  margin: 4px 0 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  overflow: auto;
+}
+
+/* ===================== Inline summary editor look ===================== */
+.summary-content[contenteditable="true"],
+.details-content [contenteditable="true"] {
+  outline: none;
+}
+.editing .summary-content { caret-color: var(--primary); }
+.editing .summary-content p:focus,
+.editing .summary-content h2:focus,
+.editing .summary-content h1:focus {
+  background: color-mix(in oklch, var(--primary) 5%, transparent);
+}
+
+/* tiny key hints */
+.kbd {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--bg-soft);
+}
+
+/* utility */
+.row { display: flex; align-items: center; gap: 8px; }
+.gap-2 { gap: 8px; }
+.flex { display: flex; }
+.flex1 { flex: 1; }
+
+.app {
+  height: 100vh;
+  display: flex; flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* loading state — placeholder before React mounts.
+   No font-family here; the class is cleared on mount so this rule
+   only applies to the initial text node. */
+.boot {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+}
+
+/* =====================================================================
+   Dark mode
+   - bg/fg/border tokens flip
+   - --ink stays dark (it's the semantic "always-contrast" surface used by
+     popovers, anchor bar, primary buttons, segmented control's ON state)
+   - Brighten primary slightly for legibility on dark
+   ===================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:         oklch(0.135 0 0);
+    --bg-soft:    oklch(0.175 0 0);
+    --bg-tint:    oklch(0.22 0 0);
+    --bg-pane:    oklch(0.155 0 0);
+    --fg:         oklch(0.96 0 0);
+    --fg-soft:    oklch(0.86 0 0);
+    --muted:      oklch(0.66 0 0);
+    --faint:      oklch(0.5 0 0);
+    --hint:       oklch(0.4 0 0);
+    --border:     oklch(0.28 0 0);
+    --hair:       oklch(0.22 0 0);
+    --ink:        oklch(0.08 0 0);   /* even darker — it's contrast surface */
+    --primary:    #a574ff;
+    --primary-fg: white;
+    --primary-soft: color-mix(in oklch, #a574ff 18%, oklch(0.135 0 0));
+    --primary-tint: color-mix(in oklch, #a574ff 30%, oklch(0.135 0 0));
+    --primary-ink:  color-mix(in oklch, #a574ff 78%, white);
+    --primary-line: color-mix(in oklch, #a574ff 50%, var(--border));
+    --code-bg:    oklch(0.21 0 0);
+  }
+
+  body { background: var(--bg); color: var(--fg); }
+  ::selection { background: var(--primary); color: oklch(0.13 0 0); }
+
+  /* code blocks need a subtle border lift on dark */
+  .summary-content code, .details-content code,
+  .cite-drawer .body code { border-color: var(--border); }
+  .details-content pre, .cite-drawer .body pre { border-color: var(--border); }
+
+  /* outline rail — softer contrast on dark */
+  .outline { background: var(--bg-soft); }
+  .outline .head { background: var(--bg-soft); border-bottom-color: var(--hair); }
+  .outline li.active a { background: var(--bg); }
+
+  /* the segmented control's ON state and primary buttons —
+     in dark mode, switch from "dark ink" to "purple" so they read */
+  .seg .opt.on { background: var(--primary); color: white; border-right-color: var(--primary); }
+  .btn.solid   { background: var(--primary); color: white; border-color: var(--primary); }
+  .btn.solid:hover { background: var(--primary-ink); }
+
+  /* citation chip — keep purple, but soften the soft bg */
+  .cite { color: var(--primary); background: var(--primary-soft); border-bottom-color: var(--primary-line); }
+  .cite.active { background: var(--primary); color: white; }
+
+  /* anchor bar + popover stay dark (they ARE the "elevated chrome" already) —
+     just adjust their internal border to be visible against dark bg */
+  .anchor-bar, .cite-pop {
+    border-color: color-mix(in oklch, white 14%, var(--ink));
+    box-shadow: 0 8px 30px -8px rgba(0,0,0,0.6);
+  }
+  .anchor-bar .slot .lbl, .anchor-bar .kicker { background: var(--ink); }
+  .anchor-bar .slot { border-color: color-mix(in oklch, white 22%, transparent); }
+  .anchor-bar .slot.filled { border-color: var(--primary); }
+
+  /* cite drawer surfaces on dark */
+  .cite-drawer { background: var(--bg-pane); border-top-color: var(--primary-line); }
+  .cite-drawer .head { background: var(--bg-soft); border-bottom-color: var(--hair); }
+
+  /* pane-head backdrop on dark */
+  .pane-head { background: color-mix(in oklch, var(--bg) 88%, transparent); }
+  .toolbar   { background: color-mix(in oklch, var(--bg-soft) 92%, transparent); }
+  .toolbar button.on { background: var(--primary); color: white; }
+
+  /* meta rail — keep numbers legible */
+  .meta-rail .v.pri { color: var(--primary); }
+
+  /* flash on jump — purple wash, dark-tuned */
+  @keyframes flash {
+    0%   { background: var(--primary-tint); }
+    100% { background: transparent; }
+  }
+
+  /* details section dividers a tad more visible */
+  .details-content section { border-bottom-color: var(--hair); }
+
+  /* tables on dark */
+  .details-content th { border-bottom-color: var(--border); }
+}

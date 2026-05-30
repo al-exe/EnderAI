@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Metrics — current</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 14px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:180px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.pad { padding: 14px 16px; flex: 1; }
+.toprow { display:flex; align-items:center; justify-content:space-between; }
+.toprow h1 { margin:0; font-size: 18px; font-weight:600; letter-spacing:-0.01em; }
+.toprow .sub { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 2px; }
+.toprow .range { display:flex; gap: 4px; padding: 2px; background: var(--tf-card-2); border-radius: 6px; }
+.toprow .range .r { padding: 3px 8px; font-size: 10px; color: var(--tf-muted-fg); border-radius: 4px; font-family:"JetBrains Mono",monospace; }
+.toprow .range .r.on { background: white; color: var(--tf-fg); box-shadow: 0 1px 0 var(--tf-border); }
+
+.grid3 { display:grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 12px; }
+.kpi { border: 1px solid var(--tf-border); border-radius: 8px; padding: 12px 14px; background: white; box-shadow: 0 1px 0 var(--tf-border); }
+.kpi .k { font-size: 10px; color: var(--tf-muted-fg); }
+.kpi .v { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.kpi .delta { font-size: 10px; color: var(--tf-positive); margin-top: 2px; }
+.kpi .delta.cold { color: var(--tf-muted-fg); }
+
+.row2 { display:grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 10px; }
+.panel { border: 1px solid var(--tf-border); border-radius: 8px; background: white; padding: 12px 14px; box-shadow: 0 1px 0 var(--tf-border); }
+.panel h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; }
+
+.chart { height: 140px; position: relative; }
+.chart svg { width: 100%; height: 100%; }
+
+.list { display:flex; flex-direction:column; gap: 6px; }
+.list .r { display:flex; align-items:center; justify-content:space-between; padding: 6px 0; font-size: 11px; border-bottom: 1px solid var(--tf-hairline); }
+.list .r:last-child { border-bottom: 0; }
+.list .r .v { font-family:"JetBrains Mono",monospace; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search documents</div></div>
+  <div class="pad">
+    <div class="toprow">
+      <div>
+        <h1>Metrics</h1>
+        <div class="sub">Token savings across your team's Taskforce activity.</div>
+      </div>
+      <div class="range"><div class="r">24h</div><div class="r on">7d</div><div class="r">30d</div><div class="r">90d</div></div>
+    </div>
+
+    <div class="grid3">
+      <div class="kpi"><div class="k">Tokens saved</div><div class="v num">412,840</div><div class="delta">+22.1% vs prev</div></div>
+      <div class="kpi"><div class="k">Reuses</div><div class="v num">128</div><div class="delta">+14 vs prev</div></div>
+      <div class="kpi"><div class="k">Active specialists</div><div class="v num">7</div><div class="delta cold">unchanged</div></div>
+    </div>
+
+    <div class="row2">
+      <div class="panel">
+        <h3>Tokens saved per day</h3>
+        <div class="chart">
+          <svg viewBox="0 0 400 140" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#8447ff" stroke-width="1.6" points="0,110 50,98 100,80 150,86 200,60 250,48 300,55 350,30 400,22"/>
+            <polyline fill="rgba(132,71,255,0.10)" stroke="none" points="0,110 50,98 100,80 150,86 200,60 250,48 300,55 350,30 400,22 400,140 0,140"/>
+          </svg>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Top docs (7d)</h3>
+        <div class="list">
+          <div class="r"><span>Stripe checkout wiring</span><span class="v">142K</span></div>
+          <div class="r"><span>Postgres RLS audit</span><span class="v">87K</span></div>
+          <div class="r"><span>Auth0 → Clerk plan</span><span class="v">64K</span></div>
+          <div class="r"><span>Tailwind v4 token map</span><span class="v">41K</span></div>
+          <div class="r"><span>Playwright flake</span><span class="v">23K</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
