@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agents — current</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+/* Faithful rendering of /v2/agents as it stands today */
+.canvas {
+  background: radial-gradient(circle at 8% 5%, rgba(245,158,11,0.12), transparent 32%),
+              radial-gradient(circle at 90% 95%, rgba(20,184,166,0.12), transparent 34%),
+              white;
+  font-size: 11px;
+}
+.hero-card {
+  margin: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--tf-border);
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(6px);
+  border-radius: 16px;
+  box-shadow: 0 1px 0 var(--tf-border);
+}
+.hero-card .eye {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 8.5px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--tf-primary); font-weight: 600;
+}
+.hero-card h1 {
+  margin: 8px 0 6px;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  font-weight: 600;
+}
+.hero-card p { margin: 0; font-size: 10.5px; color: var(--tf-muted-fg); line-height: 1.55; }
+
+.grid {
+  margin: 4px 14px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.agent-card {
+  position: relative;
+  border: 1px solid var(--tf-border);
+  background: white;
+  padding: 12px;
+  border-radius: 12px;
+  box-shadow: 0 1px 0 var(--tf-border);
+  overflow: hidden;
+}
+.agent-card::before {
+  content: "";
+  position: absolute; left: 0; right: 0; top: 0; height: 3px;
+  background: linear-gradient(90deg, #fbbf24, #34d399, #38bdf8);
+  opacity: 0.85;
+}
+.agent-card .row1 { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.agent-card .sparkle {
+  width: 22px; height: 22px;
+  border-radius: 10px;
+  background: color-mix(in oklch, #8447ff 14%, white);
+  color: var(--tf-primary);
+  display: grid; place-items: center;
+  font-size: 12px;
+}
+.agent-card h3 { margin: 6px 0 2px; font-size: 13.5px; letter-spacing: -0.01em; font-weight: 600; }
+.agent-card .role { font-size: 9.5px; color: var(--tf-muted-fg); }
+.agent-card .desc { margin-top: 6px; font-size: 9.5px; color: var(--tf-muted-fg); line-height: 1.5; min-height: 24px; }
+.agent-card .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.agent-card .tag { font-size: 8px; padding: 1px 5px; border-radius: 999px; background: var(--tf-card-2); color: var(--tf-muted-fg); }
+.agent-card .stats {
+  margin-top: 8px;
+  display: grid; grid-template-columns: repeat(3,1fr);
+  background: color-mix(in oklch, var(--tf-card-2) 70%, white);
+  border-radius: 10px;
+  padding: 6px;
+  gap: 4px;
+}
+.agent-card .stats .v { font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.agent-card .stats .k { font-size: 8.5px; color: var(--tf-muted-fg); }
+.agent-card .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 9px; color: var(--tf-muted-fg); }
+.agent-card .foot .btn { padding: 3px 7px; border: 1px solid var(--tf-border); border-radius: 6px; font-size: 9px; color: var(--tf-fg); }
+.status {
+  font-size: 8px; padding: 1px 5px; border: 1px solid var(--tf-border); border-radius: 999px; color: var(--tf-muted-fg);
+}
+</style>
+</head>
+<body>
+<div class="canvas" style="flex-direction:column;">
+  <div style="display:flex; height:36px; align-items:center; padding:0 14px; gap:10px; border-bottom: 1px solid var(--tf-border); background: rgba(255,255,255,0.7); backdrop-filter: blur(8px);">
+    <div style="font-weight:600; font-size:13px; display:inline-flex; align-items:center;"><span class="tf-mark"></span>Taskforce</div>
+    <div style="flex:1"></div>
+    <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; color: var(--tf-muted-fg);">Search documents</div>
+    <div style="width:22px;height:22px;border-radius:999px; background: var(--tf-card-2);"></div>
+  </div>
+
+  <section class="hero-card">
+    <div class="eye">Taskforce command center</div>
+    <h1>Reusable AI specialists</h1>
+    <p>Specialists package your best prior work into repeatable expertise: routing triggers, operating instructions, linked knowledge, and proof that reuse paid off.</p>
+  </section>
+
+  <div class="grid">
+    <article class="agent-card">
+      <div class="row1">
+        <div class="sparkle">✦</div>
+        <span class="status">Active</span>
+      </div>
+      <h3>Stripe Checkout Specialist</h3>
+      <div class="role">Billing &amp; subscriptions</div>
+      <div class="desc">Knows price IDs, webhooks, refund flows, and the team's tax assumptions.</div>
+      <div class="tags"><span class="tag">stripe</span><span class="tag">billing</span><span class="tag">webhooks</span></div>
+      <div class="stats">
+        <div><div class="v">142K</div><div class="k">saved</div></div>
+        <div><div class="v">28</div><div class="k">runs</div></div>
+        <div><div class="v">12</div><div class="k">docs</div></div>
+      </div>
+      <div class="foot"><span>2h ago</span><span class="btn">View specialist ›</span></div>
+    </article>
+
+    <article class="agent-card">
+      <div class="row1">
+        <div class="sparkle">✦</div>
+        <span class="status">Active</span>
+      </div>
+      <h3>Postgres Migrations</h3>
+      <div class="role">Database &amp; schema</div>
+      <div class="desc">Long-running migrations, RLS rules, and the team's idempotency conventions.</div>
+      <div class="tags"><span class="tag">postgres</span><span class="tag">migrations</span><span class="tag">rls</span></div>
+      <div class="stats">
+        <div><div class="v">87K</div><div class="k">saved</div></div>
+        <div><div class="v">14</div><div class="k">runs</div></div>
+        <div><div class="v">7</div><div class="k">docs</div></div>
+      </div>
+      <div class="foot"><span>Yesterday</span><span class="btn">View specialist ›</span></div>
+    </article>
+  </div>
+</div>
+
+<!-- Callouts (overlaid by the parent doc, but useful here for solo view) -->
+</body>
+</html>

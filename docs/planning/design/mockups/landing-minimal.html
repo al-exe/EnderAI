@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Landing — minimal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { padding: 12px 20px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px solid var(--tf-hairline); }
+.bar .b { font-weight: 600; font-size: 14px; display:flex; align-items:center; gap: 8px; }
+.bar .nav { display:flex; gap: 14px; align-items:center; font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.04em; color: var(--tf-muted-fg); }
+.bar .nav .a.solid { background: var(--tf-ink); color: white; padding: 5px 10px; }
+
+.wrap { padding: 36px 22px 14px; max-width: 920px; }
+.wrap .eye {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--tf-primary); font-weight: 500;
+}
+.wrap h1 {
+  margin: 14px 0 0;
+  font-size: 52px;
+  line-height: 0.98;
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+.wrap h1 em { font-style: normal; color: var(--em-color, var(--tf-primary)); }
+.wrap .lede { margin: 18px 0 0; font-size: 14px; line-height: 1.55; max-width: 56ch; color: var(--tf-muted-fg); text-wrap: pretty; }
+.wrap .lede b { color: var(--tf-fg); font-weight: 500; }
+.wrap .ctas { margin: 22px 0 0; display: flex; gap: 8px; align-items: center; }
+.wrap .ctas .c { font-family:"JetBrains Mono",monospace; font-size: 11px; letter-spacing: 0.04em; padding: 8px 14px; border: 1px solid var(--tf-ink); }
+.wrap .ctas .c.solid { background: var(--tf-ink); color: white; }
+.wrap .ctas .micro { font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg); }
+
+.proof {
+  margin: 22px 22px 0;
+  display: grid; grid-template-columns: repeat(4,1fr);
+  border-top: 1px solid var(--tf-border);
+  border-bottom: 1px solid var(--tf-border);
+}
+.proof .c { padding: 12px 16px 14px; border-right: 1px solid var(--tf-border); }
+.proof .c:last-child { border-right: 0; }
+.proof .k { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.proof .v { margin-top: 4px; font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -0.015em; }
+.proof .sub { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-muted-fg); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="nav"><span>Docs</span><span>Pricing</span><span>Log in</span><span class="a solid">Sign up</span></div>
+  </div>
+
+  <section class="wrap">
+    <div class="eye">AI work memory · for engineering teams</div>
+    <h1>Taskforce <em>remembers</em> what you and your team already did.</h1>
+    <p class="lede">Taskforce captures decisions from Claude Code, Codex, and Cursor, stores them as searchable <b>documents</b>, and replays them as context to your next prompt. Engineers stop re-explaining the codebase to every new chat.</p>
+    <div class="ctas">
+      <div class="c solid">Start free →</div>
+      <div class="c">Watch 90s demo</div>
+      <div class="micro">no credit card · works with claude code, codex, cursor, mcp</div>
+    </div>
+  </section>
+
+  <section class="proof">
+    <div class="c"><div class="k">Avg tokens saved / week</div><div class="v num">412K</div><div class="sub">across pilot teams · 5–12 engineers</div></div>
+    <div class="c"><div class="k">Rediscovery avoided</div><div class="v num">73%</div><div class="sub">of repeat questions resolved from memory</div></div>
+    <div class="c"><div class="k">Setup time</div><div class="v num">4 min</div><div class="sub">connect MCP, point at repo, done</div></div>
+    <div class="c"><div class="k">Works with</div><div class="v" style="font-size: 14px;">Claude Code · Codex · Cursor</div><div class="sub">team library, shared across machines</div></div>
+  </section>
+</div>
+<!-- ==================== TWEAKS PANEL ==================== -->
+<style>
+#tf-tweaks {
+  position: fixed; right: 18px; bottom: 18px;
+  width: 290px; max-height: calc(100vh - 36px);
+  background: white; border: 1px solid var(--tf-ink);
+  box-shadow: 0 12px 32px -10px rgba(0,0,0,0.22);
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px; color: var(--tf-fg);
+  z-index: 9999;
+  display: none; flex-direction: column;
+  user-select: none;
+}
+#tf-tweaks.open { display: flex; }
+#tf-tweaks .h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 14px; background: var(--tf-ink); color: white;
+}
+#tf-tweaks .h .ttl {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family:"JetBrains Mono",monospace; font-size: 10px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+}
+#tf-tweaks .h .ttl .d { width: 7px; height: 7px; background: var(--tf-primary); }
+#tf-tweaks .h .x {
+  background: transparent; border: 0; color: white; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px;
+}
+#tf-tweaks .b {
+  padding: 12px 14px 14px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+#tf-tweaks .grp {
+  font-family:"JetBrains Mono",monospace; font-size: 9px;
+  letter-spacing: 0.18em; text-transform: uppercase; color: var(--tf-faint-fg);
+  border-top: 1px solid var(--tf-hairline);
+  padding-top: 10px; margin-top: 2px;
+}
+#tf-tweaks .grp:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+#tf-tweaks .row { display: flex; flex-direction: column; gap: 5px; }
+#tf-tweaks .row .l {
+  font-family:"JetBrains Mono",monospace; font-size: 9px;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--tf-faint-fg);
+}
+#tf-tweaks input[type="text"], #tf-tweaks textarea {
+  font-family: inherit; font-size: 11.5px;
+  padding: 6px 8px; border: 1px solid var(--tf-border);
+  background: white; color: var(--tf-fg); outline: none;
+  width: 100%; box-sizing: border-box;
+}
+#tf-tweaks input[type="text"]:focus, #tf-tweaks textarea:focus { border-color: var(--tf-ink); }
+#tf-tweaks textarea { resize: vertical; min-height: 60px; line-height: 1.45; }
+#tf-tweaks .seg { display: flex; }
+#tf-tweaks .seg .o {
+  flex: 1; padding: 5px 6px; cursor: pointer; background: white;
+  font-family:"JetBrains Mono",monospace; font-size: 10px;
+  letter-spacing: 0.04em; text-align: center;
+  border: 1px solid var(--tf-border); border-right: 0; color: var(--tf-muted-fg);
+}
+#tf-tweaks .seg .o:last-child { border-right: 1px solid var(--tf-border); }
+#tf-tweaks .seg .o.on {
+  background: var(--tf-ink); color: white; border-color: var(--tf-ink);
+}
+#tf-tweaks .toggle {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 11.5px;
+}
+#tf-tweaks .toggle input {
+  appearance: none; -webkit-appearance: none;
+  width: 28px; height: 16px; border-radius: 999px;
+  background: var(--tf-border); position: relative; cursor: pointer;
+  transition: background .15s ease;
+}
+#tf-tweaks .toggle input::before {
+  content: ""; position: absolute; left: 2px; top: 2px;
+  width: 12px; height: 12px; border-radius: 999px; background: white;
+  transition: transform .15s ease;
+}
+#tf-tweaks .toggle input:checked { background: var(--tf-primary); }
+#tf-tweaks .toggle input:checked::before { transform: translateX(12px); }
+#tf-tweaks .swatches { display: flex; gap: 6px; }
+#tf-tweaks .swatches .sw {
+  width: 26px; height: 26px; cursor: pointer; position: relative;
+  border: 1px solid var(--tf-border);
+}
+#tf-tweaks .swatches .sw.on { outline: 2px solid var(--tf-ink); outline-offset: 2px; }
+#tf-tweaks .ft {
+  padding: 9px 14px; border-top: 1px solid var(--tf-hairline);
+  font-family:"JetBrains Mono",monospace; font-size: 9px;
+  letter-spacing: 0.1em; color: var(--tf-faint-fg);
+  display: flex; align-items: center; justify-content: space-between;
+}
+#tf-tweaks .ft button {
+  background: transparent; border: 0; color: var(--tf-fg); cursor: pointer;
+  font-family: inherit; font-size: 9px; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 0;
+}
+#tf-tweaks .ft button:hover { color: var(--tf-primary); }
+</style>
+
+<div id="tf-tweaks" aria-label="Tweaks">
+  <div class="h">
+    <span class="ttl"><span class="d"></span>Tweaks</span>
+    <button class="x" type="button" title="Close">×</button>
+  </div>
+  <div class="b"></div>
+  <div class="ft">
+    <span>landing · minimal</span>
+    <button type="button" data-action="reset">Reset</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  // --- Defaults ---------------------------------------------------------
+  const DEFAULTS = /*EDITMODE-BEGIN*/{
+    "headline": "Taskforce <em>remembers</em> what you and your team already did.",
+    "eyebrow": "AI work memory · for engineering teams",
+    "lede": "Taskforce captures decisions from Claude Code, Codex, and Cursor, stores them as searchable <b>documents</b>, and replays them as context to your next prompt. Engineers stop re-explaining the codebase to every new chat.",
+    "primaryCta": "Start free →",
+    "secondaryCta": "Watch 90s demo",
+    "microCaption": "no credit card · works with Claude Code, Codex, Cursor",
+    "showProof": true,
+    "proofCols": 4,
+    "emColor": "#8447ff"
+  }/*EDITMODE-END*/;
+
+  let state = Object.assign({}, DEFAULTS);
+
+  // --- Apply state to the page -----------------------------------------
+  const $ = (s) => document.querySelector(s);
+  function apply() {
+    $(".wrap h1").innerHTML = state.headline;
+    $(".wrap .eye").textContent = state.eyebrow;
+    $(".wrap .lede").innerHTML = state.lede;
+    $(".wrap .ctas .c.solid").textContent = state.primaryCta;
+    $(".wrap .ctas .c:not(.solid)").textContent = state.secondaryCta;
+    $(".wrap .ctas .micro").textContent = state.microCaption;
+    const proof = $(".proof");
+    proof.style.display = state.showProof ? "" : "none";
+    proof.style.gridTemplateColumns = `repeat(${state.proofCols}, 1fr)`;
+    document.documentElement.style.setProperty("--em-color", state.emColor);
+  }
+
+  function set(partial) {
+    Object.assign(state, partial);
+    apply();
+    try {
+      window.parent.postMessage({ type: "__edit_mode_set_keys", edits: partial }, "*");
+    } catch (e) {}
+  }
+
+  // --- Build panel controls --------------------------------------------
+  const SWATCHES = ["#8447ff", "#5b3dd1", "#c948c0", "#111111"];
+  const panel = document.getElementById("tf-tweaks");
+  const body = panel.querySelector(".b");
+
+  function render() {
+    body.innerHTML = "";
+    const add = (html) => {
+      const wrap = document.createElement("div");
+      wrap.innerHTML = html;
+      body.appendChild(wrap.firstElementChild);
+    };
+
+    add(`<div class="grp">Copy</div>`);
+    add(`<div class="row"><span class="l">Headline (supports &lt;em&gt;)</span>
+         <textarea data-key="headline">${escape(state.headline)}</textarea></div>`);
+    add(`<div class="row"><span class="l">Eyebrow</span>
+         <input type="text" data-key="eyebrow" value="${attr(state.eyebrow)}"></div>`);
+    add(`<div class="row"><span class="l">Lede (supports &lt;b&gt;)</span>
+         <textarea data-key="lede">${escape(state.lede)}</textarea></div>`);
+    add(`<div class="row"><span class="l">Primary CTA</span>
+         <input type="text" data-key="primaryCta" value="${attr(state.primaryCta)}"></div>`);
+    add(`<div class="row"><span class="l">Secondary CTA</span>
+         <input type="text" data-key="secondaryCta" value="${attr(state.secondaryCta)}"></div>`);
+    add(`<div class="row"><span class="l">Micro caption</span>
+         <input type="text" data-key="microCaption" value="${attr(state.microCaption)}"></div>`);
+
+    add(`<div class="grp">Layout</div>`);
+    add(`<div class="row"><span class="l">Proof strip</span>
+         <label class="toggle"><input type="checkbox" data-key="showProof" ${state.showProof ? "checked" : ""}>
+         <span>Show the four-stat strip</span></label></div>`);
+    add(`<div class="row"><span class="l">Proof columns</span>
+         <div class="seg" data-key="proofCols">
+           <div class="o${state.proofCols === 2 ? " on" : ""}" data-val="2">2</div>
+           <div class="o${state.proofCols === 3 ? " on" : ""}" data-val="3">3</div>
+           <div class="o${state.proofCols === 4 ? " on" : ""}" data-val="4">4</div>
+         </div></div>`);
+
+    add(`<div class="grp">Emphasis color</div>`);
+    add(`<div class="row"><span class="l">Headline <em>em</em> accent</span>
+         <div class="swatches" data-key="emColor">
+           ${SWATCHES.map(c =>
+             `<div class="sw${state.emColor === c ? " on" : ""}" data-val="${c}" style="background:${c}" title="${c}"></div>`
+           ).join("")}
+         </div></div>`);
+  }
+  function escape(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function attr(s)   { return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;"); }
+
+  // --- Wire up control events ------------------------------------------
+  body.addEventListener("input", (ev) => {
+    const t = ev.target;
+    if (t.matches("input[type='text'], textarea")) {
+      set({ [t.dataset.key]: t.value });
+    } else if (t.matches("input[type='checkbox']")) {
+      set({ [t.dataset.key]: t.checked });
+    }
+  });
+  body.addEventListener("click", (ev) => {
+    const seg = ev.target.closest(".seg .o");
+    if (seg) {
+      const key = seg.parentElement.dataset.key;
+      const v = Number(seg.dataset.val);
+      set({ [key]: v });
+      seg.parentElement.querySelectorAll(".o").forEach(o => o.classList.toggle("on", o === seg));
+      return;
+    }
+    const sw = ev.target.closest(".swatches .sw");
+    if (sw) {
+      const key = sw.parentElement.dataset.key;
+      set({ [key]: sw.dataset.val });
+      sw.parentElement.querySelectorAll(".sw").forEach(s => s.classList.toggle("on", s === sw));
+    }
+  });
+
+  // close & reset
+  panel.querySelector(".h .x").addEventListener("click", () => {
+    panel.classList.remove("open");
+    try { window.parent.postMessage({ type: "__edit_mode_dismissed" }, "*"); } catch (e) {}
+  });
+  panel.querySelector(".ft button[data-action='reset']").addEventListener("click", () => {
+    state = Object.assign({}, DEFAULTS);
+    apply(); render();
+    try { window.parent.postMessage({ type: "__edit_mode_set_keys", edits: DEFAULTS }, "*"); } catch (e) {}
+  });
+
+  // --- Protocol: register listener BEFORE announcing -------------------
+  window.addEventListener("message", (ev) => {
+    const d = ev.data || {};
+    if (d.type === "__activate_edit_mode") panel.classList.add("open");
+    else if (d.type === "__deactivate_edit_mode") panel.classList.remove("open");
+  });
+
+  // Initial paint, then announce
+  apply();
+  render();
+  try { window.parent.postMessage({ type: "__edit_mode_available" }, "*"); } catch (e) {}
+})();
+</script>
+
+</body>
+</html>

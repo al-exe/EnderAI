@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Landing — current</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { padding: 12px 20px; display:flex; align-items:center; justify-content:space-between; }
+.bar .b { font-weight: 600; font-size: 14px; }
+.bar .nav { display:flex; gap: 4px; }
+.bar .btn { padding: 4px 10px; font-size: 10.5px; border-radius: 6px; }
+.bar .btn.ghost { color: var(--tf-muted-fg); }
+.bar .btn.solid { background: var(--tf-ink); color: white; }
+
+.hero { padding: 28px 28px 18px; max-width: 760px; }
+.hero .eye { font-size: 10.5px; color: var(--tf-muted-fg); margin-bottom: 6px; }
+.hero h1 { margin: 0; font-size: 44px; font-weight: 600; line-height: 1.04; letter-spacing: -0.022em; }
+.hero p { margin: 14px 0 0; font-size: 12.5px; color: var(--tf-muted-fg); line-height: 1.55; max-width: 56ch; }
+.hero .ctas { margin-top: 16px; display: flex; gap: 8px; }
+.hero .cta { padding: 8px 14px; font-size: 11.5px; border-radius: 6px; }
+.hero .cta.solid { background: var(--tf-ink); color: white; }
+.hero .cta.outline { border: 1px solid var(--tf-border); }
+
+.preview { margin: 6px 20px 20px; border: 1px solid var(--tf-border); border-radius: 8px; background: white; overflow: hidden; box-shadow: 0 1px 0 var(--tf-border); }
+.preview .grid { display:grid; grid-template-columns: 200px 1fr; }
+.preview .side { background: oklch(0.97 0 0); padding: 14px; border-right: 1px solid var(--tf-border); }
+.preview .side .br { font-weight: 600; font-size: 14px; }
+.preview .side .li { display:flex; align-items:center; gap:8px; padding: 5px 8px; font-size: 11px; color: var(--tf-muted-fg); border-radius: 6px; margin-top: 4px; }
+.preview .side .li .ic { width: 11px; height: 11px; background: var(--tf-faint-fg); }
+.preview .main { padding: 14px 16px; }
+.preview .main .row { display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 1px solid var(--tf-border); padding-bottom: 8px; }
+.preview .main .row h2 { margin: 0; font-size: 18px; }
+.preview .main .row .lbl { font-size: 11px; color: var(--tf-muted-fg); }
+.preview .main .row .meta { font-size: 11px; color: var(--tf-muted-fg); }
+.preview .docs { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.preview .docs .d { border: 1px solid var(--tf-border); border-radius: 6px; padding: 10px 12px; display:grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+.preview .docs .d .ti { font-size: 12px; font-weight: 500; }
+.preview .docs .d .sm { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 2px; }
+.preview .docs .d .sig { font-size: 10.5px; color: var(--tf-muted-fg); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="nav"><div class="btn ghost">Log in</div><div class="btn solid">Sign up</div></div>
+  </div>
+
+  <section class="hero">
+    <div class="eye">AI work memory for builders</div>
+    <h1><span class="tf-mark"></span>Taskforce</h1>
+    <p>Keep agent work in a searchable Library, reuse prior decisions as context, and measure the time and tokens Taskforce saves along the way.</p>
+    <div class="ctas">
+      <div class="cta solid">Start with Taskforce →</div>
+      <div class="cta outline">Open Library</div>
+    </div>
+  </section>
+
+  <section class="preview">
+    <div class="grid">
+      <div class="side">
+        <div class="br"><span class="tf-mark"></span>Taskforce</div>
+        <div class="li"><div class="ic"></div>Search</div>
+        <div class="li"><div class="ic"></div>Library</div>
+        <div class="li"><div class="ic"></div>Agents</div>
+        <div class="li"><div class="ic"></div>Metrics</div>
+      </div>
+      <div class="main">
+        <div class="row"><div><div class="lbl">Library</div><h2>Recent work</h2></div><div class="meta">73% rediscovery avoided this week</div></div>
+        <div class="docs">
+          <div class="d"><div><div class="ti">Stripe checkout wiring</div><div class="sm">Subscription decisions, price IDs, and validation notes</div></div><div class="sig">Updated today</div></div>
+          <div class="d"><div><div class="ti">Taskforce MCP metrics</div><div class="sm">Usage events, token savings, and methodology details</div></div><div class="sig">Reused 4 times</div></div>
+          <div class="d"><div><div class="ti">Library sharing rollout</div><div class="sm">Organization access, folders, and document permissions</div></div><div class="sig">Shared</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

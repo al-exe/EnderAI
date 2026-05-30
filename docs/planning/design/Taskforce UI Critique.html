@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Taskforce — UI/UX Critique</title>
+<link rel="icon" type="image/svg+xml" href="assets/tf-logo.svg" />
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" media="(prefers-color-scheme: light)" />
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32-dark.png" media="(prefers-color-scheme: dark)" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+<link rel="manifest" href="site.webmanifest" />
+<meta name="theme-color" content="#8447ff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0e0e10" media="(prefers-color-scheme: dark)" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="mark"></span>Taskforce — UI/UX critique</div>
+  <div class="meta">v1 · May 2026 · for @al-exe</div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============================ HERO ============================ -->
+  <section class="hero">
+    <div class="eyebrow">Design review · web app + landing</div>
+    <h1>The product is sharp. <em>The UI is mostly lists.</em></h1>
+    <p class="lede">
+      Taskforce is doing something <strong>genuinely novel</strong> — turning agent work into reusable team memory with anchored evidence and a ROI ledger. But the UI today reads like a thin shadcn shell over four CRUD pages: a Library list, an Agents card grid, a KPI dashboard, and a landing page that says "Taskforce" without saying what it is. The visual system is fighting itself — <span class="tok">--radius: 0 !important</span> in CSS, <span class="tok">rounded-[2rem]</span> in the Agents page, <span class="tok">rounded-lg</span> on the landing. This document is a teardown plus two concrete redesign directions per surface, all anchored to your existing DNA: purple <span class="tok">#8447ff</span>, sharp corners, restrained type.
+    </p>
+
+    <div class="meta-row">
+      <div><b>Scope</b> · Agents · Library · Metrics · Landing</div>
+      <div><b>Stack read</b> · React 19 · Tailwind v4 · shadcn · TanStack Router</div>
+      <div><b>Audience</b> · Engineering teams sharing context</div>
+      <div><b>Method</b> · code-read · heuristic eval · paired direction mocks</div>
+    </div>
+
+    <nav class="toc" aria-label="Sections">
+      <a href="#system"><span class="n">00</span> System diagnosis</a>
+      <a href="#agents"><span class="n">01</span> Agents</a>
+      <a href="#library"><span class="n">02</span> Library + document</a>
+      <a href="#search"><span class="n">03</span> Search</a>
+      <a href="#metrics"><span class="n">04</span> Metrics</a>
+      <a href="#landing"><span class="n">05</span> Landing</a>
+      <a href="#rollout"><span class="n">06</span> Rollout</a>
+    </nav>
+  </section>
+
+  <!-- ============================ SYSTEM ============================ -->
+  <section class="surface" id="system">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>00 · System</div>
+      <div>
+        <h2>What's broken at the system level</h2>
+        <p class="deck">Before we touch any single screen, five system-level decisions need to be made. Most surface problems trace back to one of these — fix them once and four pages improve at the same time.</p>
+      </div>
+    </div>
+
+    <ol class="issues">
+      <li>
+        <div>
+          <h4>The radius war</h4>
+          <p>Your <span class="tok">index.css</span> declares <span class="tok">--radius: 0 !important</span> — a strong, opinionated stance. But the Agents page renders <span class="tok">rounded-[2rem]</span> hero cards, the landing uses <span class="tok">rounded-lg</span> document tiles, shadcn primitives default to soft radii, and the result is a UI that can't decide whether it's brutalist or friendly. <b>Commit one way.</b> For your product (engineering tools, dense info, builder audience) sharp corners are the right call — but only if every surface honors it.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h4>Purple as decoration, not as signal</h4>
+          <p>Right now <span class="tok">#8447ff</span> shows up on primary buttons, sparkle icons, the marketing gradient — wherever a designer felt the page needed a bit of color. <b>Promote purple to a semantic role:</b> it means "this is Taskforce intelligence at work" — reuses, citations, replayed memory, AI-generated summary anchors. Strip it everywhere else. The product becomes legible the moment a single hue tells a story.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h4>The "team" promise is invisible</h4>
+          <p>The pitch — "engineering teams sharing context across people and machines" — is nowhere on the active screens. No avatars, no "who created this," no "@ana reused this 6× this week," no presence, no scope chip (mine / shared / org). For a tool whose <em>main value</em> is collaboration, every list row should declare its scope at a glance. This is the single biggest IA gap.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h4>Lists everywhere, hierarchy nowhere</h4>
+          <p>Library is a flat list. Agents is a flat grid. Metrics is a flat dashboard. There is no "first thing your eye lands on" anywhere. Every surface should have <b>one hero artifact</b> (the most-reused doc, the headline number, the top specialist) and then the long tail. "Boring lists" is your own description and it's accurate — flatness is the cause.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h4>The proof-of-value loop is hidden</h4>
+          <p>The most defensible thing Taskforce does is <em>measure that reuse paid off</em>. But savings only live on the Metrics page, walled off from where work happens. Surface "+38K saved on this reuse" inline — on Library rows, on Agent cards, in the document header, in the landing demo. Every encounter with a doc should re-anchor the user in <em>why this tool exists</em>.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h4>Type and density are inconsistent</h4>
+          <p>The Agents hero uses display-scale serifs; the Library uses small Geist body; Metrics KPIs use mid-weight numerals; chips are sometimes mono, sometimes sans. Lock a four-step type ramp (display / heading / body / mono-label), assign mono to <em>data and identifiers only</em>, and density becomes legible.</p>
+        </div>
+      </li>
+    </ol>
+
+    <div class="note">
+      <div class="kicker">The design system, in one sentence</div>
+      <h4>Sharp · Quiet · Loud where it matters.</h4>
+      <p>Hairline borders everywhere. Zero radii. Generous whitespace. Geist sans for prose, JetBrains Mono for data and identifiers. One accent — purple — used <em>only</em> when Taskforce is doing the thing only Taskforce can do (reuse, replay, cite). One ink color for primary buttons. No decorative gradients. Numbers always tabular.</p>
+    </div>
+
+    <div class="diagram" aria-label="Token system">
+      <h5>The tokens, drawn out</h5>
+      <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap: 12px; font-size: 12.5px;">
+        <div>
+          <div style="height:36px; background:#ffffff; border:1px solid var(--border);"></div>
+          <div style="margin-top:6px;" class="mono">bg / #FFF</div>
+        </div>
+        <div>
+          <div style="height:36px; background:oklch(0.985 0 0); border:1px solid var(--border);"></div>
+          <div style="margin-top:6px;" class="mono">bg-soft</div>
+        </div>
+        <div>
+          <div style="height:36px; background:oklch(0.97 0 0); border:1px solid var(--border);"></div>
+          <div style="margin-top:6px;" class="mono">bg-tint</div>
+        </div>
+        <div>
+          <div style="height:36px; background:oklch(0.205 0 0);"></div>
+          <div style="margin-top:6px;" class="mono">ink (primary btn)</div>
+        </div>
+        <div>
+          <div style="height:36px; background:#8447ff;"></div>
+          <div style="margin-top:6px;" class="mono">primary · #8447ff</div>
+        </div>
+        <div>
+          <div style="height:36px; background:oklch(0.55 0.13 155);"></div>
+          <div style="margin-top:6px;" class="mono">positive</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ AGENTS ============================ -->
+  <section class="surface" id="agents">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>01 · Agents</div>
+      <div>
+        <h2>Agents — currently the loudest, the least useful at a glance</h2>
+        <p class="deck">Your own description: <em>"Codex made this and it's not uniform with the rest."</em> Agreed. The hero gradient, the rainbow card top-stripes, the 2rem rounded corners, the sparkle icons — none of it agrees with the brutalist DNA elsewhere. More importantly: a specialist gallery should answer one question, fast — <b>which of these is paying for itself, and which is dead weight?</b> The current grid buries that under decoration.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Today</span><span class="tag current">current</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/agents-current.html" loading="lazy" title="Agents — current"></iframe>
+          <div class="callouts">
+            <span class="callout" style="top:16%; left:6%;">1</span>
+            <span class="callout" style="top:46%; left:8%;">2</span>
+            <span class="callout" style="top:58%; right:7%;">3</span>
+            <span class="callout" style="top:80%; left:32%;">4</span>
+          </div>
+        </div>
+        <div class="caption">Hero gradient is decorative, not informative. <b>Rainbow strip on every card</b> works against the brutalist DNA. Status pill says "Active" with no contrast against the cards beside it. Stats cells are inside soft rounded containers inside a card with rounded corners — radius soup.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction A</span><span class="tag minimal">minimal</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/agents-minimal.html" loading="lazy" title="Agents — minimal"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:24%; left:6%;">1</span>
+            <span class="callout fix" style="top:42%; right:18%;">2</span>
+            <span class="callout fix" style="top:64%; left:8%;">3</span>
+          </div>
+        </div>
+        <div class="caption"><b>Table-shaped list</b> with sortable columns. The page becomes scannable in 2 seconds: who, how much, when. A small "this week" strip gives one hero metric without inventing a hero card. <em>Same data, 1/3 the visual noise.</em></div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction B</span><span class="tag expressive">expressive</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/agents-expressive.html" loading="lazy" title="Agents — expressive"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:30%; left:6%;">1</span>
+            <span class="callout fix" style="top:48%; left:48%;">2</span>
+            <span class="callout fix" style="top:72%; right:10%;">3</span>
+          </div>
+        </div>
+        <div class="caption">Dark <b>team strip</b> as a recurring motif (used again on Metrics and Library). Cards carry a left purple bar — the only place radius is broken is to amplify the brand stripe. Each card declares <b>routing triggers, sparkline, owners</b> — making "this specialist is paying off" obvious without leaving the page.</div>
+      </figure>
+    </div>
+
+    <div class="deltas">
+      <div class="col" data-kind="current">
+        <div class="col-h">Problems today</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Decorative gradient hero</b><div class="desc">Adds no information; conflicts with sharp DNA.</div></div></li>
+          <li><span class="n">2</span><div><b>Two rounded boxes nested</b><div class="desc">Card has a radius; stats panel inside has a radius; both fight <span class="tok">--radius: 0</span>.</div></div></li>
+          <li><span class="n">3</span><div><b>Rainbow top stripe</b><div class="desc">Reads as decoration; not tied to specialist identity or status.</div></div></li>
+          <li><span class="n">4</span><div><b>Static numbers, no trend</b><div class="desc">"142K saved" with no direction — is this growing or dying?</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="minimal">
+        <div class="col-h">A · Minimal moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Replace grid with table-of-specialists</b><div class="desc">Sortable. Lets users compare on the dimensions that matter: impact, freshness.</div></div></li>
+          <li><span class="n">2</span><div><b>Single "this week" feature strip</b><div class="desc">One hero metric without burning a full hero card. Tells the team where to look.</div></div></li>
+          <li><span class="n">3</span><div><b>Idle &gt; 30d signal</b><div class="desc">Surface dead specialists. Hygiene is part of the tool's value.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="expressive">
+        <div class="col-h">B · Expressive moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Dark team strip — recurring motif</b><div class="desc">Anchors the page and pulls headline numbers up. Reused on Metrics and Library — one chord across surfaces.</div></div></li>
+          <li><span class="n">2</span><div><b>Routing triggers visible</b><div class="desc">Surfacing <span class="mono">route_when: stripe, checkout…</span> answers "when will this fire" without an extra click.</div></div></li>
+          <li><span class="n">3</span><div><b>Inline sparkline + owners</b><div class="desc">Trend + co-authors right in the card — replaces the stats grid with something that earns its space.</div></div></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="kicker">Recommendation</div>
+      <h4>Use Direction A as the live page; promote B's stripe + accent bar to the system.</h4>
+      <p>The table is the right primary view for specialists — Engineers compare specialists like they compare CI runs. But B's dark stat strip is so good it should become a reusable component used on three surfaces. That gives you variety without inventing three different visual languages.</p>
+    </div>
+  </section>
+
+  <!-- ============================ LIBRARY ============================ -->
+  <section class="surface" id="library">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>02 · Library</div>
+      <div>
+        <h2>Library — the centerpiece, presented like a CRUD table</h2>
+        <p class="deck">The Library is where the magic of Taskforce lives — every row represents a piece of working memory that may have just saved hours of agent context. Today it's rendered as a vanilla shadcn table: title, visibility, date. Three columns, none of which answer the question that matters: <b>is this document paying off?</b></p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Today</span><span class="tag current">current</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/library-current.html" loading="lazy" title="Library — current"></iframe>
+          <div class="callouts">
+            <span class="callout" style="top:18%; right:6%;">1</span>
+            <span class="callout" style="top:46%; right:18%;">2</span>
+            <span class="callout" style="top:50%; left:8%;">3</span>
+            <span class="callout" style="top:74%; right:30%;">4</span>
+          </div>
+        </div>
+        <div class="caption">Two tab-pill rows ("Owned/Shared" + "Files/Folders") <b>compete with the filter UI</b>. Sidebar items are visually identical to body rows — no hierarchy. Rows show <b>visibility but not reuse</b>. No team signals, no owners, no impact. The most important screen reads as the least important.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction A</span><span class="tag minimal">minimal</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/library-minimal.html" loading="lazy" title="Library — minimal"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:30%; right:14%;">1</span>
+            <span class="callout fix" style="top:52%; left:24%;">2</span>
+            <span class="callout fix" style="top:68%; right:8%;">3</span>
+          </div>
+        </div>
+        <div class="caption">One <b>flat filter bar</b> replaces both pill rows. <b>Folder tags</b> become a 4px colored bar to the left of each title. Adds <span class="mono">Reuse · Updated · Visibility · Owners</span> as proper columns. The team is finally visible.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction B</span><span class="tag expressive">expressive</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/library-expressive.html" loading="lazy" title="Library — expressive"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:30%; left:8%;">1</span>
+            <span class="callout fix" style="top:48%; left:48%;">2</span>
+            <span class="callout fix" style="top:78%; right:10%;">3</span>
+          </div>
+        </div>
+        <div class="caption"><b>"Today reel"</b> at top — a horizontal feed of reuse moments ("@alex reused Stripe checkout 2h ago, +38K saved"). Below, documents as <b>two-up cards</b> with folder accent bars. Live story + library in one screen.</div>
+      </figure>
+    </div>
+
+    <div class="deltas">
+      <div class="col" data-kind="current">
+        <div class="col-h">Problems today</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Two competing toggles</b><div class="desc">Owned/Shared + Files/Folders both shown as pill segmented controls; user has to mentally cross-reference.</div></div></li>
+          <li><span class="n">2</span><div><b>No reuse signal</b><div class="desc">The whole point of Taskforce is reuse. Library rows don't show it.</div></div></li>
+          <li><span class="n">3</span><div><b>Visibility ≠ team context</b><div class="desc">"Organization" doesn't tell me who, when, or for what.</div></div></li>
+          <li><span class="n">4</span><div><b>Folder structure as a flat sidebar</b><div class="desc">No visual cue connecting a row to a folder once you click "All".</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="minimal">
+        <div class="col-h">A · Minimal moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>One filter bar, four facets</b><div class="desc">All / Mine / Shared / Org as a single row of underlined tabs. Sort dropdown on the right.</div></div></li>
+          <li><span class="n">2</span><div><b>Reuse + saved as primary column</b><div class="desc"><span class="mono">14 · 142K saved</span> tells the value story on every row.</div></div></li>
+          <li><span class="n">3</span><div><b>Avatars + scope chip per row</b><div class="desc">The "team" promise made visible inline.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="expressive">
+        <div class="col-h">B · Expressive moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>"Today" reel as a narrative</b><div class="desc">Reuse moments rendered as sentences, not numbers. Recruits empathy.</div></div></li>
+          <li><span class="n">2</span><div><b>Folder = colored side bar on card</b><div class="desc">Color does the work the breadcrumb used to. Scannable from across the room.</div></div></li>
+          <li><span class="n">3</span><div><b>Scope label in card corner</b><div class="desc"><span class="mono">ORG / PRIV</span> upper-right. Purple = org-shared.</div></div></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="kicker">Document split view — the one explicit request</div>
+      <h4>Make the single-document view readable in any window width.</h4>
+      <p>Today the Summary / Details split breaks awkwardly under ~1100px. Switch to a <b>resizable two-pane layout</b> with three modes: <span class="tok">summary</span> (Summary fullwidth, Details collapsed to a citation popover), <span class="tok">split</span> (50/50 with anchored scroll-sync so clicking a §3 marker in Summary jumps Details to §3), <span class="tok">details</span> (Details fullwidth, Summary as a sticky outline on the left). The mode picker is one row of three icons. Persist per-document. <em>Below ~900px collapse to a single column with a Summary/Details segmented toggle</em>. This unblocks reading without re-architecting the page.</p>
+    </div>
+  </section>
+
+  <!-- ============================ SEARCH ============================ -->
+  <section class="surface" id="search">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>03 · Search</div>
+      <div>
+        <h2>Search — the citations <em>are</em> the answer, not a footnote</h2>
+        <p class="deck">The Search page today is a thin ChatGPT-shaped chat: messages stack, the LLM streams an answer, citations live as pill chips at the bottom like a research-paper bibliography. That's backwards for a "your work memory" tool. <b>The citations are the product.</b> The model is just narrating a path through your real documents — so the UI should make those documents present, not summarize and link off.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Today</span><span class="tag current">current</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/search-current.html" loading="lazy" title="Search — current"></iframe>
+          <div class="callouts">
+            <span class="callout" style="top:14%; right:6%;">1</span>
+            <span class="callout" style="top:56%; left:8%;">2</span>
+            <span class="callout" style="top:74%; left:10%;">3</span>
+            <span class="callout" style="top:84%; right:30%;">4</span>
+          </div>
+        </div>
+        <div class="caption">Avatars + body text + a row of pill chips at the bottom — a chat clone. <b>No thread history</b> (the page is amnesic). <b>No scope</b> (what am I searching against?). <b>No reading feedback</b> during the stream. Citations are tiny and orphaned from the claims they back.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction A</span><span class="tag minimal">minimal</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/search-minimal.html" loading="lazy" title="Search — minimal"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:18%; right:8%;">1</span>
+            <span class="callout fix" style="top:48%; right:24%;">2</span>
+            <span class="callout fix" style="top:72%; left:8%;">3</span>
+          </div>
+        </div>
+        <div class="caption"><b>Inline §-superscripts</b> directly after each claim — purple, monospace, anchored. <b>Scope chips</b> in the header declare what's being searched. A <b>"Sources"</b> block under the answer lists anchors with their section titles, not opaque IDs. Token meta becomes one quiet mono line.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction B</span><span class="tag expressive">expressive</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/search-expressive.html" loading="lazy" title="Search — expressive"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:22%; left:7%;">1</span>
+            <span class="callout fix" style="top:30%; left:42%;">2</span>
+            <span class="callout fix" style="top:54%; left:38%;">3</span>
+            <span class="callout fix" style="top:46%; right:8%;">4</span>
+          </div>
+        </div>
+        <div class="caption"><b>Three-pane command center.</b> Left: thread history grouped by recency, each row showing cite count + tokens saved. Center: chat with a live <b>"reading 1 doc, 3 anchors"</b> status pip during the stream. Right: <b>pinned citation drawer</b> showing the actual cited section as you read.</div>
+      </figure>
+    </div>
+
+    <div class="deltas">
+      <div class="col" data-kind="current">
+        <div class="col-h">Problems today</div>
+        <ul>
+          <li><span class="n">1</span><div><b>BYOK pill, hidden in a sentence</b><div class="desc">"Using your Anthropic key" lives inside body copy. Subtle but critical — should be a chip.</div></div></li>
+          <li><span class="n">2</span><div><b>Citations divorced from claims</b><div class="desc">All cites bunch at the bottom. The reader has to look up which one supports which sentence.</div></div></li>
+          <li><span class="n">3</span><div><b>Token meta as a stray sentence</b><div class="desc">"BYOK · model · 1,840 in / 220 out" reads like a stack trace, not a signal.</div></div></li>
+          <li><span class="n">4</span><div><b>No conversation continuity</b><div class="desc">Reload the page and the thread is gone. For a "memory" tool, that's the wrong default.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="minimal">
+        <div class="col-h">A · Minimal moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Scope chips as the header</b><div class="desc">"All docs · 28" / "org-shared · 4" / "recent · 7d" — answers <em>"what am I asking?"</em> at a glance.</div></div></li>
+          <li><span class="n">2</span><div><b>Inline §-superscripts</b><div class="desc">Each cite sits right where the claim ends. Hover preview; click to open the source.</div></div></li>
+          <li><span class="n">3</span><div><b>Sources block with real section names</b><div class="desc"><em>"§3 — EU customer, no VAT"</em> instead of <span class="tok">#sec-eu-no-vat</span>. Names not IDs.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="expressive">
+        <div class="col-h">B · Expressive moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Thread rail — restore memory</b><div class="desc">Grouped by today / yesterday / older. Each row shows cite count + tokens saved — the rail itself is a ledger.</div></div></li>
+          <li><span class="n">2</span><div><b>"Reading…" status pip while streaming</b><div class="desc">"Read 1 doc, 3 anchors · Stripe checkout wiring §1 §3 §5" — surfaces the work, not just the result.</div></div></li>
+          <li><span class="n">3</span><div><b>"38K replayed from memory" chip</b><div class="desc">Reuse loop, re-anchored at every turn. The tool earns its own existence on every screen.</div></div></li>
+          <li><span class="n">4</span><div><b>Pinned citation drawer</b><div class="desc">Click <span class="mono">§3</span> → the actual section snippet appears in the right pane. No tab-switching, no doc-hunting.</div></div></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="kicker">Recommendation</div>
+      <h4>Ship Direction A as a v1 polish; promote Direction B's pinned-citation pane to a system primitive.</h4>
+      <p>The inline-superscript pattern from A is a one-week refactor — it'd transform how the page feels. The thread rail + pinned drawer from B is bigger work, but it's the same shape as the Document split view (Section 02). <b>Build it once</b>: a "right-pane citation viewer" that takes an <span class="tok">anchor_id</span> and renders that section. Reuse it in Search, in the document view, and in the in-app home's "Today reel". That's the same atom appearing three times — which is how a design system earns its keep.</p>
+    </div>
+
+    <div class="note">
+      <div class="kicker">Quietly important</div>
+      <h4>The BYOK wall should be a progressive disclosure.</h4>
+      <p>Today, no key = wall (a single Card with a key icon). Better: show the Search UI in a faded "preview" state, with the composer disabled and a single sentence at the input — <em>"Add an Anthropic or OpenAI key to ask →"</em>. The user sees what they're missing before they're asked to pay for it. Same approach for the Upsell: show a few example threads from the team (already public) with results redacted; one CTA to upgrade. The current full-page Card feels like a paywall; the alternative feels like an empty pantry that's worth filling.</p>
+    </div>
+  </section>
+
+  <!-- ============================ METRICS ============================ -->
+  <section class="surface" id="metrics">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>04 · Metrics</div>
+      <div>
+        <h2>Metrics — KPI cards in search of a story</h2>
+        <p class="deck">Three boxed numbers and a chart. Truthful, but it doesn't argue for anything. Metrics is the ROI dashboard for a tool whose entire pitch is ROI — it should be the most opinionated screen in the app, and it's the most generic.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Today</span><span class="tag current">current</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/metrics-current.html" loading="lazy" title="Metrics — current"></iframe>
+          <div class="callouts">
+            <span class="callout" style="top:30%; left:7%;">1</span>
+            <span class="callout" style="top:62%; left:35%;">2</span>
+          </div>
+        </div>
+        <div class="caption">Three small KPI cards of equal weight — none feels like the headline. Chart is generic and unscaled (no axis labels). Top docs list is information-rich but visually identical to the chart panel. Missing: the one number you'd put on a billboard.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction A</span><span class="tag minimal">minimal</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/metrics-minimal.html" loading="lazy" title="Metrics — minimal"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:20%; left:7%;">1</span>
+            <span class="callout fix" style="top:60%; left:8%;">2</span>
+            <span class="callout fix" style="top:88%; left:22%;">3</span>
+          </div>
+        </div>
+        <div class="caption"><b>Four-cell hero row</b> with one number visibly bigger than the rest. Bar chart with proper axes and gridlines. <b>Bar-in-cell sparkline</b> in the top-docs table. Methodology footnote — small, but it's now possible to challenge the math.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction B</span><span class="tag expressive">expressive</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/metrics-expressive.html" loading="lazy" title="Metrics — expressive"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:18%; left:32%;">1</span>
+            <span class="callout fix" style="top:42%; left:18%;">2</span>
+            <span class="callout fix" style="top:74%; left:7%;">3</span>
+          </div>
+        </div>
+        <div class="caption"><b>76px headline number</b> on dark ground — billboard-scale. <b>Plain-English narrative strip</b> below converts numbers into a sentence ("you wrote 4 new docs and reused 128 times — but 2 specialists are idle"). Trend chart + ranked leaderboard at bottom. <em>This screen makes an argument.</em></div>
+      </figure>
+    </div>
+
+    <div class="deltas">
+      <div class="col" data-kind="current">
+        <div class="col-h">Problems today</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Equal-weight KPIs</b><div class="desc">Three cards same size = no narrative. Reader has to assemble the meaning.</div></div></li>
+          <li><span class="n">2</span><div><b>Unscaled chart</b><div class="desc">Pretty line, but no Y-axis labels, no dates on X, no comparison band.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="minimal">
+        <div class="col-h">A · Minimal moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Hero number that's 2× bigger</b><div class="desc">"412K" is the only thing your CFO needs to remember.</div></div></li>
+          <li><span class="n">2</span><div><b>Chart with real axes</b><div class="desc">Tick labels, gridlines, bar columns instead of a generic line.</div></div></li>
+          <li><span class="n">3</span><div><b>Methodology link, inline</b><div class="desc">Engineers will not trust the number until they can see how you computed it.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="expressive">
+        <div class="col-h">B · Expressive moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Billboard number on dark</b><div class="desc">Same dark strip motif as Agents. The "this week" answer is unmissable.</div></div></li>
+          <li><span class="n">2</span><div><b>Plain-English narrative band</b><div class="desc">Converts metrics into a sentence with embedded numbers — turns the dashboard into a brief.</div></div></li>
+          <li><span class="n">3</span><div><b>Ranked contributor leaderboard</b><div class="desc">Where did the savings come from? Bars + names + authors right there.</div></div></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ LANDING ============================ -->
+  <section class="surface" id="landing">
+    <div class="section-h">
+      <div class="num-tag"><span class="marker">▍</span>05 · Landing</div>
+      <div>
+        <h2>Landing — says <em>Taskforce</em>, doesn't say what it does</h2>
+        <p class="deck">The current landing hero says "Taskforce" as the H1 and "AI work memory for builders" as the eyebrow — backwards. Visitors don't know what the product is yet; the brand name carries no weight. The preview card below shows a generic library, not a moment of the product earning its keep. There is no proof, no demo, no scope of who uses it.</p>
+      </div>
+    </div>
+
+    <div class="compare">
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Today</span><span class="tag current">current</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/landing-current.html" loading="lazy" title="Landing — current"></iframe>
+          <div class="callouts">
+            <span class="callout" style="top:24%; left:8%;">1</span>
+            <span class="callout" style="top:60%; left:30%;">2</span>
+          </div>
+        </div>
+        <div class="caption">Brand name <em>as</em> headline. Preview shows a UI screenshot with no annotation of <b>what Taskforce is doing</b>. No proof, no scale, no team signals. "73% rediscovery avoided this week" is the one good number — it's buried.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction A</span><span class="tag minimal">minimal</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/landing-minimal.html" loading="lazy" title="Landing — minimal"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:32%; left:7%;">1</span>
+            <span class="callout fix" style="top:74%; left:30%;">2</span>
+          </div>
+        </div>
+        <div class="caption"><b>Argumentative headline</b>: "Your AI agents <em>remember</em> what your team already built." Numbers strip below: tokens / week, rediscovery rate, setup time, compatibility. Quiet, dense, opinionated.</div>
+      </figure>
+
+      <figure class="frame">
+        <figcaption class="head"><span class="label">Direction B</span><span class="tag expressive">expressive</span></figcaption>
+        <div class="body">
+          <iframe src="mockups/landing-expressive.html" loading="lazy" title="Landing — expressive"></iframe>
+          <div class="callouts">
+            <span class="callout fix" style="top:30%; left:8%;">1</span>
+            <span class="callout fix" style="top:48%; left:54%;">2</span>
+            <span class="callout fix" style="top:86%; left:54%;">3</span>
+          </div>
+        </div>
+        <div class="caption">Half-and-half hero: <b>argument left, live terminal right</b> showing Cursor + Taskforce mid-replay, with citations and a "+38,420 saved" stamp. Shows the product working in 5 seconds without playing a video.</div>
+      </figure>
+    </div>
+
+    <div class="deltas">
+      <div class="col" data-kind="current">
+        <div class="col-h">Problems today</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Brand-as-headline</b><div class="desc">Visitors don't yet know what Taskforce <em>is</em> — leading with the name is a missed opportunity.</div></div></li>
+          <li><span class="n">2</span><div><b>Decorative preview</b><div class="desc">The preview card looks like a library but doesn't <em>do</em> anything for the pitch.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="minimal">
+        <div class="col-h">A · Minimal moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Headline does the work</b><div class="desc">"Your AI agents remember what your team built." Specific, declarative.</div></div></li>
+          <li><span class="n">2</span><div><b>Numbers as proof, not decoration</b><div class="desc">Four columns of evidence under the fold: tokens / week, rediscovery, setup time, compatibility.</div></div></li>
+        </ul>
+      </div>
+      <div class="col" data-kind="expressive">
+        <div class="col-h">B · Expressive moves</div>
+        <ul>
+          <li><span class="n">1</span><div><b>Headline targets the pain</b><div class="desc">"Stop re-explaining your codebase to every new chat" — names what every engineer hates.</div></div></li>
+          <li><span class="n">2</span><div><b>Live terminal as proof</b><div class="desc">Right pane shows Cursor + Taskforce co-thinking with citations + savings stamp. No video needed.</div></div></li>
+          <li><span class="n">3</span><div><b>Cite + save row</b><div class="desc">"This turn: 2 docs replayed · saved 38,420 tokens · 5.6× vs cold" — the entire value prop in one row.</div></div></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <div class="kicker">Recommendation</div>
+      <h4>Direction B for the marketing site; Direction A for the in-app landing (logged-in home).</h4>
+      <p>The terminal demo earns its space when the audience is cold and skeptical. Once the user is logged in, they don't need a sales pitch — they need a quiet, dense number that says "your team saved X this week." Use both, not one.</p>
+    </div>
+  </section>
+
+  <!-- ============================ ROLLOUT ============================ -->
+  <section class="close" id="rollout">
+    <div class="section-h" style="margin-bottom: 0;">
+      <div class="num-tag"><span class="marker">▍</span>06 · Rollout</div>
+      <div>
+        <h2>If I were shipping this Monday</h2>
+        <p style="color: var(--muted); font-size: 16.5px; max-width: 64ch; text-wrap: pretty;">In order, smallest blast radius first. You can ship steps 1–3 in a week without touching backend.</p>
+      </div>
+    </div>
+
+    <div class="rollout">
+      <div class="step">
+        <div class="order">01 · 1 day</div>
+        <h4>Settle the radius war</h4>
+        <p>Pick a stance globally. Strip <span class="tok">rounded-*</span> classes from V2/* components. Audit shadcn overrides.</p>
+      </div>
+      <div class="step">
+        <div class="order">02 · 1 day</div>
+        <h4>Promote purple to a role</h4>
+        <p>Define <span class="tok">--tf-intel</span> = <span class="tok">#8447ff</span>. Use only on reuse counts, citation links, replayed-context indicators.</p>
+      </div>
+      <div class="step">
+        <div class="order">03 · 2 days</div>
+        <h4>Library rows, reshaped</h4>
+        <p>Add <span class="tok">Reuse · Owners · Saved</span> columns. One filter bar. Folder = 4px side stripe. Direction A.</p>
+      </div>
+      <div class="step">
+        <div class="order">04 · 2 days</div>
+        <h4>Agents page rebuild</h4>
+        <p>Replace gradient hero + 2rem cards with the table + feature strip. Codex's work, retired.</p>
+      </div>
+      <div class="step">
+        <div class="order">05 · 2 days</div>
+        <h4>Search citations inline</h4>
+        <p>§-superscripts after each claim. Scope chips in the header. Sources block under each answer. <em>One week to a different-feeling page.</em></p>
+      </div>
+      <div class="step">
+        <div class="order">06 · 3 days</div>
+        <h4>Metrics narrative + dark strip</h4>
+        <p>Billboard number, plain-English band, contributor leaderboard, methodology footnote.</p>
+      </div>
+      <div class="step">
+        <div class="order">07 · 3 days</div>
+        <h4>Landing rewrite + live demo</h4>
+        <p>New headline. Right-pane terminal showing Cursor + Taskforce mid-replay. Replace screenshot with proof.</p>
+      </div>
+      <div class="step">
+        <div class="order">08 · backlog</div>
+        <h4>Right-pane citation primitive</h4>
+        <p>One component, three places: Search thread, Document split view, in-app home Today reel. Shared right-rail that renders an <span class="tok">anchor_id</span>.</p>
+      </div>
+    </div>
+
+    <div class="note" style="margin-top: 36px;">
+      <div class="kicker">One last thing</div>
+      <h4>Build the "reuse moment" as a primitive, not a feature.</h4>
+      <p>Every screen in this critique benefits from the same atom — a short sentence saying <em>"@alex reused Stripe checkout 2h ago — 38K saved · cited §3, §5"</em>. Build it once as <span class="tok">&lt;ReuseMoment&gt;</span>, render it in: the Library "Today" reel, the Agent card foot, the Metrics page, the document header, the in-app home, and the cold-pitch landing terminal. It's your product's smallest unit of value — make it a component, not a slide.</p>
+    </div>
+
+  </section>
+
+</main>
+
+</body>
+</html>

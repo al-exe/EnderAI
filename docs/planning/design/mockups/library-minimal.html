@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Library — minimal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 11px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; }
+.bar .sp { flex:1 }
+.bar .search { width:260px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.head { padding: 18px 22px 8px; display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: end; }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--tf-faint-fg); }
+.head h1 { margin: 6px 0 0; font-size: 22px; letter-spacing: -0.022em; font-weight: 600; }
+.head .actions { display:flex; gap:6px; }
+.head .a { font-family:"JetBrains Mono",monospace; font-size:10px; letter-spacing:0.06em; text-transform:uppercase; padding:5px 10px; border:1px solid var(--tf-border); }
+.head .a.solid { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+
+/* Filter bar — flat, no toggle pills inside pills */
+.filters {
+  margin: 6px 22px 0; display: flex; gap: 0;
+  border-top: 1px solid var(--tf-border);
+  border-bottom: 1px solid var(--tf-border);
+}
+.filters .f {
+  padding: 7px 12px;
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--tf-muted-fg); border-right: 1px solid var(--tf-border);
+  display: flex; align-items: center; gap: 6px;
+}
+.filters .f.on { color: var(--tf-fg); box-shadow: inset 0 -2px 0 var(--tf-primary); }
+.filters .sp { flex: 1; border-right: 0; }
+.filters .sort {
+  padding: 7px 12px; font-family:"JetBrains Mono",monospace; font-size: 10px;
+  color: var(--tf-muted-fg); border-left: 1px solid var(--tf-border);
+}
+
+.body { display: grid; grid-template-columns: 180px 1fr; gap: 0; flex: 1; min-height: 0; }
+.nav { border-right: 1px solid var(--tf-border); padding: 10px 0; align-self: stretch; }
+.nav .group {
+  font-family:"JetBrains Mono",monospace; font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--tf-faint-fg); padding: 6px 16px 4px;
+}
+.nav .item { display:flex; align-items:center; justify-content:space-between; padding: 6px 16px; font-size: 11.5px; }
+.nav .item.on { background: var(--tf-card-2); box-shadow: inset 2px 0 0 var(--tf-primary); font-weight: 500; }
+.nav .item .ct { font-family:"JetBrains Mono",monospace; font-size:9.5px; color:var(--tf-faint-fg); }
+
+.list { align-self: stretch; }
+.list .head-r {
+  display: grid; grid-template-columns: minmax(0,1fr) 90px 90px 80px 70px;
+  gap: 14px; padding: 8px 18px;
+  border-bottom: 1px solid var(--tf-border);
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.list .row {
+  display:grid; grid-template-columns: minmax(0,1fr) 90px 90px 80px 70px;
+  gap: 14px; padding: 10px 18px;
+  border-bottom: 1px solid var(--tf-hairline);
+  align-items: center;
+}
+.list .row:hover { background: var(--tf-card-2); }
+.list .row .ti { display:flex; align-items:center; gap:8px; min-width: 0; }
+.list .row .ti .tag {
+  width: 4px; height: 14px; background: var(--tf-primary);
+}
+.list .row .ti .tag.amber { background: oklch(0.72 0.16 70); }
+.list .row .ti .tag.green { background: var(--tf-positive); }
+.list .row .ti .tag.gray { background: var(--tf-border); }
+.list .row .ti .t { font-size: 12px; font-weight: 500; }
+.list .row .ti .desc { font-size: 10px; color: var(--tf-muted-fg); margin-top: 1px; }
+.list .row .meta {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-muted-fg);
+}
+.list .row .vis { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--tf-muted-fg); }
+.list .row .vis .d { width: 6px; height: 6px; }
+.list .row .vis .d.org { background: var(--tf-primary); }
+.list .row .vis .d.priv { background: var(--tf-border); }
+
+.list .row .owners { display: flex; align-items: center; gap: 0; }
+.list .row .owners .av {
+  width: 18px; height: 18px; border: 1px solid white; outline: 1px solid var(--tf-border);
+  margin-left: -4px; background: var(--tf-card-2); display:grid; place-items:center; font-size:9px; font-weight: 600;
+}
+.list .row .owners .av:first-child { margin-left: 0; }
+.list .row .reuse { font-family:"JetBrains Mono",monospace; font-size: 10px; }
+.list .row .reuse b { color: var(--tf-fg); font-weight: 600; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.list .row .reuse small { color: var(--tf-faint-fg); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar"><div class="b"><span class="tf-mark"></span>Taskforce</div><div class="sp"></div><div class="search">/ Search documents</div></div>
+
+  <header class="head">
+    <div>
+      <div class="crumb">Library · 28 documents · 4 shared with team</div>
+      <h1>Library</h1>
+    </div>
+    <div class="actions">
+      <span class="a">+ Folder</span>
+      <span class="a solid">+ New document</span>
+    </div>
+  </header>
+
+  <div class="filters">
+    <div class="f on">All</div>
+    <div class="f">Mine</div>
+    <div class="f">Shared with me</div>
+    <div class="f">Org</div>
+    <div class="sp"></div>
+    <div class="sort">Sort: recent ↓</div>
+  </div>
+
+  <div class="body">
+    <aside class="nav">
+      <div class="group">Quick</div>
+      <div class="item on">All documents <span class="ct">28</span></div>
+      <div class="item">Favorites <span class="ct">4</span></div>
+      <div class="item">Unfiled <span class="ct">9</span></div>
+      <div class="group">Folders</div>
+      <div class="item">Billing <span class="ct">5</span></div>
+      <div class="item">Infra <span class="ct">7</span></div>
+      <div class="item">Auth migration <span class="ct">3</span></div>
+      <div class="item">Frontend <span class="ct">4</span></div>
+    </aside>
+
+    <div class="list">
+      <div class="head-r"><div>Document</div><div>Reuse</div><div>Updated</div><div>Visibility</div><div>Owners</div></div>
+
+      <div class="row">
+        <div class="ti"><div class="tag"></div><div><div class="t">Stripe checkout wiring</div><div class="desc">Subscription decisions, price IDs, validation notes</div></div></div>
+        <div class="reuse"><b>14</b> <small>· 142K saved</small></div>
+        <div class="meta">2h ago</div>
+        <div class="vis"><span class="d org"></span>Org</div>
+        <div class="owners"><div class="av">A</div><div class="av">J</div><div class="av">+2</div></div>
+      </div>
+
+      <div class="row">
+        <div class="ti"><div class="tag amber"></div><div><div class="t">Taskforce MCP metrics</div><div class="desc">Usage events, token savings, methodology</div></div></div>
+        <div class="reuse"><b>9</b> <small>· 87K saved</small></div>
+        <div class="meta">Yesterday</div>
+        <div class="vis"><span class="d org"></span>Org</div>
+        <div class="owners"><div class="av">A</div></div>
+      </div>
+
+      <div class="row">
+        <div class="ti"><div class="tag green"></div><div><div class="t">Library sharing rollout</div><div class="desc">Organization access, folders, document perms</div></div></div>
+        <div class="reuse"><b>4</b> <small>· 31K saved</small></div>
+        <div class="meta">3d ago</div>
+        <div class="vis"><span class="d priv"></span>Priv</div>
+        <div class="owners"><div class="av">A</div></div>
+      </div>
+
+      <div class="row">
+        <div class="ti"><div class="tag"></div><div><div class="t">Postgres RLS audit</div><div class="desc">Row-level security policies across tenant tables</div></div></div>
+        <div class="reuse"><b>11</b> <small>· 64K saved</small></div>
+        <div class="meta">3d ago</div>
+        <div class="vis"><span class="d priv"></span>Priv</div>
+        <div class="owners"><div class="av">N</div><div class="av">M</div></div>
+      </div>
+
+      <div class="row">
+        <div class="ti"><div class="tag amber"></div><div><div class="t">Auth0 → Clerk plan</div><div class="desc">JWT mapping, session bridge, migration order</div></div></div>
+        <div class="reuse"><b>6</b> <small>· 28K saved</small></div>
+        <div class="meta">May 16</div>
+        <div class="vis"><span class="d org"></span>Org</div>
+        <div class="owners"><div class="av">J</div></div>
+      </div>
+
+      <div class="row">
+        <div class="ti"><div class="tag gray"></div><div><div class="t">Tailwind v4 token map</div><div class="desc">Old → new utility renames, custom theme migration</div></div></div>
+        <div class="reuse"><b>2</b> <small>· 7K saved</small></div>
+        <div class="meta">May 15</div>
+        <div class="vis"><span class="d priv"></span>Priv</div>
+        <div class="owners"><div class="av">A</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

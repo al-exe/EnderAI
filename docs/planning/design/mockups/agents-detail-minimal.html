@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Agent · Jensen — minimal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas { background: white; flex-direction: column; font-size: 12px; }
+.bar { height:36px; padding:0 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--tf-border); }
+.bar .b { font-weight:600; font-size:13px; display:inline-flex; align-items:center; }
+.bar .sp { flex:1 }
+.bar .search { width:220px; height:22px; padding:0 8px; border:1px solid var(--tf-border); font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--tf-muted-fg); display:flex; align-items:center; }
+
+.wrap { max-width: 920px; margin: 0 auto; padding: 18px 22px 32px; width: 100%; }
+
+/* Header */
+.head { display:grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; padding-bottom: 14px; border-bottom: 1px solid var(--tf-border); }
+.head .crumb { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.head .crumb a { color: var(--tf-faint-fg); text-decoration: none; }
+.head .crumb a:hover { color: var(--tf-fg); }
+.head .crumb .sep { padding: 0 5px; color: oklch(0.8 0 0); }
+.head .crumb .here { color: var(--tf-fg); }
+.head h1 { margin: 6px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -0.022em; display: inline-flex; align-items: center; gap: 10px; }
+.head h1 .av {
+  width: 22px; height: 22px;
+  background: var(--tf-primary); color: white;
+  display: inline-grid; place-items: center;
+  font-family:"JetBrains Mono",monospace; font-size: 11px; font-weight: 700;
+}
+.head .role { margin-top: 4px; font-size: 12.5px; color: var(--tf-muted-fg); }
+.head .role b { color: var(--tf-fg); font-weight: 500; }
+
+.head .actions { display:flex; gap: 6px; align-items: end; }
+.head .act {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 5px 10px; border: 1px solid var(--tf-border); color: var(--tf-fg);
+}
+.head .act.solid { background: var(--tf-ink); color: white; border-color: var(--tf-ink); }
+.head .pill {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.1em;
+  padding: 3px 8px; border: 1px solid var(--tf-border); color: var(--tf-positive);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.head .pill .d { width: 6px; height: 6px; background: var(--tf-positive); }
+
+/* Stats inline strip */
+.statline {
+  margin: 14px 0;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--tf-border);
+}
+.statline .c { padding: 10px 14px; border-right: 1px solid var(--tf-border); }
+.statline .c:last-child { border-right: 0; }
+.statline .k { font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--tf-faint-fg); }
+.statline .v { margin-top: 3px; font-size: 18px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -0.015em; }
+.statline .v small { font-size: 10.5px; color: var(--tf-positive); font-family:"JetBrains Mono",monospace; font-weight: 500; margin-left: 4px; }
+.statline .v.pri { color: var(--tf-primary); }
+.statline .sub { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-muted-fg); margin-top: 2px; }
+
+/* Sections */
+.sec { padding-top: 18px; }
+.sec .sh {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--tf-hairline);
+}
+.sec .sh h2 {
+  margin: 0; font-family:"JetBrains Mono",monospace; font-size: 10px;
+  letter-spacing: 0.18em; text-transform: uppercase; font-weight: 600;
+  color: var(--tf-fg);
+}
+.sec .sh .mt { font-family:"JetBrains Mono",monospace; font-size: 9.5px; color: var(--tf-faint-fg); letter-spacing: 0.06em; }
+
+/* Routing chips */
+.rule { padding: 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.rule .lk {
+  font-family:"JetBrains Mono",monospace; font-size: 10px; color: var(--tf-faint-fg);
+  display: flex; align-items: center; gap: 6px;
+}
+.rule .lk b { color: var(--tf-fg); font-weight: 500; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  font-family:"JetBrains Mono",monospace; font-size: 10.5px;
+  padding: 2px 7px; border: 1px solid var(--tf-border); color: var(--tf-fg);
+}
+.chip.neg { color: var(--tf-muted-fg); border-color: var(--tf-hairline); text-decoration: line-through; }
+.chip.pri { color: var(--tf-primary); border-color: color-mix(in oklch, #8447ff 35%, var(--tf-border)); }
+
+/* Instructions */
+.instr {
+  margin: 10px 0 0;
+  border: 1px solid var(--tf-border);
+  background: oklch(0.985 0 0);
+}
+.instr .h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px; border-bottom: 1px solid var(--tf-hairline);
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--tf-faint-fg);
+}
+.instr .h .v { color: var(--tf-primary); }
+.instr pre {
+  margin: 0; padding: 10px 12px;
+  font-family:"JetBrains Mono",monospace; font-size: 11px; line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--tf-fg);
+  max-height: 110px; overflow: hidden; position: relative;
+}
+.instr pre::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px;
+  background: linear-gradient(to bottom, transparent, oklch(0.985 0 0));
+}
+.instr .more {
+  padding: 6px 10px; border-top: 1px solid var(--tf-hairline);
+  font-family:"JetBrains Mono",monospace; font-size: 10px; letter-spacing: 0.06em;
+  color: var(--tf-primary); text-transform: uppercase;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* Generic table-shaped list (docs, invocations) */
+.tbl { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+.tbl th, .tbl td {
+  text-align: left; padding: 8px 6px;
+  border-bottom: 1px solid var(--tf-hairline);
+  vertical-align: top;
+}
+.tbl th {
+  font-family:"JetBrains Mono",monospace; font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--tf-faint-fg); font-weight: 500;
+  border-bottom-color: var(--tf-border);
+}
+.tbl td .ti { font-weight: 500; }
+.tbl td .desc { font-size: 10.5px; color: var(--tf-muted-fg); margin-top: 2px; }
+.tbl td.num, .tbl th.num { text-align: right; font-family:"JetBrains Mono",monospace; font-variant-numeric: tabular-nums; }
+.tbl td.who { font-family:"JetBrains Mono",monospace; color: var(--tf-muted-fg); font-size: 11px; }
+.tbl td.when { font-family:"JetBrains Mono",monospace; color: var(--tf-faint-fg); font-size: 10.5px; }
+.tbl td.pri { color: var(--tf-primary); font-family:"JetBrains Mono",monospace; font-weight: 600; }
+.tbl td.qry { font-family:"JetBrains Mono",monospace; font-size: 11px; color: var(--tf-fg); }
+.tbl td.qry b { color: var(--tf-fg); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="bar">
+    <div class="b"><span class="tf-mark"></span>Taskforce</div>
+    <div class="sp"></div>
+    <div class="search">/ Search documents</div>
+  </div>
+
+  <main class="wrap">
+    <header class="head">
+      <div>
+        <div class="crumb"><a href="#">Agents</a><span class="sep">/</span><span class="here">jensen</span></div>
+        <h1><span class="av">J</span> Jensen</h1>
+        <div class="role"><b>Database &amp; Migrations</b> · senior engineer's playbook · owned by @jensen, @ana</div>
+      </div>
+      <div class="actions">
+        <span class="pill"><span class="d"></span>Active · v3</span>
+        <span class="act">↗ Share</span>
+        <span class="act">✎ Edit</span>
+        <span class="act solid">▶ Invoke</span>
+      </div>
+    </header>
+
+    <section class="statline">
+      <div class="c">
+        <div class="k">Tokens saved</div>
+        <div class="v pri num">87,420 <small>▲ 8%</small></div>
+        <div class="sub">across 14 invocations · 30d</div>
+      </div>
+      <div class="c">
+        <div class="k">Reuse rate</div>
+        <div class="v num">72%</div>
+        <div class="sub">routes that fired vs. matched</div>
+      </div>
+      <div class="c">
+        <div class="k">Linked docs</div>
+        <div class="v num">4</div>
+        <div class="sub">3 org-shared · 1 private</div>
+      </div>
+      <div class="c">
+        <div class="k">Last invoked</div>
+        <div class="v" style="font-size:14px; font-weight:600;">2h ago</div>
+        <div class="sub">@ana · billing/migrations</div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h2>Routing rules</h2><span class="mt">Fires when ANY trigger matches AND NO negative trigger matches</span></div>
+      <div class="rule">
+        <div class="lk"><b>route_when:</b></div>
+        <div class="chips">
+          <span class="chip pri">postgres</span>
+          <span class="chip pri">migration</span>
+          <span class="chip pri">schema</span>
+          <span class="chip pri">rls</span>
+          <span class="chip pri">tenant_id</span>
+          <span class="chip pri">ALTER TABLE</span>
+          <span class="chip pri">idempotent</span>
+        </div>
+        <div class="lk" style="margin-top: 4px;"><b>do_not_route_when:</b></div>
+        <div class="chips">
+          <span class="chip neg">stripe</span>
+          <span class="chip neg">frontend</span>
+          <span class="chip neg">css</span>
+          <span class="chip neg">react</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h2>Operating instructions</h2><span class="mt">v3 · edited 4d ago · @jensen</span></div>
+      <div class="instr">
+        <div class="h"><span>system prompt</span><span class="v">v3</span></div>
+<pre>You are Jensen, a senior database engineer at Ender. Your job is to help the
+team make safe, reversible changes to PostgreSQL — schema migrations, RLS
+policies, and the boring-but-critical playbook for live tables.
+
+Hard rules:
+  1. Never suggest dropping a column on a live table without an inline-rewrite
+     plan and a rollback. Always recommend `SET STATEMENT_TIMEOUT` and a
+     concurrent index path.
+  2. Every multi-tenant table MUST have RLS enabled. If a migration adds a
+     new table referenced by tenant_id, generate the policy stanza too.
+  3. Treat idempotency keys as part of the schema; reuse Ender's standard…</pre>
+        <div class="more"><span>Expand · 96 lines</span><span>↗ Copy</span></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h2>Linked knowledge</h2><span class="mt">4 documents · click to open</span></div>
+      <table class="tbl">
+        <thead>
+          <tr><th>Document</th><th>Scope</th><th class="num">Reuses</th><th class="num">Saved</th><th>Updated</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><div class="ti">Postgres RLS audit</div><div class="desc">Row-level policies across tenant tables, tested with sample data</div></td>
+            <td>org</td>
+            <td class="num">11</td>
+            <td class="num">64K</td>
+            <td class="when">3d ago</td>
+          </tr>
+          <tr>
+            <td><div class="ti">Idempotency conventions</div><div class="desc">Ender's standard idempotency keys for webhook + retry handlers</div></td>
+            <td>org</td>
+            <td class="num">8</td>
+            <td class="num">38K</td>
+            <td class="when">May 16</td>
+          </tr>
+          <tr>
+            <td><div class="ti">Migration runbook</div><div class="desc">Pre-flight, deploy window, rollback. Updated quarterly.</div></td>
+            <td>org</td>
+            <td class="num">5</td>
+            <td class="num">22K</td>
+            <td class="when">May 10</td>
+          </tr>
+          <tr>
+            <td><div class="ti">tenant_id rollout (in flight)</div><div class="desc">Backfill plan for the missing FK constraints — draft</div></td>
+            <td>priv</td>
+            <td class="num">2</td>
+            <td class="num">7K</td>
+            <td class="when">May 12</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sec">
+      <div class="sh"><h2>Recent invocations</h2><span class="mt">last 14 runs · 30d window</span></div>
+      <table class="tbl">
+        <thead>
+          <tr><th>Query</th><th>By</th><th class="num">Saved</th><th>When</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="qry">"is RLS enabled on the new <b>audit_logs</b> table?"</td>
+            <td class="who">@ana</td>
+            <td class="num pri">+6K</td>
+            <td class="when">2h ago</td>
+          </tr>
+          <tr>
+            <td class="qry">"safe to drop a column on a live table?"</td>
+            <td class="who">@alex</td>
+            <td class="num pri">+4K</td>
+            <td class="when">yesterday</td>
+          </tr>
+          <tr>
+            <td class="qry">"how do we handle FK cascades in tenant migrations?"</td>
+            <td class="who">@jin</td>
+            <td class="num pri">+8K</td>
+            <td class="when">2d ago</td>
+          </tr>
+          <tr>
+            <td class="qry">"add tenant_id to user_sessions — what's the policy?"</td>
+            <td class="who">@ana</td>
+            <td class="num pri">+5K</td>
+            <td class="when">May 15</td>
+          </tr>
+          <tr>
+            <td class="qry">"backfill plan for a 90M row table"</td>
+            <td class="who">@jensen</td>
+            <td class="num pri">+11K</td>
+            <td class="when">May 12</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</div>
+</body>
+</html>
