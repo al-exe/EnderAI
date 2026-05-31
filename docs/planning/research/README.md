@@ -43,7 +43,9 @@ Not "we measure / they don't" (false). The defensible cut points:
 4. **Neutral, standardized, auditable measurement** — the benchmark-credibility war (84%→58%) makes a *neutral* measure valuable.
 
 ## The bear case (respect it — flagged in thesis Addendum B)
-The market is building **per-harness** memory (Letta Code, Cursor, Claude Code) — the *opposite* of cross-vendor neutrality. Our bet wins only if teams (a) run multiple harnesses, (b) feel fragmented-memory pain, (c) trust a neutral third party over their vendor. **Unvalidated.** Letta is the strongest evidence the vertical path is where capital/talent flow.
+The market is building **per-harness** memory (Letta Code, Cursor, Claude Code) — the *opposite* of cross-vendor neutrality. Our bet wins only if teams (a) run multiple harnesses, (b) feel fragmented-memory pain, (c) trust a neutral third party over their vendor. Letta is the strongest evidence the vertical path is where capital/talent flow.
+
+> **Update — 2026-05-30 (PM-4): pressure-tested → survivable / partially validated.** See [bear-case-validation.md](bear-case-validation.md). (a) multi-harness is the norm and (b) cross-tool pain is real *and already fought* via the neutral **AGENTS.md** standard; (c) neutral cross-vendor layers have strong precedent (**MCP**) plus a data-trust counterweight. The residual risk is narrower than "is the thesis real": it's whether teams pay a third party for **dynamic learned-memory + a reuse ledger** vs. waiting for a free neutral standard to absorb it (as AGENTS.md absorbed static config). The proven cross-tool pain is at the **static-config** layer; the **learned-memory + ledger** slot is unbuilt — that's ours.
 
 ## What to take (learn, don't copy)
 - **Git** as the append-only/versioned/conflict substrate (Letta) — evaluate vs Graphiti's temporal graph.
