@@ -368,6 +368,7 @@ def record_document_reused(
     reasons: list[str] | None,
     usage: TaskforceUsagePayload | None,
     is_demo: bool,
+    consumed_by_client: str | None = None,
 ) -> list[MetricsEvent]:
     """Emit ``document.reused`` + a paired ``tokens.saved.reuse`` event.
 
@@ -382,6 +383,14 @@ def record_document_reused(
     model_id_for_pricing = usage.model_id if usage else "claude-opus-4-7"
     pricing = pricing_for(session, model_id_for_pricing, occurred_at)
     bootstrap_tokens, bootstrap_usd = reuse_savings(document, pricing)
+    payload: dict[str, Any] = {
+        "score": score,
+        "band": band,
+        "reasons": reasons or [],
+        "bootstrap_tokens": bootstrap_tokens,
+    }
+    if consumed_by_client:
+        payload["consumed_by_client"] = consumed_by_client
 
     primary = _build_event(
         kind=METRICS_EVENT_DOCUMENT_REUSED,
@@ -390,12 +399,7 @@ def record_document_reused(
         occurred_at=occurred_at,
         is_demo=is_demo,
         model_id=usage.model_id if usage else None,
-        payload={
-            "score": score,
-            "band": band,
-            "reasons": reasons or [],
-            "bootstrap_tokens": bootstrap_tokens,
-        },
+        payload=payload,
     )
     session.add(primary)
     events: list[MetricsEvent] = [primary]
@@ -451,6 +455,7 @@ def record_document_consulted(
     session_id: str | None = None,
     specialist_slug: str | None = None,
     prompt: str | None = None,
+    consumed_by_client: str | None = None,
 ) -> MetricsEvent:
     """Record one ``document.consulted`` event (TF-175 / Phase 1 + TF-177 / Phase 3).
 
@@ -502,6 +507,8 @@ def record_document_consulted(
         # `metrics_event.payload->>'specialist_slug'`. Don't rename
         # without updating both call sites.
         payload["specialist_slug"] = specialist_slug
+    if consumed_by_client:
+        payload["consumed_by_client"] = consumed_by_client
 
     event = _build_event(
         kind=METRICS_EVENT_DOCUMENT_CONSULTED,

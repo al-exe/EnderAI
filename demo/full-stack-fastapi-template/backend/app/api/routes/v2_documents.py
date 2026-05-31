@@ -675,6 +675,7 @@ def record_v2_document_reused(
         reasons=payload.reasons,
         usage=payload.usage,
         is_demo=demo,
+        consumed_by_client=payload.client,
     )
     session.commit()
     for event in events:

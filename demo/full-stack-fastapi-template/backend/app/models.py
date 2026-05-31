@@ -955,6 +955,7 @@ class V2Document(SQLModel, table=True):
         ondelete="SET NULL",
     )
     visibility: str = Field(default="private", index=True, max_length=16)
+    produced_by_client: str | None = Field(default=None, max_length=32)
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="")
     human_summary: str = Field(default="")
@@ -1089,6 +1090,7 @@ class V2DocumentPublic(SQLModel):
     folder_id: uuid.UUID | None
     folder_name: str | None = None
     visibility: Literal["private", "organization"]
+    produced_by_client: str | None = None
     user_access: Literal["owner", "editor", "viewer"] = "owner"
     is_favorite: bool = False
     description: str
@@ -1478,6 +1480,7 @@ class TaskforceReusePayload(SQLModel):
     score: int | None = Field(default=None, ge=0, le=100)
     band: Literal["high", "medium", "low", "explicit", "forced-new"] | None = None
     reasons: list[str] = Field(default_factory=list)
+    client: str | None = Field(default=None, max_length=32)
     usage: TaskforceUsagePayload | None = None
 
 
@@ -1497,6 +1500,8 @@ class TaskforceDiscoverRequest(SQLModel):
     files: list[str] = Field(default_factory=list)
     git_branch: str | None = None
     recent_commands: list[str] = Field(default_factory=list)
+    # Self-reported harness/client provenance. Advisory only; identity is JWT.
+    client: str | None = Field(default=None, max_length=32)
     # k is hard-capped at 3 in the handler regardless of the requested value.
     k: int = Field(default=3, ge=1, le=3)
     min_score: float = Field(default=0.3, ge=0, le=1)
@@ -1649,6 +1654,8 @@ class TaskforceObserveRequest(SQLModel):
     pinned_query_id: uuid.UUID | None = None
     session_id: str | None = Field(default=None, max_length=128)
     cwd: str | None = None
+    # Self-reported harness/client provenance. Advisory only; identity is JWT.
+    client: str | None = Field(default=None, max_length=32)
     files_touched: list[str] = Field(default_factory=list)
     commands_run: list[TaskforceCommandRun] = Field(default_factory=list)
     diff_summary: str | None = None
@@ -1704,6 +1711,8 @@ class TaskforceSessionStartRequest(SQLModel):
     files: list[str] = Field(default_factory=list)
     git_branch: str | None = None
     recent_commands: list[str] = Field(default_factory=list)
+    # Self-reported harness/client provenance. Advisory only; identity is JWT.
+    client: str | None = Field(default=None, max_length=32)
     k: int = Field(default=3, ge=1, le=3)
     min_score: float = Field(default=0.3, ge=0, le=1)
     demo: bool = False

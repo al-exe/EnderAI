@@ -123,6 +123,7 @@ def session_start(
             files=list(request.files),
             git_branch=request.git_branch,
             recent_commands=list(request.recent_commands),
+            client=request.client,
             k=request.k,
             min_score=request.min_score,
             session_id=str(session_id),

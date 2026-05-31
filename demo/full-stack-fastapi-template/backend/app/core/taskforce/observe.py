@@ -40,7 +40,6 @@ from app.core.taskforce.summarizer import (
 )
 from app.core.v2_documents import (
     apply_v2_document_update,
-    build_v2_document_public,
     get_v2_document_for_actor,
     refresh_v2_document_token_counts,
 )
@@ -330,6 +329,7 @@ def _create_document_from_summary(
         owner_id=actor.id,
         organization_id=actor.organization_id,
         visibility="private",
+        produced_by_client=request.client,
         title=title.strip() or "Taskforce session",
         description=request.prompt.strip()[:500],
         human_summary="",
