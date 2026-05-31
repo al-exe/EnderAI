@@ -18,6 +18,8 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
+    AgentSpecialist,
+    AgentSpecialistDocumentLink,
     MetricsEvent,
     ModelPricing,
     User,
@@ -47,15 +49,43 @@ def _user_by_email(db: Session, email: str) -> User:
     return db.exec(select(User).where(User.email == email)).one()
 
 
+def _join_same_org(
+    client: TestClient,
+    db: Session,
+    *,
+    owner_headers: dict[str, str],
+    member_email: str,
+    member_headers: dict[str, str],
+) -> None:
+    invite = client.post(
+        f"{settings.API_V1_STR}/organizations/invitations",
+        headers=owner_headers,
+        json={"email": member_email},
+    )
+    assert invite.status_code == 201, invite.text
+
+    accepted = client.post(
+        f"{settings.API_V1_STR}/organizations/invitations/{invite.json()['id']}/accept",
+        headers=member_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    db.commit()
+
+
 def _create_document(
     client: TestClient,
     headers: dict[str, str],
     *,
     title: str,
     description: str = "",
+    visibility: str = "private",
     details_markdown_sections: list[dict[str, str]] | None = None,
 ) -> str:
-    payload: dict[str, Any] = {"title": title, "description": description}
+    payload: dict[str, Any] = {
+        "title": title,
+        "description": description,
+        "visibility": visibility,
+    }
     if details_markdown_sections is not None:
         payload["details_markdown_sections"] = details_markdown_sections
     response = client.post(
@@ -600,6 +630,62 @@ def test_session_start_returns_session_id_and_matches(client: TestClient) -> Non
         assert ms["href"] == f"/v2/agents/{ms['slug']}"
 
 
+def test_session_start_hydrates_org_visible_teammate_document(
+    client: TestClient, db: Session
+) -> None:
+    alice_email, alice_headers = _signup(client)
+    bob_email, bob_headers = _signup(client)
+    _join_same_org(
+        client,
+        db,
+        owner_headers=alice_headers,
+        member_email=bob_email,
+        member_headers=bob_headers,
+    )
+    alice = _user_by_email(db, alice_email)
+    bob = _user_by_email(db, bob_email)
+    assert alice.organization_id == bob.organization_id
+
+    doc_id = _create_document(
+        client,
+        alice_headers,
+        title="Stripe webhook idempotency strategy",
+        description=(
+            "Refund and payment webhook retries must use durable event-id "
+            "dedupe before side effects."
+        ),
+        visibility="organization",
+        details_markdown_sections=[
+            {
+                "anchor_id": "decision",
+                "markdown": "Store processed Stripe event ids before issuing refunds.",
+            }
+        ],
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/start",
+        headers=bob_headers,
+        json={
+            "prompt": "Handle refund webhook retries with Stripe event idempotency",
+            "client": "claude-code",
+            "min_score": 0.0,
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert doc_id in {match["document_id"] for match in body["matches"]}
+
+    event = db.exec(
+        select(MetricsEvent)
+        .where(MetricsEvent.user_id == bob.id)
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        .where(MetricsEvent.document_id == uuid.UUID(doc_id))
+    ).first()
+    assert event is not None
+    assert event.payload["consumed_by_client"] == "claude-code"
+
+
 def test_session_start_routes_to_seeded_specialist(
     client: TestClient, db: Session
 ) -> None:
@@ -712,6 +798,97 @@ def test_session_start_routes_to_seeded_specialist(
         assert event.payload.get("consumed_by_client") == "claude-code", event.payload
 
 
+def test_session_start_specialist_routing_uses_org_visible_linked_docs(
+    client: TestClient, db: Session
+) -> None:
+    alice_email, alice_headers = _signup(client)
+    bob_email, bob_headers = _signup(client)
+    _join_same_org(
+        client,
+        db,
+        owner_headers=alice_headers,
+        member_email=bob_email,
+        member_headers=bob_headers,
+    )
+    alice = _user_by_email(db, alice_email)
+    bob = _user_by_email(db, bob_email)
+    assert alice.organization_id == bob.organization_id
+
+    org_doc_id = uuid.UUID(
+        _create_document(
+            client,
+            alice_headers,
+            title="Stripe refund webhook idempotency",
+            description="Use durable Stripe event-id dedupe for refund webhooks.",
+            visibility="organization",
+        )
+    )
+    private_doc_id = uuid.UUID(
+        _create_document(
+            client,
+            alice_headers,
+            title="Private billing note",
+            description="This private document must not appear in Bob's specialist preview.",
+        )
+    )
+
+    slug = f"payments-{uuid.uuid4().hex[:8]}"
+    specialist = AgentSpecialist(
+        slug=slug,
+        name="Payments Reliability",
+        role="Payments Reliability Specialist",
+        short_description="Stripe webhooks, refunds, and idempotency.",
+        description="Specialist for payment webhook reliability.",
+        status="active",
+        visibility="organization",
+        owner_id=alice.id,
+        organization_id=alice.organization_id,
+        domain_tags=["Stripe", "Payments"],
+        routing_triggers=["stripe", "refund", "webhook", "idempotency"],
+        negative_triggers=[],
+        instructions=[],
+        is_demo=False,
+    )
+    db.add(specialist)
+    db.flush()
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=org_doc_id,
+            anchor_id=None,
+            is_pinned=True,
+            weight=1.0,
+        )
+    )
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=private_doc_id,
+            anchor_id=None,
+            is_pinned=True,
+            weight=1.0,
+        )
+    )
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/start",
+        headers=bob_headers,
+        json={
+            "prompt": "Stripe refund webhook idempotency is needed",
+            "files": ["app/api/routes/billing.py"],
+            "min_score": 0.0,
+        },
+    )
+    assert response.status_code == 201, response.text
+    matched = response.json()["matched_specialist"]
+    assert matched is not None
+    assert matched["slug"] == slug
+    linked_ids = {doc["document_id"] for doc in matched["linked_documents"]}
+    assert str(org_doc_id) in linked_ids
+    assert str(private_doc_id) not in linked_ids
+
+
 def test_session_observe_with_structured_fields_skips_summarizer(
     client: TestClient,
 ) -> None:
@@ -781,6 +958,45 @@ def test_session_observe_created_document_stamps_produced_by_client(
         select(V2Document).where(V2Document.id == uuid.UUID(body["document_id"]))
     ).one()
     assert document.produced_by_client == "codex"
+
+
+def test_session_observe_created_document_can_be_org_visible(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "Capture shared Stripe refund webhook idempotency notes",
+            "visibility": "organization",
+            "session_id": "org-visible-observe-test",
+            "summary_points": ["Use durable Stripe event-id dedupe for refund webhooks."],
+            "details_sections": [
+                {
+                    "anchor_id": "decision",
+                    "markdown": "Make the document organization-visible for teammates.",
+                }
+            ],
+            "files_touched": ["app/api/routes/billing.py"],
+            "duration_ms": 1000,
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["action"] == "created"
+
+    document = db.exec(
+        select(V2Document).where(V2Document.id == uuid.UUID(body["document_id"]))
+    ).one()
+    assert document.visibility == "organization"
+    assert document.organization_id == user.organization_id
 
 
 def test_session_observe_without_structured_fields_uses_summarizer_path(

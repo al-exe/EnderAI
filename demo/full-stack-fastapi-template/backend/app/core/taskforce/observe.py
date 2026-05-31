@@ -325,10 +325,15 @@ def _create_document_from_summary(
         (summary.summary_points[0] if summary.summary_points else request.prompt)
         or "Taskforce session"
     )[:255]
+    visibility = (
+        request.visibility
+        if request.visibility == "private" or actor.organization_id is not None
+        else "private"
+    )
     document = V2Document(
         owner_id=actor.id,
-        organization_id=actor.organization_id,
-        visibility="private",
+        organization_id=actor.organization_id if visibility == "organization" else None,
+        visibility=visibility,
         produced_by_client=request.client,
         title=title.strip() or "Taskforce session",
         description=request.prompt.strip()[:500],

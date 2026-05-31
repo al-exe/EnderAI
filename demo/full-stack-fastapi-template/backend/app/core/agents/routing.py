@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.scoring import DiscoveryRequest, score_document, tokenize
+from app.core.v2_documents import build_v2_document_acl_filter
 from app.models import (
     AgentSpecialist,
     AgentSpecialistDocumentLink,
@@ -367,6 +368,7 @@ def route_specialist(
                 col(V2Document.id) == col(AgentSpecialistDocumentLink.document_id),
             )
             .where(col(AgentSpecialistDocumentLink.specialist_id).in_(specialist_ids))
+            .where(build_v2_document_acl_filter(actor, demo=demo))
         ).all()
     )
     links_by_specialist: dict = {sid: [] for sid in specialist_ids}

@@ -104,6 +104,7 @@ taskforce-cli observe  --session-id <id> --kind final \
     --summary-points "Removed lock badge,Stopped click propagation" \
     --decisions "Use stopPropagation handler" \
     --outcome shipped \
+    --visibility organization \
     --files-touched "src/routes/v2/library.tsx"
 taskforce-cli session-log --session-id <id> --pretty
 ```

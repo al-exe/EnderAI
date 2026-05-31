@@ -355,6 +355,7 @@ const TaskforceSessionObserveArgsSchema = z
     kind: z.enum(["checkpoint", "final"]),
     prompt: z.string().max(8000).optional(),
     active_document_id: z.string().uuid().optional(),
+    visibility: z.enum(["private", "organization"]).optional(),
     transcript: z.array(TaskforceTranscriptTurnSchema).optional(),
     cwd: z.string().optional(),
     files_touched: z.array(z.string()).optional(),
@@ -1814,6 +1815,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
               active_document_id: {
                 type: "string",
                 description: "Document to patch; usually `suggested_pin` from session_start.",
+              },
+              visibility: {
+                type: "string",
+                enum: ["private", "organization"],
+                description:
+                  "Visibility for a newly created observed document. Defaults to private; use organization for shared proof runs.",
               },
               summary_points: {
                 ...stringArrayJsonSchema,

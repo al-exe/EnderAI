@@ -73,6 +73,7 @@ export type TaskforceSessionObserveArgs = {
   kind: "checkpoint" | "final";
   prompt?: string;
   active_document_id?: string;
+  visibility?: "private" | "organization";
   transcript?: TaskforceTranscriptTurn[];
   cwd?: string;
   files_touched?: string[];
@@ -139,6 +140,7 @@ export async function callTaskforceSessionObserve(
     prompt: args.prompt ?? "",
     transcript: args.transcript ?? [],
     active_document_id: args.active_document_id ?? null,
+    visibility: args.visibility ?? "private",
     pinned_query_id: null,
     session_id: args.session_id,
     cwd: args.cwd ?? null,
