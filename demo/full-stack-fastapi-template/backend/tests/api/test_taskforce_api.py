@@ -21,6 +21,7 @@ from app.models import (
     MetricsEvent,
     ModelPricing,
     User,
+    V2Document,
 )
 from tests.utils.utils import random_email, random_lower_string
 
@@ -155,14 +156,26 @@ def test_taskforce_discover_returns_top_matches_for_owner(client: TestClient) ->
         assert "consult_token_cost" in top
 
 
-def test_taskforce_discover_records_consulted_events(client: TestClient) -> None:
-    _, headers = _signup(client)
-    _create_document(client, headers, title="Important library work")
+def test_taskforce_discover_records_consulted_events(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    doc_id = uuid.UUID(_create_document(client, headers, title="Important library work"))
+    document = db.exec(select(V2Document).where(V2Document.id == doc_id)).one()
+    document.produced_by_client = "codex"
+    db.add(document)
+    db.commit()
 
     discover = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
         headers=headers,
-        json={"prompt": "library work continuation", "k": 3, "min_score": 0.0},
+        json={
+            "prompt": "library work continuation",
+            "client": "claude-code",
+            "k": 3,
+            "min_score": 0.0,
+        },
     )
     assert discover.status_code == 200, discover.text
     matches = discover.json()["matches"]
@@ -178,6 +191,17 @@ def test_taskforce_discover_records_consulted_events(client: TestClient) -> None
     assert metrics.status_code == 200, metrics.text
     consulted = metrics.json()["metrics"]["documents_consulted"]
     assert int(consulted["total"]) >= 1
+
+    event = db.exec(
+        select(MetricsEvent)
+        .where(MetricsEvent.user_id == user.id)
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        .where(MetricsEvent.document_id == doc_id)
+    ).first()
+    assert event is not None
+    assert event.document_id == doc_id
+    assert event.payload["consumed_by_client"] == "claude-code"
+    assert document.produced_by_client == "codex"
 
 
 def test_taskforce_discover_empty_library_still_returns_query_id(
@@ -652,6 +676,7 @@ def test_session_start_routes_to_seeded_specialist(
         json={
             "prompt": prompt,
             "files": ["app/api/routes/billing.py"],
+            "client": "claude-code",
             "min_score": 0.0,
         },
     )
@@ -684,6 +709,7 @@ def test_session_start_routes_to_seeded_specialist(
         # Agents page Recent Invocations table shows real queries instead
         # of "" — _recent_invocations reads payload->>'prompt'.
         assert event.payload.get("prompt") == prompt, event.payload
+        assert event.payload.get("consumed_by_client") == "claude-code", event.payload
 
 
 def test_session_observe_with_structured_fields_skips_summarizer(
@@ -716,6 +742,45 @@ def test_session_observe_with_structured_fields_skips_summarizer(
     assert body["structured_path"] is True
     # Summarizer was skipped → no LLM cost
     assert body["summarizer_usd_cost"] in ("0", 0, "0.0", "0.00")
+
+
+def test_session_observe_created_document_stamps_produced_by_client(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "Capture Stripe webhook idempotency notes",
+            "client": "codex",
+            "session_id": "origin-client-test",
+            "summary_points": ["Use a durable idempotency key per Stripe event."],
+            "details_sections": [
+                {
+                    "anchor_id": "decision",
+                    "markdown": "Store processed event ids before side effects.",
+                }
+            ],
+            "outcome": "shipped",
+            "files_touched": ["app/api/routes/billing.py"],
+            "duration_ms": 1000,
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["action"] == "created"
+    assert body["shadow"] is False
+
+    document = db.exec(
+        select(V2Document).where(V2Document.id == uuid.UUID(body["document_id"]))
+    ).one()
+    assert document.produced_by_client == "codex"
 
 
 def test_session_observe_without_structured_fields_uses_summarizer_path(

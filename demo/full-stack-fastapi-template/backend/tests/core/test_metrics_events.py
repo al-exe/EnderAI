@@ -174,6 +174,7 @@ def test_record_document_reused_emits_reuse_savings(db: Session, user: User) -> 
         reasons=["Title tokens overlap"],
         usage=None,
         is_demo=False,
+        consumed_by_client="claude-code",
     )
     db.commit()
 
@@ -187,6 +188,7 @@ def test_record_document_reused_emits_reuse_savings(db: Session, user: User) -> 
     assert reused.payload["score"] == 82
     assert reused.payload["band"] == "high"
     assert reused.payload["bootstrap_tokens"] == 15_000
+    assert reused.payload["consumed_by_client"] == "claude-code"
     saved = events[1]
     # 15k tokens × $5/MTok = $0.075.
     assert saved.input_tokens == 15_000
