@@ -15,6 +15,8 @@ export type TaskforceDiscoverArgs = {
   recent_commands?: string[];
   k?: number;
   min_score?: number;
+  // TF-203 / C4: self-reported harness, threaded into the request body.
+  client?: string;
   demo?: boolean;
 };
 
