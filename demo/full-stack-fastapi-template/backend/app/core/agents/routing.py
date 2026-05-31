@@ -337,6 +337,15 @@ def route_specialist(
     one query, then runs the pure scoring loop in-process. For demo
     seeds N=5 specialists; this stays well under the 100ms p95 budget
     the ticket calls out.
+
+    Earned vs seeded (TF-205 / C6): the specialists scored here are
+    today hand-``created_from="seeded"``. The "earned" path — auto-
+    accreting linked docs from real captured work and flipping
+    ``created_from="earned"`` — is an OFFLINE job, deliberately NOT run
+    on this hot read path (sensor-not-processor). Earned profiles flow
+    through this exact same scorer; nothing here changes. Entry point +
+    design: ``app.core.agents.compounding`` /
+    ``docs/planning/earned-profiles-design.md``.
     """
 
     from app.core.agents.access import build_agent_specialist_acl_filter
