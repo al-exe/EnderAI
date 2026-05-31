@@ -5,15 +5,23 @@ from sqlmodel import Session, func, select
 
 from app.core.agents.seed import (
     DOCUMENT_SLUG_TITLES,
+    EMPTY_CELL_ALICE_DOC_TITLE,
+    EMPTY_CELL_BOB_PROMPT,
+    EMPTY_CELL_SPECIALIST_SLUG,
+    link_empty_cell_payments_specialist,
     seed_agents,
     seed_demo_metrics_for_user,
+    seed_empty_cell_proof_accounts,
 )
 from app.core.config import settings
+from app.core.taskforce.session import session_start
+from app.core.v2_documents import refresh_v2_document_token_counts
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     AgentSpecialist,
     AgentSpecialistDocumentLink,
     MetricsEvent,
+    TaskforceSessionStartRequest,
     User,
     V2Document,
 )
@@ -157,3 +165,91 @@ def test_seeded_jensen_routes_demo_session_start(
     assert matched["slug"] == "jensen"
     assert matched["band"] in {"high", "medium"}
     assert matched["linked_documents"]
+
+
+def test_empty_cell_seed_routes_bob_to_alice_codex_document(db: Session) -> None:
+    seed = seed_empty_cell_proof_accounts(db)
+    document = V2Document(
+        owner_id=seed.alice.id,
+        organization_id=seed.organization.id,
+        visibility="organization",
+        produced_by_client="codex",
+        title=EMPTY_CELL_ALICE_DOC_TITLE,
+        description=(
+            "Stripe refund webhook retries must persist event ids before "
+            "issuing refund side effects."
+        ),
+        human_summary="",
+        ai_generated_summary=(
+            "Durable Stripe event-id idempotency prevents duplicate refund "
+            "webhook side effects."
+        ),
+        collaborators=[],
+        main_body=[
+            {
+                "segments": [
+                    {
+                        "text": (
+                            "Store each Stripe event id before issuing a refund "
+                            "and short-circuit duplicate webhook delivery."
+                        )
+                    }
+                ]
+            }
+        ],
+        details_file_name="taskforce.details.md",
+        details_markdown_sections=[
+            {
+                "anchor_id": "stripe-event-idempotency",
+                "markdown": (
+                    "Refund webhooks can be retried by Stripe. Use a durable "
+                    "processed-events table keyed by event id before running "
+                    "the refund side effect. app/api/routes/billing.py"
+                ),
+            }
+        ],
+        is_demo=False,
+    )
+    refresh_v2_document_token_counts(document)
+    db.add(document)
+    db.flush()
+    link = link_empty_cell_payments_specialist(
+        db,
+        specialist=seed.specialist,
+        document=document,
+    )
+    db.flush()
+
+    response = session_start(
+        db,
+        actor=seed.bob,
+        request=TaskforceSessionStartRequest(
+            prompt=EMPTY_CELL_BOB_PROMPT,
+            client="claude-code",
+            files=["app/api/routes/billing.py"],
+            min_score=0.0,
+            demo=False,
+        ),
+    )
+
+    assert seed.organization.name == "Acme"
+    assert seed.alice.organization_id == seed.bob.organization_id
+    assert seed.specialist.slug == EMPTY_CELL_SPECIALIST_SLUG
+    assert seed.specialist.visibility == "organization"
+    assert seed.specialist.is_demo is False
+    assert link.anchor_id == "stripe-event-idempotency"
+    assert response.matched_specialist is not None
+    assert response.matched_specialist.slug == EMPTY_CELL_SPECIALIST_SLUG
+    assert document.id in {match.document_id for match in response.matches}
+
+    event = db.exec(
+        select(MetricsEvent)
+        .where(MetricsEvent.user_id == seed.bob.id)
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+        .where(MetricsEvent.document_id == document.id)
+    ).first()
+    assert event is not None
+    assert event.payload["consumed_by_client"] == "claude-code"
+    assert event.payload["specialist_slug"] == EMPTY_CELL_SPECIALIST_SLUG
+    assert event.input_tokens is not None
+    assert event.input_tokens > 0
