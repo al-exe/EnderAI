@@ -15,6 +15,7 @@ from typing import Any
 
 from sqlmodel import Session, col, select
 
+from app.core.security import get_password_hash
 from app.core.v2_documents import ensure_v2_documents_demo_seed
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
@@ -27,6 +28,7 @@ from app.models import (
     AgentSpecialist,
     AgentSpecialistDocumentLink,
     MetricsEvent,
+    Organization,
     User,
     V2Document,
 )
@@ -413,11 +415,207 @@ class MetricsSeedResult:
     events_created: int
 
 
+EMPTY_CELL_ORGANIZATION_NAME = "Acme"
+EMPTY_CELL_ALICE_EMAIL = "alice@acme.example"
+EMPTY_CELL_BOB_EMAIL = "bob@acme.example"
+EMPTY_CELL_DEFAULT_PASSWORD = "Taskforce123!"
+EMPTY_CELL_SPECIALIST_SLUG = "payments"
+EMPTY_CELL_ALICE_DOC_TITLE = "Stripe refund webhook idempotency guardrail"
+EMPTY_CELL_ALICE_PROMPT = (
+    "Codex: add idempotency to Stripe refund webhook handling before issuing refunds."
+)
+EMPTY_CELL_BOB_PROMPT = (
+    "Claude Code: handle Stripe refund webhook retries with durable event id "
+    "idempotency and prevent duplicate refunds."
+)
+
+EMPTY_CELL_PAYMENTS_SPECIALIST: dict[str, Any] = {
+    "slug": EMPTY_CELL_SPECIALIST_SLUG,
+    "name": "Payments",
+    "role": "Payments Reliability Specialist",
+    "short_description": "Stripe refunds, webhooks, event-id dedupe, and idempotency.",
+    "description": (
+        "Routes payment reliability work to prior Stripe webhook decisions, "
+        "especially refund retries, duplicate delivery, idempotency keys, and "
+        "event-id persistence before side effects."
+    ),
+    "domain_tags": ["Stripe", "Payments", "Webhooks"],
+    "routing_triggers": [
+        "stripe",
+        "refund",
+        "webhook",
+        "idempotency",
+        "event id",
+        "duplicate",
+    ],
+    "negative_triggers": ["pricing page copy", "non-stripe payment provider"],
+    "instructions": [
+        "Check event-id persistence before refund side effects.",
+        "Prefer durable database dedupe over process-local locks.",
+        "Verify retry tests assert one refund for duplicate webhook delivery.",
+    ],
+}
+
+
+@dataclass(frozen=True)
+class EmptyCellScenarioSeedResult:
+    organization: Organization
+    alice: User
+    bob: User
+    specialist: AgentSpecialist
+    organization_created: bool
+    users_created: int
+    specialist_created: bool
+
+
+def _get_or_create_empty_cell_org(
+    session: Session,
+    *,
+    name: str = EMPTY_CELL_ORGANIZATION_NAME,
+) -> tuple[Organization, bool]:
+    organization = session.exec(
+        select(Organization).where(Organization.name == name)
+    ).first()
+    if organization is not None:
+        return organization, False
+
+    organization = Organization(name=name)
+    session.add(organization)
+    session.flush()
+    return organization, True
+
+
+def _get_or_create_empty_cell_user(
+    session: Session,
+    *,
+    email: str,
+    full_name: str,
+    organization: Organization,
+    organization_role: str,
+    password: str,
+) -> tuple[User, bool]:
+    user = session.exec(select(User).where(User.email == email)).first()
+    created = user is None
+    if user is None:
+        user = User(email=email)
+        session.add(user)
+
+    user.full_name = full_name
+    user.organization_id = organization.id
+    user.organization_role = organization_role
+    user.is_active = True
+    user.v2 = True
+    user.hashed_password = get_password_hash(password)
+    session.flush()
+    return user, created
+
+
+def seed_empty_cell_proof_accounts(
+    session: Session,
+    *,
+    organization_name: str = EMPTY_CELL_ORGANIZATION_NAME,
+    alice_email: str = EMPTY_CELL_ALICE_EMAIL,
+    bob_email: str = EMPTY_CELL_BOB_EMAIL,
+    password: str = EMPTY_CELL_DEFAULT_PASSWORD,
+) -> EmptyCellScenarioSeedResult:
+    """Seed the non-demo Acme/Alice/Bob + Payments specialist fixture.
+
+    This intentionally does not create the proof document or ledger event.
+    The one-shot scenario script creates Alice's document through the real
+    observe path, then lets Bob's real session/start emit the consult event.
+    """
+
+    organization, organization_created = _get_or_create_empty_cell_org(
+        session, name=organization_name
+    )
+    alice, alice_created = _get_or_create_empty_cell_user(
+        session,
+        email=alice_email,
+        full_name="Alice Acme",
+        organization=organization,
+        organization_role="admin",
+        password=password,
+    )
+    bob, bob_created = _get_or_create_empty_cell_user(
+        session,
+        email=bob_email,
+        full_name="Bob Acme",
+        organization=organization,
+        organization_role="member",
+        password=password,
+    )
+
+    specialist_payload = EMPTY_CELL_PAYMENTS_SPECIALIST
+    specialist = session.exec(
+        select(AgentSpecialist).where(
+            AgentSpecialist.slug == specialist_payload["slug"]
+        )
+    ).first()
+    specialist_created = specialist is None
+    if specialist is None:
+        specialist = AgentSpecialist(slug=specialist_payload["slug"])
+        session.add(specialist)
+
+    specialist.owner_id = alice.id
+    specialist.organization_id = organization.id
+    specialist.name = specialist_payload["name"]
+    specialist.role = specialist_payload["role"]
+    specialist.short_description = specialist_payload["short_description"]
+    specialist.description = specialist_payload["description"]
+    specialist.status = "active"
+    specialist.visibility = "organization"
+    specialist.domain_tags = list(specialist_payload["domain_tags"])
+    specialist.routing_triggers = list(specialist_payload["routing_triggers"])
+    specialist.negative_triggers = list(specialist_payload["negative_triggers"])
+    specialist.instructions = list(specialist_payload["instructions"])
+    specialist.created_from = "seeded"
+    specialist.is_demo = False
+    session.flush()
+
+    return EmptyCellScenarioSeedResult(
+        organization=organization,
+        alice=alice,
+        bob=bob,
+        specialist=specialist,
+        organization_created=organization_created,
+        users_created=int(alice_created) + int(bob_created),
+        specialist_created=specialist_created,
+    )
+
+
+def link_empty_cell_payments_specialist(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    document: V2Document,
+) -> AgentSpecialistDocumentLink:
+    """Pin Alice's real proof document to the Payments specialist."""
+
+    link = session.exec(
+        select(AgentSpecialistDocumentLink)
+        .where(AgentSpecialistDocumentLink.specialist_id == specialist.id)
+        .where(AgentSpecialistDocumentLink.document_id == document.id)
+    ).first()
+    if link is None:
+        link = AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=document.id,
+        )
+        session.add(link)
+
+    link.anchor_id = "stripe-event-idempotency"
+    link.reason = "Alice's Codex-produced Stripe refund webhook idempotency decision."
+    link.weight = 1.0
+    link.is_pinned = True
+    session.flush()
+    return link
+
+
 def _document_by_slug(session: Session, user: User) -> dict[str, V2Document]:
     docs = session.exec(
         select(V2Document)
         .where(V2Document.owner_id == user.id)
-        .where(V2Document.is_demo.is_(True))  # type: ignore[union-attr]
+        .where(col(V2Document.is_demo).is_(True))
     ).all()
     by_title = {doc.title: doc for doc in docs}
     return {
@@ -432,7 +630,7 @@ def _delete_existing_seeded_specialists(session: Session) -> None:
         session.exec(
             select(AgentSpecialist)
             .where(AgentSpecialist.created_from == "seeded")
-            .where(AgentSpecialist.is_demo.is_(True))  # type: ignore[union-attr]
+            .where(col(AgentSpecialist.is_demo).is_(True))
         ).all()
     )
     if not existing:
@@ -770,7 +968,11 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
     for day_index, daily_saved in enumerate(_DAILY_SAVED_7D):
         days_ago = 7 - day_index
         cache, summary, reuse = _split_saved_triple(daily_saved)
-        day_count = 3 if consult_index + 3 <= len(consult_7d) else len(consult_7d) - consult_index
+        day_count = (
+            3
+            if consult_index + 3 <= len(consult_7d)
+            else len(consult_7d) - consult_index
+        )
         day_consults = consult_7d[consult_index : consult_index + day_count]
         day_avoided = avoided_7d[consult_index : consult_index + day_count]
         consult_index += day_count
@@ -904,7 +1106,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/consumed",
                 "anchor_slug": consumed_anchor,
-                "consumed": [{"model_id": model_id, "input_tokens": tokens, "usd": usd}],
+                "consumed": [
+                    {"model_id": model_id, "input_tokens": tokens, "usd": usd}
+                ],
             }
         )
     for index, (model_id, tokens, usd) in enumerate(_CONSUMED_BY_MODEL_PREV_7D):
@@ -920,7 +1124,9 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "repo": "al-exe/EnderAI",
                 "branch": "demo/consumed-prev",
                 "anchor_slug": consumed_anchor,
-                "consumed": [{"model_id": model_id, "input_tokens": tokens, "usd": usd}],
+                "consumed": [
+                    {"model_id": model_id, "input_tokens": tokens, "usd": usd}
+                ],
             }
         )
 
@@ -939,13 +1145,17 @@ def _build_metrics_session_specs() -> list[dict[str, Any]]:
                 "consultations": [
                     {
                         "slug": slug,
-                        "avoided_tokens": max(4000, invocation["tokens"] // len(invocation["documents"])),
+                        "avoided_tokens": max(
+                            4000, invocation["tokens"] // len(invocation["documents"])
+                        ),
                     }
                     for slug in invocation["documents"]
                 ],
                 "cache_tokens": int(invocation["tokens"] * 0.25),
                 "summary_only_tokens": int(invocation["tokens"] * 0.45),
-                "reuse_tokens": int(invocation["tokens"] * 0.1) if index % 2 == 0 else 0,
+                "reuse_tokens": int(invocation["tokens"] * 0.1)
+                if index % 2 == 0
+                else 0,
                 "begin_reused": index % 3 == 0,
                 "begin_created": index in {4, 9},
             }
@@ -957,8 +1167,8 @@ def _delete_existing_seeded_metrics(session: Session, user: User) -> None:
     events = session.exec(
         select(MetricsEvent)
         .where(MetricsEvent.user_id == user.id)
-        .where(MetricsEvent.is_demo.is_(True))  # type: ignore[union-attr]
-        .where(MetricsEvent.payload["seeded"].astext == "true")  # type: ignore[index]
+        .where(col(MetricsEvent.is_demo).is_(True))
+        .where(MetricsEvent.payload["seeded"].astext == "true")
     ).all()
     for event in events:
         session.delete(event)
