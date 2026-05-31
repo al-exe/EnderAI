@@ -112,6 +112,7 @@ describe("callTaskforceSessionObserve", () => {
         session_id: "00000000-0000-0000-0000-000000000001",
         kind: "final",
         active_document_id: "11111111-1111-1111-1111-111111111111",
+        visibility: "organization",
         summary_points: ["Removed lock badge", "Stopped click propagation"],
         decisions: ["Use stopPropagation handler"],
         files_touched: ["src/routes/v2/library.tsx"],
@@ -139,6 +140,7 @@ describe("callTaskforceSessionObserve", () => {
     ]);
     expect(body.decisions).toEqual(["Use stopPropagation handler"]);
     expect(body.outcome).toBe("shipped");
+    expect(body.visibility).toBe("organization");
     expect(body.transcript).toEqual([]);
     expect(body.harness.model_id).toBe("gpt-5-codex");
   });

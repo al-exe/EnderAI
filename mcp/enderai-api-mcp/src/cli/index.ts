@@ -230,6 +230,7 @@ async function cmdObserve(args: ParsedArgs) {
                           [--decisions "a,b"     | --decisions-file FILE]
                           [--files-touched a,b   | --files-touched-file FILE]
                           [--outcome shipped|blocked|paused|interrupted]
+                          [--visibility private|organization]
                           [--details-sections-file FILE]   # JSON array
                           [--harness-file FILE]            # JSON object
                           [--cwd PATH] [--duration-ms N]
@@ -244,6 +245,10 @@ async function cmdObserve(args: ParsedArgs) {
   if (!kind || (kind !== "final" && kind !== "checkpoint")) {
     throw new Error("`observe` requires --kind final|checkpoint");
   }
+  const visibility = args.options.visibility as string | undefined;
+  if (visibility && visibility !== "private" && visibility !== "organization") {
+    throw new Error("`observe` --visibility must be private|organization");
+  }
 
   const body: Record<string, unknown> = {
     session_id: sessionId,
@@ -251,6 +256,7 @@ async function cmdObserve(args: ParsedArgs) {
     prompt: (args.options.prompt as string | undefined) || "",
     transcript: [],
     active_document_id: (args.options["active-document-id"] as string | undefined) || null,
+    visibility: visibility || "private",
     pinned_query_id: null,
     cwd: (args.options.cwd as string | undefined) || null,
     files_touched: readMaybeJsonOrLines(

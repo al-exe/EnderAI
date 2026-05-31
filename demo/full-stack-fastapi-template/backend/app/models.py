@@ -1656,6 +1656,7 @@ class TaskforceObserveRequest(SQLModel):
     cwd: str | None = None
     # Self-reported harness/client provenance. Advisory only; identity is JWT.
     client: str | None = Field(default=None, max_length=32)
+    visibility: Literal["private", "organization"] = "private"
     files_touched: list[str] = Field(default_factory=list)
     commands_run: list[TaskforceCommandRun] = Field(default_factory=list)
     diff_summary: str | None = None
