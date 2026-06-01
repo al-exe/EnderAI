@@ -19,6 +19,8 @@ export type TaskforceSessionStartArgs = {
   recent_commands?: string[];
   k?: number;
   min_score?: number;
+  // TF-203 / C4: self-reported harness, threaded into the request body.
+  client?: string;
   demo?: boolean;
 };
 
@@ -74,6 +76,9 @@ export type TaskforceSessionObserveArgs = {
   prompt?: string;
   active_document_id?: string;
   visibility?: "private" | "organization";
+  // TF-203 / C4: self-reported harness; stamped as produced_by_client on a
+  // newly captured document.
+  client?: string;
   transcript?: TaskforceTranscriptTurn[];
   cwd?: string;
   files_touched?: string[];
@@ -141,6 +146,7 @@ export async function callTaskforceSessionObserve(
     transcript: args.transcript ?? [],
     active_document_id: args.active_document_id ?? null,
     visibility: args.visibility ?? "private",
+    client: args.client ?? null,
     pinned_query_id: null,
     session_id: args.session_id,
     cwd: args.cwd ?? null,

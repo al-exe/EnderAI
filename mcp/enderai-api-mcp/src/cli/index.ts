@@ -84,6 +84,20 @@ function backendUrl(opts: ParsedArgs["options"]): string {
   );
 }
 
+// TF-203 / C4: the harness self-reports its client so cross-boundary reuse
+// can attribute the origin + consuming tool. Defaults to "codex" because the
+// CLI is the Tier-3 entry point for hookless agents (Codex/Cursor); override
+// with --client or TASKFORCE_CLIENT.
+function clientOf(opts: ParsedArgs["options"]): string {
+  const explicit = opts.client as string | undefined;
+  return (
+    (explicit && explicit.trim()) ||
+    process.env.TASKFORCE_CLIENT?.trim() ||
+    process.env.ENDERAI_CLIENT?.trim() ||
+    "codex"
+  );
+}
+
 function readJsonFile(path: string): unknown {
   const resolved = resolvePath(path);
   return JSON.parse(readFileSync(resolved, "utf8"));
@@ -154,14 +168,14 @@ function ensureOk(
 async function cmdDiscover(args: ParsedArgs) {
   if (args.options.help) {
     process.stdout.write(
-      `Usage: taskforce-cli discover --prompt "..." [--cwd PATH] [--files A,B] [--git-branch NAME] [--k 3] [--min-score 0.3] [--demo]\n`,
+      `Usage: taskforce-cli discover --prompt "..." [--client NAME] [--cwd PATH] [--files A,B] [--git-branch NAME] [--k 3] [--min-score 0.3] [--demo]\n`,
     );
     return;
   }
   const prompt = args.options.prompt as string | undefined;
   if (!prompt) throw new Error("`discover` requires --prompt");
 
-  const body: Record<string, unknown> = { prompt };
+  const body: Record<string, unknown> = { prompt, client: clientOf(args.options) };
   if (args.options.cwd) body.cwd = args.options.cwd;
   if (args.options["git-branch"]) body.git_branch = args.options["git-branch"];
   if (args.options.files) {
@@ -189,14 +203,14 @@ async function cmdDiscover(args: ParsedArgs) {
 async function cmdSessionStart(args: ParsedArgs) {
   if (args.options.help) {
     process.stdout.write(
-      `Usage: taskforce-cli session --prompt "..." [--cwd PATH] [--files A,B] [--k 3] [--min-score 0.3] [--demo]\n`,
+      `Usage: taskforce-cli session --prompt "..." [--client NAME] [--cwd PATH] [--files A,B] [--k 3] [--min-score 0.3] [--demo]\n`,
     );
     return;
   }
   const prompt = args.options.prompt as string | undefined;
   if (!prompt) throw new Error("`session` requires --prompt");
 
-  const body: Record<string, unknown> = { prompt };
+  const body: Record<string, unknown> = { prompt, client: clientOf(args.options) };
   if (args.options.cwd) body.cwd = args.options.cwd;
   if (args.options["git-branch"]) body.git_branch = args.options["git-branch"];
   if (args.options.files) {
@@ -225,6 +239,7 @@ async function cmdObserve(args: ParsedArgs) {
   if (args.options.help) {
     process.stdout.write(
       `Usage: taskforce-cli observe --session-id ID --kind final|checkpoint
+                          [--client NAME]
                           [--active-document-id ID]
                           [--summary-points "a,b" | --summary-points-file FILE]
                           [--decisions "a,b"     | --decisions-file FILE]
@@ -253,6 +268,7 @@ async function cmdObserve(args: ParsedArgs) {
   const body: Record<string, unknown> = {
     session_id: sessionId,
     kind,
+    client: clientOf(args.options),
     prompt: (args.options.prompt as string | undefined) || "",
     transcript: [],
     active_document_id: (args.options["active-document-id"] as string | undefined) || null,
@@ -337,12 +353,15 @@ Global options (any subcommand):
   --token VALUE         Bearer token (overrides TASKFORCE_BEARER_TOKEN env).
   --token-file PATH     Token file (defaults to ~/.enderai_mcp_token).
   --backend URL         Backend URL (defaults to enderai-backend.onrender.com).
+  --client NAME         Self-reported harness/client (default: codex; also
+                        TASKFORCE_CLIENT env). Drives cross-boundary reuse
+                        attribution (TF-202/C3).
   --pretty              Pretty-print JSON output.
   --help                Subcommand-specific usage.
 
 Examples:
   taskforce-cli discover --prompt "fix metrics card" --cwd $PWD --pretty
-  taskforce-cli session  --prompt "library polish"   --pretty
+  taskforce-cli session  --prompt "library polish" --client codex --pretty
   taskforce-cli observe  --session-id 0000-…-0001 --kind final \\
     --active-document-id 1111-…-1111 \\
     --summary-points "Did the thing,Then did the other" \\

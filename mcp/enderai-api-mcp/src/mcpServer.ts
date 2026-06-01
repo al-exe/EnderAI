@@ -32,7 +32,24 @@ export type McpServerOptions = {
   // This enables a hosted MCP server to act per user by binding the validated MCP token
   // to a session while still supporting token rotation during that session.
   backendBearerTokenProvider?: () => string | undefined;
+  // TF-203 / C4: self-reported harness/client (e.g. "claude-code", "codex",
+  // "cursor"). Stamped onto discover / session_start / session_observe calls so
+  // cross-boundary reuse (TF-202 / C3) can attribute the origin + consuming
+  // tool. A per-call `client` arg always wins; this is the server-wide default
+  // for a harness that mounts one MCP instance (Claude Code via the skill).
+  // Advisory provenance only — identity stays the bearer token. Defaults to
+  // TASKFORCE_CLIENT / ENDERAI_CLIENT env when unset.
+  defaultClient?: string;
 };
+
+function resolveDefaultClient(opts: McpServerOptions): string | undefined {
+  return (
+    opts.defaultClient?.trim() ||
+    process.env.TASKFORCE_CLIENT?.trim() ||
+    process.env.ENDERAI_CLIENT?.trim() ||
+    undefined
+  );
+}
 
 const AUDIT_MAX_BYTES = 48_000;
 const AUDIT_PREVIEW_CHARS = 8_000;
@@ -295,6 +312,8 @@ const TaskforceDiscoverArgsSchema = z
     k: z.number().int().min(1).max(3).optional(),
     min_score: z.number().min(0).max(1).optional(),
     session_id: z.string().min(1).max(128).optional(),
+    // TF-203 / C4: self-reported harness, advisory provenance.
+    client: z.string().min(1).max(32).optional(),
     demo: z.boolean().optional(),
   })
   .strict();
@@ -317,6 +336,8 @@ const TaskforceSessionStartArgsSchema = z
     recent_commands: z.array(z.string()).optional(),
     k: z.number().int().min(1).max(3).optional(),
     min_score: z.number().min(0).max(1).optional(),
+    // TF-203 / C4: self-reported harness, advisory provenance.
+    client: z.string().min(1).max(32).optional(),
     demo: z.boolean().optional(),
   })
   .strict();
@@ -356,6 +377,8 @@ const TaskforceSessionObserveArgsSchema = z
     prompt: z.string().max(8000).optional(),
     active_document_id: z.string().uuid().optional(),
     visibility: z.enum(["private", "organization"]).optional(),
+    // TF-203 / C4: self-reported harness, advisory provenance.
+    client: z.string().min(1).max(32).optional(),
     transcript: z.array(TaskforceTranscriptTurnSchema).optional(),
     cwd: z.string().optional(),
     files_touched: z.array(z.string()).optional(),
@@ -1780,6 +1803,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 maximum: 1,
                 description: "Filter matches below this score (default 0.3).",
               },
+              client: {
+                type: "string",
+                maxLength: 32,
+                description:
+                  "Self-reported harness (e.g. 'claude-code', 'codex', 'cursor'). Advisory provenance — drives cross-boundary reuse attribution (TF-202/C3). Identity stays the bearer token.",
+              },
               demo: {
                 type: "boolean",
                 description: "Operate against demo documents.",
@@ -1821,6 +1850,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 enum: ["private", "organization"],
                 description:
                   "Visibility for a newly created observed document. Defaults to private; use organization for shared proof runs.",
+              },
+              client: {
+                type: "string",
+                maxLength: 32,
+                description:
+                  "Self-reported harness (e.g. 'claude-code', 'codex', 'cursor'). Stamped as produced_by_client on a newly captured document. Advisory provenance (TF-202/C3); identity stays the bearer token.",
               },
               summary_points: {
                 ...stringArrayJsonSchema,
@@ -1959,6 +1994,12 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
                 minimum: 0,
                 maximum: 1,
                 description: "Filter matches below this score. Defaults to 0.3.",
+              },
+              client: {
+                type: "string",
+                maxLength: 32,
+                description:
+                  "Self-reported harness (e.g. 'claude-code', 'codex', 'cursor'). Advisory provenance — drives cross-boundary reuse attribution (TF-202/C3). Identity stays the bearer token.",
               },
               demo: {
                 type: "boolean",
@@ -2542,7 +2583,10 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const args = TaskforceDiscoverArgsSchema.parse(req.params.arguments ?? {});
         const bearerToken = opts.backendBearerTokenProvider?.();
         try {
-          const result = await callTaskforceDiscover(args, { bearerToken });
+          const result = await callTaskforceDiscover(
+            { ...args, client: args.client ?? resolveDefaultClient(opts) },
+            { bearerToken },
+          );
           return toolJson(result);
         } catch (err) {
           return toolError(
@@ -2568,7 +2612,10 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const args = TaskforceSessionStartArgsSchema.parse(req.params.arguments ?? {});
         const bearerToken = opts.backendBearerTokenProvider?.();
         try {
-          const result = await callTaskforceSessionStart(args, { bearerToken });
+          const result = await callTaskforceSessionStart(
+            { ...args, client: args.client ?? resolveDefaultClient(opts) },
+            { bearerToken },
+          );
           return toolJson(result);
         } catch (err) {
           return toolError(
@@ -2581,7 +2628,10 @@ export function createMcpServer(opts: McpServerOptions = {}): Server {
         const args = TaskforceSessionObserveArgsSchema.parse(req.params.arguments ?? {});
         const bearerToken = opts.backendBearerTokenProvider?.();
         try {
-          const result = await callTaskforceSessionObserve(args, { bearerToken });
+          const result = await callTaskforceSessionObserve(
+            { ...args, client: args.client ?? resolveDefaultClient(opts) },
+            { bearerToken },
+          );
           return toolJson(result);
         } catch (err) {
           return toolError(
