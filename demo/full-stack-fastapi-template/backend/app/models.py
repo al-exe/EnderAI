@@ -1580,6 +1580,55 @@ class TaskforceReferenceRequest(SQLModel):
     occurred_at: datetime | None = None
 
 
+class CrossBoundaryReuseEventPublic(SQLModel):
+    """One cross-person reuse/consult event for the empty-cell proof view.
+
+    ``owner_name`` is the producer (document owner); ``consumer_name`` is the
+    teammate who reused it. ``produced_by_client`` / ``consumed_by_client``
+    are the origin and consuming tools (Codex, Claude Code, …). ``usd_amount``
+    is an estimated floor when ``usd_is_estimated`` is true.
+    """
+
+    event_id: uuid.UUID
+    kind: str
+    occurred_at: datetime
+    document_id: uuid.UUID
+    document_title: str
+    document_href: str
+    produced_by_client: str | None = None
+    consumed_by_client: str | None = None
+    owner_id: uuid.UUID
+    owner_name: str
+    consumer_id: uuid.UUID
+    consumer_name: str
+    net_saved_tokens: int = 0
+    usd_amount: Decimal = Decimal(0)
+    usd_is_estimated: bool = True
+    specialist_slug: str | None = None
+    specialist_name: str | None = None
+    session_id: str | None = None
+    query_id: str | None = None
+    match_reasons: list[str] = Field(default_factory=list)
+    score: float | None = None
+    confidence_band: str | None = None
+
+
+class CrossBoundaryReuseResponse(SQLModel):
+    """Response for GET /v2/taskforce/cross-boundary-reuse (TF-202 / C3).
+
+    Org-scoped. ``proven_*`` aggregates are measured directly from real
+    events (surfaced + used + provenance); ``estimated_usd_total`` is the
+    deliberately understated lower bound the view renders as the $ figure.
+    """
+
+    scope: Literal["organization"] = "organization"
+    organization_id: uuid.UUID | None = None
+    proven_event_count: int = 0
+    proven_net_saved_tokens: int = 0
+    estimated_usd_total: Decimal = Decimal(0)
+    events: list[CrossBoundaryReuseEventPublic] = Field(default_factory=list)
+
+
 class TaskforceReferenceResponse(SQLModel):
     """Documents updated by POST /v2/taskforce/reference."""
 
@@ -1754,9 +1803,7 @@ class MatchedSpecialist(SQLModel):
     band: Literal["high", "medium", "low"]
     href: str  # f"/v2/agents/{slug}"
     reasons: list[str] = Field(default_factory=list)
-    linked_documents: list[MatchedSpecialistLinkedDoc] = Field(
-        default_factory=list
-    )
+    linked_documents: list[MatchedSpecialistLinkedDoc] = Field(default_factory=list)
 
 
 class TaskforceSessionStartResponse(SQLModel):

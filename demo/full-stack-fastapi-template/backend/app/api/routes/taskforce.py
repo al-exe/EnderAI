@@ -13,20 +13,26 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import desc
 from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.metrics.queries import taskforce_session_savings
+from app.core.metrics.queries import (
+    cross_boundary_reuse,
+    taskforce_session_savings,
+)
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
+    CrossBoundaryReuseEventPublic,
+    CrossBoundaryReuseResponse,
     MetricsEvent,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
@@ -311,4 +317,68 @@ def session_savings_route(
         occurred_at_last=savings.occurred_at_last,
         specialist_slug=savings.specialist_slug,
         specialist_name=savings.specialist_name,
+    )
+
+
+@router.get("/cross-boundary-reuse", response_model=CrossBoundaryReuseResponse)
+def cross_boundary_reuse_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    demo: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=MAX_REFERENCE_ROWS),
+) -> Any:
+    """Cross-person reuse ledger for the caller's organization (TF-202 / C3).
+
+    The empty-cell proof's read surface: documents produced by one teammate
+    and later reused/consulted by another, with the origin + consuming tool,
+    both display names, measured token savings and an estimated USD floor, and
+    the provenance trail. Org-scoped — a 422 is returned for solo users.
+    Nothing is seeded; every row is a real C1/C2 event.
+    """
+
+    if current_user.organization_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="User does not belong to an organization",
+        )
+
+    rows = cross_boundary_reuse(
+        session,
+        organization_id=current_user.organization_id,
+        is_demo=demo,
+        limit=limit,
+    )
+    events = [
+        CrossBoundaryReuseEventPublic(
+            event_id=row.event_id,
+            kind=row.kind,
+            occurred_at=row.occurred_at,
+            document_id=row.document_id,
+            document_title=row.document_title,
+            document_href=f"/v2/documents/{row.document_id}",
+            produced_by_client=row.produced_by_client,
+            consumed_by_client=row.consumed_by_client,
+            owner_id=row.owner_id,
+            owner_name=row.owner_name,
+            consumer_id=row.consumer_id,
+            consumer_name=row.consumer_name,
+            net_saved_tokens=row.net_saved_tokens,
+            usd_amount=row.usd_amount,
+            usd_is_estimated=row.usd_is_estimated,
+            specialist_slug=row.specialist_slug,
+            specialist_name=row.specialist_name,
+            session_id=row.session_id,
+            query_id=row.query_id,
+            match_reasons=row.match_reasons,
+            score=row.score,
+            confidence_band=row.confidence_band,
+        )
+        for row in rows
+    ]
+    return CrossBoundaryReuseResponse(
+        organization_id=current_user.organization_id,
+        proven_event_count=len(events),
+        proven_net_saved_tokens=sum(event.net_saved_tokens for event in events),
+        estimated_usd_total=sum((event.usd_amount for event in events), Decimal(0)),
+        events=events,
     )
