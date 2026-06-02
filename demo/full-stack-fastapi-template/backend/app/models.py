@@ -1414,6 +1414,92 @@ class MetricsDailyRollup(SQLModel, table=True):
     )
 
 
+class TaskforceSessionArchive(SQLModel, table=True):
+    """Persisted session archive for the Ledger transcript/detail surface."""
+
+    __tablename__ = "taskforce_session_archive"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "is_demo",
+            "session_id",
+            name="uq_taskforce_session_archive_org_demo_session",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: str = Field(min_length=1, max_length=128, index=True)
+    actor_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    is_demo: bool = Field(default=False, nullable=False, index=True)
+    client: str | None = Field(default=None, max_length=32)
+    specialist_slug: str | None = Field(default=None, max_length=64)
+    harness_label: str | None = Field(default=None, max_length=64)
+    harness_version: str | None = Field(default=None, max_length=64)
+    model_id: str | None = Field(default=None, max_length=128)
+    repo: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=255)
+    cwd: str | None = Field(default=None, max_length=1024)
+    title: str | None = Field(default=None, max_length=255)
+    started_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    ended_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    duration_ms: int = Field(default=0)
+    imported_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    message_count: int = Field(default=0)
+    command_count: int = Field(default=0)
+    edit_count: int = Field(default=0)
+    input_tokens: int = Field(default=0)
+    output_tokens: int = Field(default=0)
+    cache_read_tokens: int = Field(default=0)
+    cache_write_tokens: int = Field(default=0)
+    referenced_document_ids: list[str] = Field(
+        default_factory=list,
+        sa_type=JSONB,  # type: ignore
+    )
+    transcript_events: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_type=JSONB,  # type: ignore
+    )
+    raw_transcript: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_type=JSONB,  # type: ignore
+    )
+    source_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 # Event kinds emitted into metrics_event.kind. Kept as module-level constants
 # rather than a StrEnum so the values are stable in jsonb payloads and easy
 # to grep.
@@ -1588,6 +1674,25 @@ class LedgerDocRefPublic(SQLModel):
     document_id: uuid.UUID
     title: str
     href: str
+    state: Literal["fresh", "stale", "new", "unknown"] = "unknown"
+
+
+class LedgerTranscriptEventPublic(SQLModel):
+    """One normalized transcript event in a Ledger session detail."""
+
+    kind: Literal["prompt", "reply", "command", "edit", "note"]
+    occurred_at: datetime | None = None
+    role: str | None = None
+    who: str | None = None
+    text: str | None = None
+    cmd: str | None = None
+    exit_code: int | None = None
+    output: str | None = None
+    file: str | None = None
+    added: int | None = None
+    removed: int | None = None
+    note: str | None = None
+    repo: str | None = None
 
 
 class LedgerSessionRowPublic(SQLModel):
@@ -1614,6 +1719,36 @@ class LedgerSessionRowPublic(SQLModel):
     cross_boundary: bool = False
     occurred_at_first: datetime
     occurred_at_last: datetime
+    title: str | None = None
+    short_session_id: str | None = None
+    actor_handle: str | None = None
+    harness_label: str | None = None
+    harness_version: str | None = None
+    model_id: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    cwd: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    duration_ms: int = 0
+    imported_at: datetime | None = None
+    message_count: int = 0
+    command_count: int = 0
+    edit_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    source: str | None = None
+    transcript_available: bool = False
+
+
+class LedgerSessionDetailPublic(LedgerSessionRowPublic):
+    """Full Ledger session detail, including normalized transcript events."""
+
+    transcript_events: list[LedgerTranscriptEventPublic] = Field(default_factory=list)
+    raw_transcript_available: bool = False
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class LedgerResponse(SQLModel):

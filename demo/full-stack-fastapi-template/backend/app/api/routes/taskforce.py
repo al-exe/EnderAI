@@ -20,7 +20,7 @@ from sqlalchemy import desc
 from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.metrics.ledger import ledger_sessions
+from app.core.metrics.ledger import ledger_session_detail, ledger_sessions
 from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
@@ -30,7 +30,9 @@ from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     LedgerDocRefPublic,
     LedgerResponse,
+    LedgerSessionDetailPublic,
     LedgerSessionRowPublic,
+    LedgerTranscriptEventPublic,
     MetricsEvent,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
@@ -323,41 +325,64 @@ def _ledger_response_from_page(
     organization_id: uuid.UUID | None,
     page: Any,
 ) -> LedgerResponse:
-    rows = [
-        LedgerSessionRowPublic(
-            session_id=row.session_id,
-            actor_id=row.actor_id,
-            actor_name=row.actor_name,
-            client=row.client,
-            specialist_slug=row.specialist_slug,
-            specialist_name=row.specialist_name,
-            specialist_href=(
-                f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
-            ),
-            documents=[
-                LedgerDocRefPublic(
-                    document_id=doc.document_id,
-                    title=doc.title,
-                    href=f"/v2/library/{doc.document_id}",
-                )
-                for doc in row.documents
-            ],
-            kinds=row.kinds,
-            net_saved_tokens=row.net_saved_tokens,
-            usd_amount=row.usd_amount,
-            event_count=row.event_count,
-            cross_boundary=row.cross_boundary,
-            occurred_at_first=row.occurred_at_first,
-            occurred_at_last=row.occurred_at_last,
-        )
-        for row in page.rows
-    ]
+    rows = [_ledger_row_public(row) for row in page.rows]
     return LedgerResponse(
         organization_id=organization_id,
         total=page.total,
         limit=page.limit,
         offset=page.offset,
         rows=rows,
+    )
+
+
+def _ledger_row_public(row: Any) -> LedgerSessionRowPublic:
+    return LedgerSessionRowPublic(
+        session_id=row.session_id,
+        actor_id=row.actor_id,
+        actor_name=row.actor_name,
+        client=row.client,
+        specialist_slug=row.specialist_slug,
+        specialist_name=row.specialist_name,
+        specialist_href=(
+            f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
+        ),
+        documents=[
+            LedgerDocRefPublic(
+                document_id=doc.document_id,
+                title=doc.title,
+                href=f"/v2/library/{doc.document_id}",
+            )
+            for doc in row.documents
+        ],
+        kinds=row.kinds,
+        net_saved_tokens=row.net_saved_tokens,
+        usd_amount=row.usd_amount,
+        event_count=row.event_count,
+        cross_boundary=row.cross_boundary,
+        occurred_at_first=row.occurred_at_first,
+        occurred_at_last=row.occurred_at_last,
+        title=row.title,
+        short_session_id=row.session_id[:8],
+        actor_handle=row.actor_handle,
+        harness_label=row.harness_label,
+        harness_version=row.harness_version,
+        model_id=row.model_id,
+        repo=row.repo,
+        branch=row.branch,
+        cwd=row.cwd,
+        started_at=row.started_at,
+        ended_at=row.ended_at,
+        duration_ms=row.duration_ms,
+        imported_at=row.imported_at,
+        message_count=row.message_count,
+        command_count=row.command_count,
+        edit_count=row.edit_count,
+        input_tokens=row.input_tokens,
+        output_tokens=row.output_tokens,
+        cache_read_tokens=row.cache_read_tokens,
+        cache_write_tokens=row.cache_write_tokens,
+        source=row.source,
+        transcript_available=row.transcript_available,
     )
 
 
@@ -419,6 +444,7 @@ def ledger_route(
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
     q: str | None = Query(default=None, max_length=200),
+    sort: str = Query(default="newest", pattern="^(newest|oldest)$"),
     limit: int = Query(default=50, ge=1, le=MAX_REFERENCE_ROWS),
     offset: int = Query(default=0, ge=0),
 ) -> Any:
@@ -453,10 +479,61 @@ def ledger_route(
         since=since,
         until=until,
         query=q,
+        sort=sort,
         limit=limit,
         offset=offset,
     )
     return _ledger_response_from_page(
         organization_id=current_user.organization_id,
         page=page,
+    )
+
+
+@router.get("/ledger/{session_id}", response_model=LedgerSessionDetailPublic)
+def ledger_detail_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Return one org-scoped Ledger session with transcript detail."""
+
+    if current_user.organization_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="User does not belong to an organization",
+        )
+
+    detail = ledger_session_detail(
+        session,
+        organization_id=current_user.organization_id,
+        session_id=session_id,
+        is_demo=demo,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Ledger session not found")
+
+    row = _ledger_row_public(detail.row)
+    return LedgerSessionDetailPublic(
+        **row.model_dump(),
+        transcript_events=[
+            LedgerTranscriptEventPublic(
+                kind=event.kind,  # type: ignore[arg-type]
+                occurred_at=event.occurred_at,
+                role=event.role,
+                who=event.who,
+                text=event.text,
+                cmd=event.cmd,
+                exit_code=event.exit_code,
+                output=event.output,
+                file=event.file,
+                added=event.added,
+                removed=event.removed,
+                note=event.note,
+                repo=event.repo,
+            )
+            for event in detail.transcript_events
+        ],
+        raw_transcript_available=detail.raw_transcript_available,
+        source_metadata=detail.source_metadata,
     )

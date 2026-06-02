@@ -191,3 +191,103 @@ def test_ledger_pagination(client: TestClient, db: Session) -> None:
     body = page.json()
     assert body["limit"] == 1
     assert len(body["rows"]) <= 1
+
+
+def test_ledger_archive_fields_and_detail_endpoint(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+    doc_id = _create_document(client, headers, title="Ledger archive fixture")
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "Capture ledger archive transcript behavior",
+            "transcript": [
+                {"role": "user", "content": "Implement archive-backed ledger"},
+                {"role": "assistant", "content": "Added the read model"},
+            ],
+            "active_document_id": doc_id,
+            "session_id": "ledger-archive-detail-test",
+            "client": "codex",
+            "cwd": "/Users/alexlee/dev/EnderAI",
+            "summary_points": ["Archive-backed Ledger sessions render detail."],
+            "commands_run": [{"cmd": "pytest backend/tests/api/test_taskforce_ledger.py", "exit_code": 0}],
+            "files_touched": ["backend/app/core/taskforce/archive.py"],
+            "diff_summary": "Added TaskforceSessionArchive ingestion.",
+            "duration_ms": 1234,
+            "harness": {
+                "model_id": "gpt-5",
+                "total_input_tokens": 100,
+                "total_output_tokens": 40,
+                "total_cache_read_tokens": 10,
+                "total_cache_write_tokens": 5,
+            },
+            "specialist_slug": "platform",
+        },
+    )
+    assert observe.status_code == 202, observe.text
+
+    listing = client.get(
+        _LEDGER,
+        headers=headers,
+        params={"q": "archive-backed", "sort": "newest"},
+    )
+    assert listing.status_code == 200, listing.text
+    row = next(
+        r
+        for r in listing.json()["rows"]
+        if r["session_id"] == "ledger-archive-detail-test"
+    )
+    assert row["title"] == "Archive-backed Ledger sessions render detail."
+    assert row["short_session_id"] == "ledger-a"
+    assert row["client"] == "codex"
+    assert row["harness_label"] == "codex"
+    assert row["model_id"] == "gpt-5"
+    assert row["repo"] == "EnderAI"
+    assert row["message_count"] == 2
+    assert row["command_count"] == 1
+    assert row["edit_count"] == 1
+    assert row["input_tokens"] == 100
+    assert row["output_tokens"] == 40
+    assert row["cache_read_tokens"] == 10
+    assert row["cache_write_tokens"] == 5
+    assert row["duration_ms"] == 1234
+    assert row["transcript_available"] is True
+    assert any(doc["document_id"] == doc_id for doc in row["documents"])
+
+    detail = client.get(f"{_LEDGER}/ledger-archive-detail-test", headers=headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["session_id"] == "ledger-archive-detail-test"
+    assert body["raw_transcript_available"] is True
+    assert body["source_metadata"]["kind"] == "final"
+    kinds = [event["kind"] for event in body["transcript_events"]]
+    assert {"prompt", "reply", "command", "edit", "note"}.issubset(kinds)
+    command = next(event for event in body["transcript_events"] if event["kind"] == "command")
+    assert command["cmd"].startswith("pytest backend/tests")
+    assert command["exit_code"] == 0
+    edit = next(event for event in body["transcript_events"] if event["kind"] == "edit")
+    assert edit["file"] == "backend/app/core/taskforce/archive.py"
+
+
+def test_ledger_detail_falls_back_for_metrics_only_session(
+    client: TestClient,
+    db: Session,
+) -> None:
+    _, _, _, bob_headers, _ = _alice_doc_bob_reuse(client, db)
+
+    listing = client.get(_LEDGER, headers=bob_headers)
+    assert listing.status_code == 200, listing.text
+    row = listing.json()["rows"][0]
+
+    detail = client.get(f"{_LEDGER}/{row['session_id']}", headers=bob_headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["session_id"] == row["session_id"]
+    assert body["transcript_events"] == []
+    assert body["raw_transcript_available"] is False
