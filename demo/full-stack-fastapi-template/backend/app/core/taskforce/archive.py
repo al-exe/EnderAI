@@ -69,12 +69,11 @@ def upsert_session_archive_from_observe(
     archive.specialist_slug = request.specialist_slug or archive.specialist_slug
     archive.harness_label = request.client or archive.harness_label
     archive.model_id = (
-        request.harness.model_id
-        if request.harness is not None
-        else archive.model_id
+        request.harness.model_id if request.harness is not None else archive.model_id
     )
     archive.cwd = request.cwd or archive.cwd
     archive.repo = _repo_from_cwd(request.cwd) or archive.repo
+    archive.branch = request.branch or archive.branch
     archive.title = _title_from_request(request) or archive.title
     archive.started_at = _earliest(archive.started_at, started_at)
     archive.ended_at = now if request.kind == "final" else archive.ended_at

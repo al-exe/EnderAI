@@ -115,9 +115,16 @@ if [[ -f "${STATE_DIR}/${session_id}.active" ]]; then
     active_doc_id="\"$(cat "${STATE_DIR}/${session_id}.active" | tr -d '\r\n')\""
 fi
 
+# Active git branch (best effort; the hook runs in the session cwd).
+branch=""
+if [[ -n "$cwd" && -d "$cwd" ]]; then
+    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+
 body="$(jq -cn \
     --arg session_id "$session_id" \
     --arg cwd "$cwd" \
+    --arg branch "$branch" \
     --argjson transcript "$transcript_array" \
     --argjson files "$files_touched" \
     --argjson commands "$commands_run" \
@@ -130,6 +137,8 @@ body="$(jq -cn \
         active_document_id: $active,
         session_id: $session_id,
         cwd: (if $cwd == "" then null else $cwd end),
+        branch: (if $branch == "" then null else $branch end),
+        client: "claude-code",
         files_touched: $files,
         commands_run: $commands,
         duration_ms: 0,
