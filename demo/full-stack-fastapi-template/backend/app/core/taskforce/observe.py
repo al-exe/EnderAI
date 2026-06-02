@@ -31,6 +31,7 @@ from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.metrics.events import _build_event, _now
+from app.core.taskforce.archive import upsert_session_archive_from_observe
 from app.core.taskforce.materiality import assess_materiality
 from app.core.taskforce.summarizer import (
     PROMPT_VERSION,
@@ -117,6 +118,13 @@ async def observe(
 ) -> TaskforceObserveResponse:
     shadow = _shadow_mode()
     structured = _has_structured_payload(request)
+    upsert_session_archive_from_observe(
+        session,
+        actor=actor,
+        request=request,
+        demo=demo,
+        document_id=request.active_document_id,
+    )
 
     materiality = assess_materiality(request)
     if not materiality.material:
@@ -270,6 +278,14 @@ async def observe(
         target_doc.updated_at = _now()
         session.add(target_doc)
         action = "updated"
+
+    upsert_session_archive_from_observe(
+        session,
+        actor=actor,
+        request=request,
+        demo=demo,
+        document_id=target_doc.id,
+    )
 
     audit = _record_audit(
         session,
