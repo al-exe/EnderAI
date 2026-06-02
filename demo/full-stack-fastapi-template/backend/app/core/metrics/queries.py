@@ -15,7 +15,6 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from sqlalchemy import func
-from sqlalchemy.orm import aliased
 from sqlmodel import Session, col, select
 
 from app.core.metrics.registry import (
@@ -27,15 +26,12 @@ from app.core.metrics.registry import (
 )
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
-    METRICS_EVENT_DOCUMENT_REUSED,
     METRICS_EVENT_TOKENS_CONSUMED,
     METRICS_EVENT_TOKENS_SAVED_CACHE,
     METRICS_EVENT_TOKENS_SAVED_REUSE,
     METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY,
     AgentSpecialist,
     MetricsEvent,
-    User,
-    V2Document,
 )
 
 WindowName = Literal["7d", "30d", "all"]
@@ -421,142 +417,3 @@ def daily_series(
         out.append(DayValue(day=cursor, value=by_day.get(cursor, Decimal(0))))
         cursor += timedelta(days=1)
     return out
-
-
-# ----- cross-boundary reuse (TF-202 / C3) ----------------------------------
-
-_CROSS_BOUNDARY_KINDS = (
-    METRICS_EVENT_DOCUMENT_REUSED,
-    METRICS_EVENT_DOCUMENT_CONSULTED,
-)
-# Fallback pricing model when a cross-boundary event predates per-event model
-# capture. Matches the reuse-savings default used elsewhere in the engine.
-_CROSS_BOUNDARY_DEFAULT_PRICING_MODEL = "claude-opus-4-7"
-
-
-@dataclass(frozen=True)
-class CrossBoundaryReuseEvent:
-    """One cross-person reuse/consult event (work produced by A, used by B)."""
-
-    event_id: uuid.UUID
-    kind: str
-    occurred_at: datetime
-    document_id: uuid.UUID
-    document_title: str
-    produced_by_client: str | None
-    consumed_by_client: str | None
-    owner_id: uuid.UUID
-    owner_name: str
-    consumer_id: uuid.UUID
-    consumer_name: str
-    net_saved_tokens: int
-    usd_amount: Decimal
-    usd_is_estimated: bool
-    specialist_slug: str | None
-    specialist_name: str | None
-    session_id: str | None
-    query_id: str | None
-    match_reasons: list[str]
-    score: float | None
-    confidence_band: str | None
-
-
-def cross_boundary_reuse(
-    session: Session,
-    *,
-    organization_id: uuid.UUID,
-    is_demo: bool = False,
-    limit: int = 50,
-) -> list[CrossBoundaryReuseEvent]:
-    """Cross-person reuse/consult events inside one organization.
-
-    The empty-cell proof (TF-202 / C3): work *produced* by one teammate and
-    later *reused* by another. Surfaces ``document.reused`` and
-    ``document.consulted`` events whose consumer (``MetricsEvent.user_id``) is
-    not the document owner, restricted to org-visible documents in the given
-    organization. Each row carries both display names, the origin tool
-    (``produced_by_client``) and the consuming tool (``consumed_by_client``
-    off the event payload), measured ``net_saved_tokens`` plus an estimated
-    USD floor, and the provenance trail (session id, query id, match reasons)
-    the drill-down view renders. Newest first.
-    """
-
-    from app.core.metrics.pricing import pricing_for
-
-    owner = aliased(User)
-    consumer = aliased(User)
-    statement = (
-        select(MetricsEvent, V2Document, owner, consumer)
-        .join(V2Document, col(V2Document.id) == col(MetricsEvent.document_id))
-        .join(owner, col(owner.id) == col(V2Document.owner_id))
-        .join(consumer, col(consumer.id) == col(MetricsEvent.user_id))
-        .where(col(MetricsEvent.kind).in_(_CROSS_BOUNDARY_KINDS))
-        .where(MetricsEvent.is_demo == is_demo)
-        .where(col(MetricsEvent.user_id) != col(V2Document.owner_id))
-        .where(V2Document.organization_id == organization_id)
-        .where(V2Document.visibility == "organization")
-        .order_by(col(MetricsEvent.occurred_at).desc())
-        .limit(limit)
-    )
-
-    specialist_names: dict[str, str | None] = {}
-    rows: list[CrossBoundaryReuseEvent] = []
-    for event, document, owner_user, consumer_user in session.exec(statement):
-        payload = event.payload or {}
-        net_saved = int(
-            payload.get("net_saved_tokens")
-            or payload.get("bootstrap_tokens")
-            or event.input_tokens
-            or 0
-        )
-
-        slug = payload.get("specialist_slug")
-        if slug and slug not in specialist_names:
-            specialist_names[slug] = session.exec(
-                select(AgentSpecialist.name).where(AgentSpecialist.slug == slug)
-            ).first()
-
-        usd_amount = event.usd_amount
-        usd_is_estimated = usd_amount is None
-        if usd_amount is None:
-            pricing = pricing_for(
-                session,
-                event.model_id or _CROSS_BOUNDARY_DEFAULT_PRICING_MODEL,
-                event.occurred_at,
-            )
-            if pricing is not None and pricing.input_per_mtok is not None:
-                usd_amount = (
-                    Decimal(net_saved) / Decimal(1_000_000)
-                ) * pricing.input_per_mtok
-            else:
-                usd_amount = Decimal(0)
-
-        score_raw = payload.get("score")
-        rows.append(
-            CrossBoundaryReuseEvent(
-                event_id=event.id,
-                kind=event.kind,
-                occurred_at=event.occurred_at,
-                document_id=document.id,
-                document_title=document.title,
-                produced_by_client=document.produced_by_client,
-                consumed_by_client=payload.get("consumed_by_client"),
-                owner_id=owner_user.id,
-                owner_name=owner_user.full_name or owner_user.email,
-                consumer_id=consumer_user.id,
-                consumer_name=consumer_user.full_name or consumer_user.email,
-                net_saved_tokens=net_saved,
-                usd_amount=Decimal(str(usd_amount)).quantize(Decimal("0.000001")),
-                usd_is_estimated=usd_is_estimated,
-                specialist_slug=slug,
-                specialist_name=specialist_names.get(slug) if slug else None,
-                session_id=payload.get("session_id"),
-                query_id=payload.get("query_id"),
-                match_reasons=list(
-                    payload.get("match_reasons") or payload.get("reasons") or []
-                ),
-                score=float(score_raw) if score_raw is not None else None,
-                confidence_band=payload.get("band"),
-            )
-        )
-    return rows
