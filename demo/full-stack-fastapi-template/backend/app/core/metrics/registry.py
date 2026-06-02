@@ -171,6 +171,28 @@ REGISTRY: dict[str, MetricDefinition] = {
         field_name="usd_amount",
         presentation=MetricPresentation(format="usd", icon="dollar"),
     ),
+    "cross_boundary_reuse_rate": MetricDefinition(
+        name="cross_boundary_reuse_rate",
+        display_name="Boundary-Crossing Reuse",
+        unit="ratio",
+        description=(
+            "Share of document consultations that crossed a person or tool boundary."
+        ),
+        kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
+        composed=True,
+        presentation=MetricPresentation(format="ratio"),
+    ),
+    "cross_boundary_tokens_saved": MetricDefinition(
+        name="cross_boundary_tokens_saved",
+        display_name="Boundary-Crossing Savings",
+        unit="tokens",
+        description=(
+            "Tokens saved by consultations that reused work across a teammate or tool boundary."
+        ),
+        kinds=(METRICS_EVENT_DOCUMENT_CONSULTED,),
+        composed=True,
+        presentation=MetricPresentation(format="compact-int", icon="spark"),
+    ),
 }
 
 

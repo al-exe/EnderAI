@@ -20,6 +20,7 @@ from app.core.metrics import (
     REGISTRY,
     MetricDefinition,
     all_metric_names,
+    cross_boundary_reuse_totals,
     daily_series,
     documents_consulted_count,
     documents_touched_count,
@@ -98,10 +99,14 @@ def _compute_metric_value(
             if defn.name == "documents_touched"
             else documents_consulted_count
         )
-        total = Decimal(counter(session, user_id=user_id, is_demo=is_demo, window=window))
+        total = Decimal(
+            counter(session, user_id=user_id, is_demo=is_demo, window=window)
+        )
         prev_window = window.previous()
         prev_total = (
-            Decimal(counter(session, user_id=user_id, is_demo=is_demo, window=prev_window))
+            Decimal(
+                counter(session, user_id=user_id, is_demo=is_demo, window=prev_window)
+            )
             if prev_window is not None
             else None
         )
@@ -124,6 +129,33 @@ def _compute_metric_value(
                 delta_vs_prev_window=_delta_abs(total, prev),
             )
         return MetricValuePublic(total=total)
+
+    if defn.name in {"cross_boundary_reuse_rate", "cross_boundary_tokens_saved"}:
+        totals = cross_boundary_reuse_totals(
+            session,
+            user_id=user_id,
+            is_demo=is_demo,
+            window=window,
+        )
+        if defn.name == "cross_boundary_reuse_rate":
+            return MetricValuePublic(total=totals.rate)
+        return MetricValuePublic(
+            total=Decimal(totals.cross_boundary_tokens),
+            breakdown_by_source=[
+                MetricBreakdownEntry(
+                    key="cross_boundary",
+                    label="Cross-boundary",
+                    tokens=totals.cross_boundary_tokens,
+                    usd=totals.cross_boundary_usd,
+                ),
+                MetricBreakdownEntry(
+                    key="same_boundary",
+                    label="Same owner/tool",
+                    tokens=totals.same_boundary_tokens,
+                    usd=totals.same_boundary_usd,
+                ),
+            ],
+        )
 
     total = sum_metric_total(
         session,

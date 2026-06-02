@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import Session, delete
 
 from app.core.metrics import (
+    cross_boundary_reuse_totals,
     documents_touched_count,
     resolve_window,
     reuse_rate,
@@ -16,6 +17,7 @@ from app.core.metrics import (
 from app.core.metrics.registry import REGISTRY
 from app.core.security import get_password_hash
 from app.models import (
+    METRICS_EVENT_DOCUMENT_CONSULTED,
     METRICS_EVENT_DOCUMENT_CREATED,
     METRICS_EVENT_DOCUMENT_REUSED,
     METRICS_EVENT_TOKENS_CONSUMED,
@@ -72,6 +74,7 @@ def _event(
     is_demo: bool = False,
     model_id: str | None = None,
     output_tokens: int | None = None,
+    payload: dict[str, str] | None = None,
 ) -> None:
     event = MetricsEvent(
         occurred_at=occurred_at,
@@ -84,6 +87,7 @@ def _event(
         output_tokens=output_tokens,
         cache_read_tokens=cache_read_tokens,
         usd_amount=usd_amount,
+        payload=payload or {},
         is_demo=is_demo,
     )
     db.add(event)
@@ -263,6 +267,56 @@ def test_savings_breakdown_splits_by_kind(db: Session, user: User) -> None:
     assert breakdown.summary_only == Decimal(200)
     assert breakdown.reuse == Decimal(300)
     assert breakdown.total == Decimal(600)
+
+
+def test_cross_boundary_reuse_totals_split_tool_boundary(
+    db: Session, user: User
+) -> None:
+    same_doc = _doc(db, user)
+    same_doc.produced_by_client = "codex"
+    cross_doc = _doc(db, user)
+    cross_doc.produced_by_client = "codex"
+    db.add(same_doc)
+    db.add(cross_doc)
+    db.commit()
+
+    now = _utc(2026, 5, 19)
+    _event(
+        db,
+        user,
+        kind=METRICS_EVENT_DOCUMENT_CONSULTED,
+        occurred_at=now,
+        input_tokens=100,
+        usd_amount=Decimal("0.010000"),
+        document=same_doc,
+        payload={"consumed_by_client": "codex"},
+    )
+    _event(
+        db,
+        user,
+        kind=METRICS_EVENT_DOCUMENT_CONSULTED,
+        occurred_at=now,
+        input_tokens=300,
+        usd_amount=Decimal("0.030000"),
+        document=cross_doc,
+        payload={"consumed_by_client": "claude-code"},
+    )
+
+    window = resolve_window("7d", now=_utc(2026, 5, 19, 23))
+    totals = cross_boundary_reuse_totals(
+        db,
+        user_id=user.id,
+        is_demo=False,
+        window=window,
+    )
+
+    assert totals.total_consults == 2
+    assert totals.cross_boundary_consults == 1
+    assert totals.rate == Decimal("0.5000")
+    assert totals.cross_boundary_tokens == 300
+    assert totals.cross_boundary_usd == Decimal("0.030000")
+    assert totals.same_boundary_tokens == 100
+    assert totals.same_boundary_usd == Decimal("0.010000")
 
 
 def test_top_models_orders_by_total_tokens_desc(db: Session, user: User) -> None:

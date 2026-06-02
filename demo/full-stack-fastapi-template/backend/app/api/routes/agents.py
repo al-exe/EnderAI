@@ -152,8 +152,7 @@ def _recent_invocations(
                 update={
                     "tokens_saved": existing.tokens_saved
                     + int(event.input_tokens or 0),
-                    "documents_consulted_count": existing.documents_consulted_count
-                    + 1,
+                    "documents_consulted_count": existing.documents_consulted_count + 1,
                     # Keep the earliest occurred_at as the row's "when" so
                     # the time delta shown to the user reflects when the
                     # session started, not when the last doc was logged.
@@ -232,6 +231,7 @@ def _summary_for(
         short_description=specialist.short_description,
         domain_tags=list(specialist.domain_tags or []),
         status=specialist.status,
+        created_from=specialist.created_from,
         linked_docs_count=linked_docs_count,
         invocations_count=stats.invocations_count,
         tokens_saved=stats.tokens_saved,
@@ -314,6 +314,7 @@ def get_agent(
         name=specialist.name,
         role=specialist.role,
         description=specialist.description,
+        created_from=specialist.created_from,
         domain_tags=list(specialist.domain_tags or []),
         routing_triggers=list(specialist.routing_triggers or []),
         negative_triggers=list(specialist.negative_triggers or []),
