@@ -114,6 +114,7 @@ def ledger_sessions(
     *,
     organization_id: uuid.UUID,
     is_demo: bool = False,
+    document_id: uuid.UUID | None = None,
     actor_id: uuid.UUID | None = None,
     client: str | None = None,
     specialist_slug: str | None = None,
@@ -167,6 +168,8 @@ def ledger_sessions(
         .where(MetricsEvent.organization_id == organization_id)
         .where(MetricsEvent.is_demo == is_demo)
     )
+    if document_id is not None:
+        grouped = grouped.where(MetricsEvent.document_id == document_id)
     if actor_id is not None:
         grouped = grouped.where(MetricsEvent.user_id == actor_id)
     if client is not None:

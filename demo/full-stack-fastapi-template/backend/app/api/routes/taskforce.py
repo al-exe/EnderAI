@@ -318,6 +318,95 @@ def session_savings_route(
     )
 
 
+def _ledger_response_from_page(
+    *,
+    organization_id: uuid.UUID | None,
+    page: Any,
+) -> LedgerResponse:
+    rows = [
+        LedgerSessionRowPublic(
+            session_id=row.session_id,
+            actor_id=row.actor_id,
+            actor_name=row.actor_name,
+            client=row.client,
+            specialist_slug=row.specialist_slug,
+            specialist_name=row.specialist_name,
+            specialist_href=(
+                f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
+            ),
+            documents=[
+                LedgerDocRefPublic(
+                    document_id=doc.document_id,
+                    title=doc.title,
+                    href=f"/v2/library/{doc.document_id}",
+                )
+                for doc in row.documents
+            ],
+            kinds=row.kinds,
+            net_saved_tokens=row.net_saved_tokens,
+            usd_amount=row.usd_amount,
+            event_count=row.event_count,
+            cross_boundary=row.cross_boundary,
+            occurred_at_first=row.occurred_at_first,
+            occurred_at_last=row.occurred_at_last,
+        )
+        for row in page.rows
+    ]
+    return LedgerResponse(
+        organization_id=organization_id,
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        rows=rows,
+    )
+
+
+@router.get("/documents/{document_id}/sessions", response_model=LedgerResponse)
+def document_sessions_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+    limit: int = Query(default=10, ge=1, le=MAX_REFERENCE_ROWS),
+    offset: int = Query(default=0, ge=0),
+) -> Any:
+    """Sessions that produced or consulted one document (TF-209 / P2).
+
+    This powers the quiet "Sessions / Reused by" strip on the document detail
+    surface. It is intentionally the Ledger read model filtered to one
+    accessible document, not a second provenance system.
+    """
+
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if (
+        current_user.organization_id is None
+        or document.organization_id != current_user.organization_id
+    ):
+        return LedgerResponse(
+            organization_id=current_user.organization_id,
+            total=0,
+            limit=limit,
+            offset=offset,
+            rows=[],
+        )
+
+    page = ledger_sessions(
+        session,
+        organization_id=current_user.organization_id,
+        is_demo=demo,
+        document_id=document.id,
+        limit=limit,
+        offset=offset,
+    )
+    return _ledger_response_from_page(
+        organization_id=current_user.organization_id,
+        page=page,
+    )
+
+
 @router.get("/ledger", response_model=LedgerResponse)
 def ledger_route(
     session: SessionDep,
@@ -367,39 +456,7 @@ def ledger_route(
         limit=limit,
         offset=offset,
     )
-    rows = [
-        LedgerSessionRowPublic(
-            session_id=row.session_id,
-            actor_id=row.actor_id,
-            actor_name=row.actor_name,
-            client=row.client,
-            specialist_slug=row.specialist_slug,
-            specialist_name=row.specialist_name,
-            specialist_href=(
-                f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
-            ),
-            documents=[
-                LedgerDocRefPublic(
-                    document_id=doc.document_id,
-                    title=doc.title,
-                    href=f"/v2/library/{doc.document_id}",
-                )
-                for doc in row.documents
-            ],
-            kinds=row.kinds,
-            net_saved_tokens=row.net_saved_tokens,
-            usd_amount=row.usd_amount,
-            event_count=row.event_count,
-            cross_boundary=row.cross_boundary,
-            occurred_at_first=row.occurred_at_first,
-            occurred_at_last=row.occurred_at_last,
-        )
-        for row in page.rows
-    ]
-    return LedgerResponse(
+    return _ledger_response_from_page(
         organization_id=current_user.organization_id,
-        total=page.total,
-        limit=page.limit,
-        offset=page.offset,
-        rows=rows,
+        page=page,
     )

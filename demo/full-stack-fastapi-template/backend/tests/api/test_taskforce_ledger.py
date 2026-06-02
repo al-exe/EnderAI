@@ -21,6 +21,7 @@ from tests.api.test_taskforce_api import (
 )
 
 _LEDGER = f"{settings.API_V1_STR}/v2/taskforce/ledger"
+_DOCUMENTS = f"{settings.API_V1_STR}/v2/taskforce/documents"
 
 
 def _stamp_produced_by_client(db: Session, doc_id: str, client_name: str) -> None:
@@ -120,6 +121,31 @@ def test_ledger_cross_boundary_filter(client: TestClient, db: Session) -> None:
     assert rows, "cross-boundary filter should keep the cross-tool reuse session"
     assert all(r["cross_boundary"] is True for r in rows)
     assert any(any(d["document_id"] == doc_id for d in r["documents"]) for r in rows)
+
+
+def test_document_sessions_lists_document_provenance(
+    client: TestClient, db: Session
+) -> None:
+    _, _, bob_email, bob_headers, doc_id = _alice_doc_bob_reuse(client, db)
+    bob = _user_by_email(db, bob_email)
+
+    resp = client.get(f"{_DOCUMENTS}/{doc_id}/sessions", headers=bob_headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["scope"] == "organization"
+    assert body["organization_id"] == str(bob.organization_id)
+    assert body["total"] >= 1
+    assert body["rows"]
+    assert all(
+        any(doc["document_id"] == doc_id for doc in row["documents"])
+        for row in body["rows"]
+    )
+    row = body["rows"][0]
+    assert row["actor_id"] == str(bob.id)
+    assert row["client"] == "claude-code"
+    assert row["cross_boundary"] is True
+    assert "document.consulted" in row["kinds"]
 
 
 def test_ledger_client_filter(client: TestClient, db: Session) -> None:

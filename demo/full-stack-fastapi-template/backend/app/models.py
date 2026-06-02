@@ -1195,6 +1195,7 @@ class AgentSpecialistSummary(SQLModel):
     short_description: str
     domain_tags: list[str] = Field(default_factory=list)
     status: Literal["active", "draft", "archived"]
+    created_from: str = "seeded"
     linked_docs_count: int = Field(default=0, ge=0)
     invocations_count: int = Field(default=0, ge=0)
     tokens_saved: int = Field(default=0, ge=0)
@@ -1239,6 +1240,7 @@ class AgentSpecialistDetail(SQLModel):
     name: str
     role: str
     description: str
+    created_from: str = "seeded"
     domain_tags: list[str] = Field(default_factory=list)
     routing_triggers: list[str] = Field(default_factory=list)
     negative_triggers: list[str] = Field(default_factory=list)

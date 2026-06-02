@@ -18,6 +18,7 @@ from app.core.metrics.pricing import pricing_for
 from app.core.metrics.queries import (
     MetricWindow,
     SavingsBreakdown,
+    cross_boundary_reuse_totals,
     daily_series,
     documents_consulted_count,
     documents_touched_count,
@@ -59,6 +60,7 @@ __all__ = [
     "count_details_sections_tokens",
     "count_paragraph_tokens",
     "count_tokens",
+    "cross_boundary_reuse_totals",
     "daily_series",
     "documents_consulted_count",
     "documents_touched_count",

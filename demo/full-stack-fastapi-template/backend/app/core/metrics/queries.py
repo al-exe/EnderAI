@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import func
+from sqlalchemy import and_, case, func, or_
 from sqlmodel import Session, col, select
 
 from app.core.metrics.registry import (
@@ -32,6 +32,7 @@ from app.models import (
     METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY,
     AgentSpecialist,
     MetricsEvent,
+    V2Document,
 )
 
 WindowName = Literal["7d", "30d", "all"]
@@ -228,6 +229,97 @@ def savings_breakdown(
         cache=sums.get(METRICS_EVENT_TOKENS_SAVED_CACHE, Decimal(0)),
         summary_only=sums.get(METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY, Decimal(0)),
         reuse=sums.get(METRICS_EVENT_TOKENS_SAVED_REUSE, Decimal(0)),
+    )
+
+
+@dataclass(frozen=True)
+class CrossBoundaryReuseTotals:
+    total_consults: int
+    cross_boundary_consults: int
+    cross_boundary_tokens: int
+    cross_boundary_usd: Decimal
+    same_boundary_tokens: int
+    same_boundary_usd: Decimal
+
+    @property
+    def rate(self) -> Decimal:
+        if self.total_consults == 0:
+            return Decimal(0)
+        return (
+            Decimal(self.cross_boundary_consults) / Decimal(self.total_consults)
+        ).quantize(Decimal("0.0001"))
+
+
+def _consumed_client_expr() -> Any:
+    return MetricsEvent.payload["consumed_by_client"].astext
+
+
+def _cross_boundary_event_expr() -> Any:
+    person_boundary = and_(
+        col(MetricsEvent.document_id).is_not(None),
+        col(MetricsEvent.user_id) != col(V2Document.owner_id),
+    )
+    consumed = _consumed_client_expr()
+    tool_boundary = and_(
+        consumed.is_not(None),
+        col(V2Document.produced_by_client).is_not(None),
+        consumed != col(V2Document.produced_by_client),
+    )
+    return or_(person_boundary, tool_boundary)
+
+
+def cross_boundary_reuse_totals(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    is_demo: bool,
+    window: MetricWindow,
+) -> CrossBoundaryReuseTotals:
+    """Reuse volume that crossed a person or tool boundary.
+
+    This is the Metrics-side view of the same quiet boolean used by the Ledger:
+    consumer != document owner OR consuming tool != producing tool.
+    """
+
+    xb = _cross_boundary_event_expr()
+    input_tokens = func.coalesce(MetricsEvent.input_tokens, 0)
+    usd_amount = func.coalesce(MetricsEvent.usd_amount, 0)
+    statement = (
+        select(
+            func.count(),
+            func.coalesce(func.sum(case((xb, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((xb, input_tokens), else_=0)), 0),
+            func.coalesce(func.sum(case((xb, usd_amount), else_=0)), 0),
+            func.coalesce(func.sum(case((xb, 0), else_=input_tokens)), 0),
+            func.coalesce(func.sum(case((xb, 0), else_=usd_amount)), 0),
+        )
+        .join(
+            V2Document,
+            col(V2Document.id) == col(MetricsEvent.document_id),
+            isouter=True,
+        )
+        .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
+    )
+    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    (
+        total_consults,
+        cross_boundary_consults,
+        cross_boundary_tokens,
+        cross_boundary_usd,
+        same_boundary_tokens,
+        same_boundary_usd,
+    ) = session.exec(statement).one()
+    return CrossBoundaryReuseTotals(
+        total_consults=int(total_consults or 0),
+        cross_boundary_consults=int(cross_boundary_consults or 0),
+        cross_boundary_tokens=int(cross_boundary_tokens or 0),
+        cross_boundary_usd=Decimal(str(cross_boundary_usd or 0)).quantize(
+            Decimal("0.000001")
+        ),
+        same_boundary_tokens=int(same_boundary_tokens or 0),
+        same_boundary_usd=Decimal(str(same_boundary_usd or 0)).quantize(
+            Decimal("0.000001")
+        ),
     )
 
 
