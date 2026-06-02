@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import String, and_, cast, func, or_
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlmodel import Session, col, select
 
 from app.models import (
@@ -194,7 +195,11 @@ def ledger_sessions(
     grouped: Any = (
         select(
             sid.label("session_id"),
-            func.min(MetricsEvent.user_id).label("actor_id"),
+            # Postgres has no min(uuid); aggregate as text then cast back.
+            # One actor per session, so which row we pick is immaterial.
+            cast(
+                func.min(cast(MetricsEvent.user_id, String)), PGUUID(as_uuid=True)
+            ).label("actor_id"),
             func.coalesce(
                 func.max(TaskforceSessionArchive.client),
                 func.max(_consumed_client_expr()),
@@ -215,9 +220,7 @@ def ledger_sessions(
             func.max(MetricsEvent.occurred_at).label("last_at"),
             func.max(TaskforceSessionArchive.title).label("title"),
             func.max(TaskforceSessionArchive.harness_label).label("harness_label"),
-            func.max(TaskforceSessionArchive.harness_version).label(
-                "harness_version"
-            ),
+            func.max(TaskforceSessionArchive.harness_version).label("harness_version"),
             func.max(TaskforceSessionArchive.model_id).label("model_id"),
             func.max(TaskforceSessionArchive.repo).label("repo"),
             func.max(TaskforceSessionArchive.branch).label("branch"),
@@ -243,9 +246,9 @@ def ledger_sessions(
             func.coalesce(func.max(TaskforceSessionArchive.output_tokens), 0).label(
                 "output_tokens"
             ),
-            func.coalesce(
-                func.max(TaskforceSessionArchive.cache_read_tokens), 0
-            ).label("cache_read_tokens"),
+            func.coalesce(func.max(TaskforceSessionArchive.cache_read_tokens), 0).label(
+                "cache_read_tokens"
+            ),
             func.coalesce(
                 func.max(TaskforceSessionArchive.cache_write_tokens), 0
             ).label("cache_write_tokens"),
@@ -261,8 +264,7 @@ def ledger_sessions(
             TaskforceSessionArchive,
             and_(
                 TaskforceSessionArchive.session_id == sid,
-                TaskforceSessionArchive.organization_id
-                == MetricsEvent.organization_id,
+                TaskforceSessionArchive.organization_id == MetricsEvent.organization_id,
                 TaskforceSessionArchive.is_demo == MetricsEvent.is_demo,
             ),
             isouter=True,
@@ -322,9 +324,11 @@ def ledger_sessions(
     total = int(session.exec(select(func.count()).select_from(count_subq)).one() or 0)
 
     order_expr = func.max(MetricsEvent.occurred_at)
-    page_stmt = grouped.order_by(
-        order_expr.asc() if sort == "oldest" else order_expr.desc()
-    ).limit(limit).offset(offset)
+    page_stmt = (
+        grouped.order_by(order_expr.asc() if sort == "oldest" else order_expr.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     raw_rows = session.exec(page_stmt).all()
 
     # ---- query 2: hydrate doc titles + specialist names for the page -------
@@ -491,9 +495,7 @@ def _transcript_events_from_archive(
                 text=_str_or_none(raw.get("text")),
                 cmd=_str_or_none(raw.get("cmd")),
                 exit_code=(
-                    int(raw["exit_code"])
-                    if raw.get("exit_code") is not None
-                    else None
+                    int(raw["exit_code"]) if raw.get("exit_code") is not None else None
                 ),
                 output=_str_or_none(raw.get("output")),
                 file=_str_or_none(raw.get("file")),
