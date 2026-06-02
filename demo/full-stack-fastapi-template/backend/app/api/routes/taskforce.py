@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -21,18 +20,17 @@ from sqlalchemy import desc
 from sqlmodel import col, select
 
 from app.api.deps import CurrentUser, SessionDep
-from app.core.metrics.queries import (
-    cross_boundary_reuse,
-    taskforce_session_savings,
-)
+from app.core.metrics.ledger import ledger_sessions
+from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
-    CrossBoundaryReuseEventPublic,
-    CrossBoundaryReuseResponse,
+    LedgerDocRefPublic,
+    LedgerResponse,
+    LedgerSessionRowPublic,
     MetricsEvent,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
@@ -320,20 +318,33 @@ def session_savings_route(
     )
 
 
-@router.get("/cross-boundary-reuse", response_model=CrossBoundaryReuseResponse)
-def cross_boundary_reuse_route(
+@router.get("/ledger", response_model=LedgerResponse)
+def ledger_route(
     session: SessionDep,
     current_user: CurrentUser,
     demo: bool = Query(default=False),
+    actor_id: uuid.UUID | None = Query(default=None),
+    client: str | None = Query(default=None, max_length=32),
+    specialist: str | None = Query(default=None, max_length=64),
+    cross_boundary: bool = Query(default=False),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
     limit: int = Query(default=50, ge=1, le=MAX_REFERENCE_ROWS),
+    offset: int = Query(default=0, ge=0),
 ) -> Any:
-    """Cross-person reuse ledger for the caller's organization (TF-202 / C3).
+    """Org-wide session ledger — the raw tier of the pipeline (TF-208 / P1).
 
-    The empty-cell proof's read surface: documents produced by one teammate
-    and later reused/consulted by another, with the origin + consuming tool,
-    both display names, measured token savings and an estimated USD floor, and
-    the provenance trail. Org-scoped — a 422 is returned for solo users.
-    Nothing is seeded; every row is a real C1/C2 event.
+    A paginated, newest-first feed of the org's Taskforce sessions across all
+    tools: who did work, in which ``client``, under which specialist, which
+    documents it touched, and what it saved. Sessions are grouped from
+    ``metrics_event.payload->>'session_id'`` (no Session table). This is a
+    recall/activity surface — ``cross_boundary`` is a filter, not a headline.
+    Org-scoped; a 422 is returned for solo users.
+
+    Filters: ``actor_id``, ``client`` (tool), ``specialist`` (slug),
+    ``cross_boundary`` (person- or tool-boundary crossings only), ``since`` /
+    ``until`` (UTC bounds), ``q`` (free-text over prompt + document title).
     """
 
     if current_user.organization_id is None:
@@ -342,43 +353,53 @@ def cross_boundary_reuse_route(
             detail="User does not belong to an organization",
         )
 
-    rows = cross_boundary_reuse(
+    page = ledger_sessions(
         session,
         organization_id=current_user.organization_id,
         is_demo=demo,
+        actor_id=actor_id,
+        client=client,
+        specialist_slug=specialist,
+        cross_boundary_only=cross_boundary,
+        since=since,
+        until=until,
+        query=q,
         limit=limit,
+        offset=offset,
     )
-    events = [
-        CrossBoundaryReuseEventPublic(
-            event_id=row.event_id,
-            kind=row.kind,
-            occurred_at=row.occurred_at,
-            document_id=row.document_id,
-            document_title=row.document_title,
-            document_href=f"/v2/documents/{row.document_id}",
-            produced_by_client=row.produced_by_client,
-            consumed_by_client=row.consumed_by_client,
-            owner_id=row.owner_id,
-            owner_name=row.owner_name,
-            consumer_id=row.consumer_id,
-            consumer_name=row.consumer_name,
-            net_saved_tokens=row.net_saved_tokens,
-            usd_amount=row.usd_amount,
-            usd_is_estimated=row.usd_is_estimated,
+    rows = [
+        LedgerSessionRowPublic(
+            session_id=row.session_id,
+            actor_id=row.actor_id,
+            actor_name=row.actor_name,
+            client=row.client,
             specialist_slug=row.specialist_slug,
             specialist_name=row.specialist_name,
-            session_id=row.session_id,
-            query_id=row.query_id,
-            match_reasons=row.match_reasons,
-            score=row.score,
-            confidence_band=row.confidence_band,
+            specialist_href=(
+                f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
+            ),
+            documents=[
+                LedgerDocRefPublic(
+                    document_id=doc.document_id,
+                    title=doc.title,
+                    href=f"/v2/library/{doc.document_id}",
+                )
+                for doc in row.documents
+            ],
+            kinds=row.kinds,
+            net_saved_tokens=row.net_saved_tokens,
+            usd_amount=row.usd_amount,
+            event_count=row.event_count,
+            cross_boundary=row.cross_boundary,
+            occurred_at_first=row.occurred_at_first,
+            occurred_at_last=row.occurred_at_last,
         )
-        for row in rows
+        for row in page.rows
     ]
-    return CrossBoundaryReuseResponse(
+    return LedgerResponse(
         organization_id=current_user.organization_id,
-        proven_event_count=len(events),
-        proven_net_saved_tokens=sum(event.net_saved_tokens for event in events),
-        estimated_usd_total=sum((event.usd_amount for event in events), Decimal(0)),
-        events=events,
+        total=page.total,
+        limit=page.limit,
+        offset=page.offset,
+        rows=rows,
     )
