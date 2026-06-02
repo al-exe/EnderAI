@@ -122,6 +122,26 @@ if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
     [[ -z "$harness_payload" ]] && harness_payload="null"
 fi
 
+# Session duration: span between the first and last transcript timestamps.
+duration_ms=0
+if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
+    duration_ms="$(
+        tail -n 400 "$transcript_path" 2>/dev/null \
+            | jq -sr '
+                [.[] | .timestamp // empty
+                       | (try (fromdateiso8601 * 1000) catch empty)] as $ts
+                | if ($ts | length) >= 2 then (($ts | max) - ($ts | min)) else 0 end
+                | floor' 2>/dev/null
+    )"
+    [[ -z "$duration_ms" || "$duration_ms" == "null" ]] && duration_ms=0
+fi
+
+# Active git branch (best effort; the hook runs in the session cwd).
+branch=""
+if [[ -n "$cwd" && -d "$cwd" ]]; then
+    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+
 # Pin the active document if the user-prompt-submit hook stashed one.
 active_doc_id="null"
 if [[ -n "$session_id" && -f "${STATE_DIR}/${session_id}.active" ]]; then
@@ -131,12 +151,14 @@ fi
 body="$(jq -cn \
     --arg session_id "$session_id" \
     --arg cwd "$cwd" \
+    --arg branch "$branch" \
     --arg prompt "$prompt_user" \
     --argjson transcript "$transcript_array" \
     --argjson files "$files_touched" \
     --argjson commands "$commands_run" \
     --argjson harness "$harness_payload" \
     --argjson active "$active_doc_id" \
+    --argjson duration_ms "${duration_ms:-0}" \
     '{
         kind: "final",
         prompt: $prompt,
@@ -144,9 +166,11 @@ body="$(jq -cn \
         active_document_id: $active,
         session_id: (if $session_id == "" then null else $session_id end),
         cwd: (if $cwd == "" then null else $cwd end),
+        branch: (if $branch == "" then null else $branch end),
+        client: "claude-code",
         files_touched: $files,
         commands_run: $commands,
-        duration_ms: 0,
+        duration_ms: $duration_ms,
         harness: $harness
     }' 2>>"$LOG_FILE")"
 

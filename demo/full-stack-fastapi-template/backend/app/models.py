@@ -1836,6 +1836,8 @@ class TaskforceObserveRequest(SQLModel):
     pinned_query_id: uuid.UUID | None = None
     session_id: str | None = Field(default=None, max_length=128)
     cwd: str | None = None
+    # Active git branch, for the Ledger session archive (advisory).
+    branch: str | None = Field(default=None, max_length=255)
     # Self-reported harness/client provenance. Advisory only; identity is JWT.
     client: str | None = Field(default=None, max_length=32)
     visibility: Literal["private", "organization"] = "private"
