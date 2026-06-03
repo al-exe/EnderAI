@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -15,6 +16,7 @@ from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     AgentsListResponse,
     AgentSpecialist,
+    AgentSpecialistCreate,
     AgentSpecialistDetail,
     AgentSpecialistDocumentLink,
     AgentSpecialistInvocationSummary,
@@ -24,6 +26,29 @@ from app.models import (
     MetricsEvent,
     V2Document,
 )
+
+# Leave headroom inside the 64-char slug column for a uniqueness suffix.
+_SLUG_BASE_MAX = 56
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug[:_SLUG_BASE_MAX] or "profile"
+
+
+def _unique_slug(session: Session, base: str) -> str:
+    slug = base
+    suffix = 2
+    while (
+        session.exec(
+            select(AgentSpecialist).where(AgentSpecialist.slug == slug)
+        ).first()
+        is not None
+    ):
+        slug = f"{base}-{suffix}"
+        suffix += 1
+    return slug
+
 
 router = APIRouter(prefix="/v2/agents", tags=["v2-agents"])
 
@@ -272,6 +297,59 @@ def list_agents(
         )
     )
     return AgentsListResponse(items=items)
+
+
+@router.post("", response_model=AgentSpecialistDetail, status_code=201)
+def create_agent(
+    session: SessionDep,
+    current_user: CurrentUser,
+    payload: AgentSpecialistCreate,
+    demo: bool = Query(default=False),
+) -> Any:
+    name = payload.name.strip()
+    role = payload.role.strip()
+    if not name or not role:
+        raise HTTPException(status_code=422, detail="Name and role are required")
+
+    specialist = AgentSpecialist(
+        owner_id=current_user.id,
+        organization_id=None,
+        slug=_unique_slug(session, _slugify(name)),
+        name=name[:80],
+        role=role[:160],
+        short_description=(payload.short_description or "").strip()[:240],
+        description="",
+        status="active",
+        visibility="private",
+        domain_tags=[tag.strip() for tag in (payload.domain_tags or []) if tag.strip()],
+        created_from="manual",
+        is_demo=demo,
+    )
+    session.add(specialist)
+    session.commit()
+    session.refresh(specialist)
+
+    # A freshly created profile has no linked docs or invocations yet.
+    return AgentSpecialistDetail(
+        id=specialist.id,
+        slug=specialist.slug,
+        name=specialist.name,
+        role=specialist.role,
+        description=specialist.description,
+        created_from=specialist.created_from,
+        domain_tags=list(specialist.domain_tags or []),
+        routing_triggers=list(specialist.routing_triggers or []),
+        negative_triggers=list(specialist.negative_triggers or []),
+        instructions=list(specialist.instructions or []),
+        linked_knowledge=[],
+        recent_invocations=[],
+        stats=AgentSpecialistStats(
+            invocations_count=0,
+            linked_docs_count=0,
+            tokens_saved=0,
+            usd_saved=Decimal(0),
+        ),
+    )
 
 
 @router.get("/{slug}", response_model=AgentSpecialistDetail)

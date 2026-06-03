@@ -210,3 +210,70 @@ def test_get_agent_403_for_acl_denied(client: TestClient, db: Session) -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_create_agent_persists_and_is_listed(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents",
+        headers=headers,
+        json={
+            "name": "Billing Specialist",
+            "role": "Stripe billing & webhooks",
+            "short_description": "Owns the checkout surface.",
+            "domain_tags": ["billing", "  ", "payments"],
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["slug"] == "billing-specialist"
+    assert body["name"] == "Billing Specialist"
+    assert body["role"] == "Stripe billing & webhooks"
+    assert body["domain_tags"] == ["billing", "payments"]
+    assert body["created_from"] == "manual"
+
+    stored = db.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == "billing-specialist")
+    ).one()
+    assert stored.owner_id == user.id
+    assert stored.status == "active"
+
+    listed = client.get(f"{settings.API_V1_STR}/v2/agents", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert any(item["slug"] == "billing-specialist" for item in listed.json()["items"])
+
+
+def test_create_agent_generates_unique_slug(
+    client: TestClient, db: Session
+) -> None:
+    _, headers = _signup(client)
+    payload = {"name": "Billing Specialist", "role": "Stripe"}
+
+    first = client.post(
+        f"{settings.API_V1_STR}/v2/agents", headers=headers, json=payload
+    )
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/agents", headers=headers, json=payload
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["slug"] == "billing-specialist"
+    assert second.json()["slug"] == "billing-specialist-2"
+
+
+def test_create_agent_requires_name_and_role(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents",
+        headers=headers,
+        json={"name": "", "role": ""},
+    )
+
+    assert response.status_code == 422

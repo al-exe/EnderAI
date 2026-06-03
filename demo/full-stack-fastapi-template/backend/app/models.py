@@ -1206,6 +1206,13 @@ class AgentsListResponse(SQLModel):
     items: list[AgentSpecialistSummary]
 
 
+class AgentSpecialistCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=80)
+    role: str = Field(min_length=1, max_length=160)
+    short_description: str = Field(default="", max_length=240)
+    domain_tags: list[str] = Field(default_factory=list)
+
+
 class AgentSpecialistLinkedDoc(SQLModel):
     document_id: uuid.UUID
     title: str
