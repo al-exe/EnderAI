@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlalchemy import String, func
+from sqlmodel import Session, col, select
 
-from app.models import TaskforceObserveRequest, TaskforceSessionArchive, User
+from app.models import (
+    MetricsEvent,
+    TaskforceObserveRequest,
+    TaskforceSessionArchive,
+    User,
+)
 
 _MAX_EVENT_TEXT = 4000
 _MAX_TITLE = 255
@@ -231,3 +238,139 @@ def _normalized_events(
         )
 
     return events[:200]
+
+
+# ---- backfill (TF-218) ----------------------------------------------------
+# Old sessions predate the archive table: they exist only as ``metrics_event``
+# rows grouped by ``payload->>'session_id'``. They already show in the Ledger
+# list (metrics-driven) and the detail endpoint falls back to an empty
+# transcript, but the list shows a null title/client because those come from
+# the archive. This backfill creates best-effort archive rows from the metrics
+# payload so old sessions get a readable title + provenance — without
+# fabricating a transcript (``raw_transcript`` stays empty, so detail honestly
+# reports ``raw_transcript_available = false``).
+
+_SESSION_ID = MetricsEvent.payload["session_id"].astext
+_PROMPT = MetricsEvent.payload["prompt"].astext
+_CONSUMED_CLIENT = MetricsEvent.payload["consumed_by_client"].astext
+_SPECIALIST_SLUG = MetricsEvent.payload["specialist_slug"].astext
+
+
+@dataclass(frozen=True)
+class ArchiveBackfillReport:
+    sessions_seen: int
+    archives_created: int
+    skipped_existing: int
+
+
+def backfill_session_archives(
+    session: Session,
+    *,
+    organization_id: uuid.UUID | None = None,
+    is_demo: bool | None = None,
+    dry_run: bool = True,
+) -> ArchiveBackfillReport:
+    """Create archive rows for metrics-only sessions that lack one.
+
+    Groups ``metrics_event`` by ``payload->>'session_id'`` (org/demo scoped),
+    skips any session that already has a ``taskforce_session_archive`` row, and
+    creates a best-effort archive from the metrics payload (title from the
+    prompt, client/specialist from the payload, started/ended from the event
+    timestamps). Idempotent: re-runs skip already-archived sessions.
+
+    ``dry_run=True`` (default) computes the report and writes nothing — mirrors
+    ``observe.py`` shadow mode and the earned-profile compounding job.
+    """
+
+    grouped: Any = (
+        select(
+            _SESSION_ID.label("session_id"),
+            MetricsEvent.organization_id.label("organization_id"),
+            MetricsEvent.is_demo.label("is_demo"),
+            func.min(MetricsEvent.occurred_at).label("first_at"),
+            func.max(MetricsEvent.occurred_at).label("last_at"),
+            func.max(_PROMPT).label("prompt"),
+            func.max(_CONSUMED_CLIENT).label("client"),
+            func.max(_SPECIALIST_SLUG).label("specialist_slug"),
+        )
+        .where(_SESSION_ID.is_not(None))
+        .group_by(_SESSION_ID, MetricsEvent.organization_id, MetricsEvent.is_demo)
+    )
+    if organization_id is not None:
+        grouped = grouped.where(MetricsEvent.organization_id == organization_id)
+    if is_demo is not None:
+        grouped = grouped.where(MetricsEvent.is_demo == is_demo)
+
+    rows = list(session.exec(grouped))
+
+    # Existing archive session_ids, scoped the same way, to skip cheaply.
+    existing_stmt: Any = select(TaskforceSessionArchive.session_id)
+    if organization_id is not None:
+        existing_stmt = existing_stmt.where(
+            TaskforceSessionArchive.organization_id == organization_id
+        )
+    if is_demo is not None:
+        existing_stmt = existing_stmt.where(TaskforceSessionArchive.is_demo == is_demo)
+    existing: set[str] = set(session.exec(existing_stmt))
+
+    # Resolve the actor per session: the first event's user_id. One query.
+    actor_by_session: dict[str, uuid.UUID] = {}
+    actor_stmt: Any = (
+        select(_SESSION_ID, func.min(col(MetricsEvent.user_id).cast(String)))
+        .where(_SESSION_ID.is_not(None))
+        .group_by(_SESSION_ID)
+    )
+    if organization_id is not None:
+        actor_stmt = actor_stmt.where(MetricsEvent.organization_id == organization_id)
+    if is_demo is not None:
+        actor_stmt = actor_stmt.where(MetricsEvent.is_demo == is_demo)
+    for sid, actor_text in session.exec(actor_stmt):
+        if sid and actor_text:
+            actor_by_session[sid] = uuid.UUID(str(actor_text))
+
+    seen = 0
+    created = 0
+    skipped = 0
+    now = _now()
+    for row in rows:
+        sid = row.session_id
+        if not sid:
+            continue
+        seen += 1
+        if sid in existing:
+            skipped += 1
+            continue
+        actor_id = actor_by_session.get(sid)
+        if actor_id is None:
+            skipped += 1
+            continue
+        created += 1
+        if dry_run:
+            continue
+        title = " ".join((row.prompt or "").split())[:_MAX_TITLE] or None
+        archive = TaskforceSessionArchive(
+            session_id=sid,
+            actor_id=actor_id,
+            organization_id=row.organization_id,
+            is_demo=row.is_demo,
+            client=row.client,
+            specialist_slug=row.specialist_slug,
+            harness_label=row.client,
+            title=title,
+            started_at=row.first_at,
+            ended_at=row.last_at,
+            imported_at=now,
+            created_at=now,
+            updated_at=now,
+            source_metadata={"backfilled": True, "source": "metrics_event"},
+        )
+        session.add(archive)
+        existing.add(sid)
+
+    if not dry_run:
+        session.flush()
+    return ArchiveBackfillReport(
+        sessions_seen=seen,
+        archives_created=created,
+        skipped_existing=skipped,
+    )
