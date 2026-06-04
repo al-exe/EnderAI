@@ -277,3 +277,142 @@ def test_create_agent_requires_name_and_role(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_update_agent_changes_fields_and_keeps_slug(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+    original_slug = specialist.slug
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{original_slug}",
+        headers=headers,
+        json={
+            "name": "Renamed Specialist",
+            "role": "Payments reliability",
+            "short_description": "Now owns refunds too.",
+            "domain_tags": ["refunds", "  ", "payments"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["slug"] == original_slug
+    assert body["name"] == "Renamed Specialist"
+    assert body["role"] == "Payments reliability"
+    assert body["domain_tags"] == ["refunds", "payments"]
+
+    stored = db.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == original_slug)
+    ).one()
+    db.refresh(stored)
+    assert stored.name == "Renamed Specialist"
+    assert stored.short_description == "Now owns refunds too."
+
+
+def test_update_agent_partial_leaves_other_fields(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=headers,
+        json={"role": "Only the role changed"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["role"] == "Only the role changed"
+    assert body["name"] == "Jensen"
+    assert body["domain_tags"] == ["Stripe", "Billing"]
+
+
+def test_update_agent_rejects_blank_name(client: TestClient, db: Session) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=headers,
+        json={"name": "   "},
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_agent_403_for_non_owner(client: TestClient, db: Session) -> None:
+    email, _ = _signup(client)
+    owner = _user_by_email(db, email)
+    specialist = _agent(db, owner, slug=f"private-{random_lower_string()}")
+    _, outsider_headers = _signup(client)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=outsider_headers,
+        json={"name": "Hijacked"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_agent_removes_profile(client: TestClient, db: Session) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+    document = _document(db, user)
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=document.id,
+            reason="Pinned decision record",
+            is_pinned=True,
+        )
+    )
+    db.commit()
+    slug = specialist.slug
+
+    response = client.delete(
+        f"{settings.API_V1_STR}/v2/agents/{slug}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204, response.text
+    assert (
+        db.exec(select(AgentSpecialist).where(AgentSpecialist.slug == slug)).first()
+        is None
+    )
+    # Linked rows cascade away with the specialist.
+    assert (
+        db.exec(
+            select(AgentSpecialistDocumentLink).where(
+                AgentSpecialistDocumentLink.specialist_id == specialist.id
+            )
+        ).first()
+        is None
+    )
+
+    follow_up = client.get(
+        f"{settings.API_V1_STR}/v2/agents/{slug}", headers=headers
+    )
+    assert follow_up.status_code == 404
+
+
+def test_delete_agent_403_for_non_owner(client: TestClient, db: Session) -> None:
+    email, _ = _signup(client)
+    owner = _user_by_email(db, email)
+    specialist = _agent(db, owner, slug=f"private-{random_lower_string()}")
+    _, outsider_headers = _signup(client)
+
+    response = client.delete(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=outsider_headers,
+    )
+
+    assert response.status_code == 403

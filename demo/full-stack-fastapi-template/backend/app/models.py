@@ -1213,6 +1213,15 @@ class AgentSpecialistCreate(SQLModel):
     domain_tags: list[str] = Field(default_factory=list)
 
 
+class AgentSpecialistUpdate(SQLModel):
+    """Partial update — only provided fields are changed. Slug is immutable."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    role: str | None = Field(default=None, min_length=1, max_length=160)
+    short_description: str | None = Field(default=None, max_length=240)
+    domain_tags: list[str] | None = None
+
+
 class AgentSpecialistLinkedDoc(SQLModel):
     document_id: uuid.UUID
     title: str
@@ -1246,6 +1255,7 @@ class AgentSpecialistDetail(SQLModel):
     slug: str
     name: str
     role: str
+    short_description: str = ""
     description: str
     created_from: str = "seeded"
     domain_tags: list[str] = Field(default_factory=list)
