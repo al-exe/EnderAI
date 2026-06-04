@@ -23,6 +23,7 @@ from app.models import (
     AgentSpecialistLinkedDoc,
     AgentSpecialistStats,
     AgentSpecialistSummary,
+    AgentSpecialistUpdate,
     MetricsEvent,
     V2Document,
 )
@@ -269,6 +270,80 @@ def _summary_for(
     )
 
 
+def _detail_for(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user: CurrentUser,
+    demo: bool,
+) -> AgentSpecialistDetail:
+    linked_knowledge = _linked_docs(
+        session,
+        specialist=specialist,
+        current_user=current_user,
+        demo=demo,
+    )
+    stats = _agent_stats(
+        session,
+        specialist=specialist,
+        linked_docs_count=len(linked_knowledge),
+        current_user_id=current_user.id,
+        demo=demo,
+    )
+    return AgentSpecialistDetail(
+        id=specialist.id,
+        slug=specialist.slug,
+        name=specialist.name,
+        role=specialist.role,
+        short_description=specialist.short_description,
+        description=specialist.description,
+        created_from=specialist.created_from,
+        domain_tags=list(specialist.domain_tags or []),
+        routing_triggers=list(specialist.routing_triggers or []),
+        negative_triggers=list(specialist.negative_triggers or []),
+        instructions=list(specialist.instructions or []),
+        linked_knowledge=linked_knowledge,
+        recent_invocations=_recent_invocations(
+            session,
+            specialist=specialist,
+            current_user_id=current_user.id,
+            demo=demo,
+        ),
+        stats=stats,
+    )
+
+
+def _writable_specialist(
+    session: Session,
+    *,
+    current_user: CurrentUser,
+    slug: str,
+    demo: bool,
+) -> AgentSpecialist:
+    """Resolve a specialist the actor is allowed to modify, or raise."""
+
+    specialist = session.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == slug)
+    ).first()
+    if specialist is None:
+        raise HTTPException(status_code=404, detail="Agent specialist not found")
+
+    accessible = session.exec(
+        select(AgentSpecialist)
+        .where(AgentSpecialist.id == specialist.id)
+        .where(build_agent_specialist_acl_filter(current_user, demo=demo))
+    ).first()
+    if accessible is None:
+        raise HTTPException(status_code=403, detail="Agent specialist access denied")
+
+    # Outside the demo sandbox, only the owner may edit or delete a profile.
+    if not demo and specialist.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only the owner can modify this profile"
+        )
+    return specialist
+
+
 @router.get("", response_model=AgentsListResponse)
 def list_agents(
     session: SessionDep,
@@ -335,6 +410,7 @@ def create_agent(
         slug=specialist.slug,
         name=specialist.name,
         role=specialist.role,
+        short_description=specialist.short_description,
         description=specialist.description,
         created_from=specialist.created_from,
         domain_tags=list(specialist.domain_tags or []),
@@ -373,36 +449,66 @@ def get_agent(
     if accessible is None:
         raise HTTPException(status_code=403, detail="Agent specialist access denied")
 
-    linked_knowledge = _linked_docs(
+    return _detail_for(
         session,
         specialist=specialist,
         current_user=current_user,
         demo=demo,
     )
-    stats = _agent_stats(
+
+
+@router.patch("/{slug}", response_model=AgentSpecialistDetail)
+def update_agent(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    payload: AgentSpecialistUpdate,
+    demo: bool = Query(default=False),
+) -> Any:
+    specialist = _writable_specialist(
+        session, current_user=current_user, slug=slug, demo=demo
+    )
+
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Name cannot be empty")
+        specialist.name = name[:80]
+    if payload.role is not None:
+        role = payload.role.strip()
+        if not role:
+            raise HTTPException(status_code=422, detail="Role cannot be empty")
+        specialist.role = role[:160]
+    if payload.short_description is not None:
+        specialist.short_description = payload.short_description.strip()[:240]
+    if payload.domain_tags is not None:
+        specialist.domain_tags = [
+            tag.strip() for tag in payload.domain_tags if tag.strip()
+        ]
+
+    specialist.updated_at = datetime.now(timezone.utc)
+    session.add(specialist)
+    session.commit()
+    session.refresh(specialist)
+
+    return _detail_for(
         session,
         specialist=specialist,
-        linked_docs_count=len(linked_knowledge),
-        current_user_id=current_user.id,
+        current_user=current_user,
         demo=demo,
     )
-    return AgentSpecialistDetail(
-        id=specialist.id,
-        slug=specialist.slug,
-        name=specialist.name,
-        role=specialist.role,
-        description=specialist.description,
-        created_from=specialist.created_from,
-        domain_tags=list(specialist.domain_tags or []),
-        routing_triggers=list(specialist.routing_triggers or []),
-        negative_triggers=list(specialist.negative_triggers or []),
-        instructions=list(specialist.instructions or []),
-        linked_knowledge=linked_knowledge,
-        recent_invocations=_recent_invocations(
-            session,
-            specialist=specialist,
-            current_user_id=current_user.id,
-            demo=demo,
-        ),
-        stats=stats,
+
+
+@router.delete("/{slug}", status_code=204)
+def delete_agent(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    demo: bool = Query(default=False),
+) -> None:
+    specialist = _writable_specialist(
+        session, current_user=current_user, slug=slug, demo=demo
     )
+    # agent_specialist_document_link rows cascade on the FK (ondelete=CASCADE).
+    session.delete(specialist)
+    session.commit()
