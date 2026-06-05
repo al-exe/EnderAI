@@ -499,7 +499,7 @@ def update_agent(
     )
 
 
-@router.delete("/{slug}", status_code=204)
+@router.delete("/{slug}", status_code=204, response_model=None)
 def delete_agent(
     session: SessionDep,
     current_user: CurrentUser,
