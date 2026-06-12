@@ -108,7 +108,12 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
         )
 
     hooks = json.loads(settings_file.read_text())["hooks"]
-    assert sorted(hooks) == ["PostToolUse", "Stop", "UserPromptSubmit"]
+    assert sorted(hooks) == [
+        "PostToolUse",
+        "SessionEnd",
+        "Stop",
+        "UserPromptSubmit",
+    ]
 
     for source_name, target_name, hook_name, timeout, _ in HOOKS:
         installed_path = claude_dir / "hooks" / target_name

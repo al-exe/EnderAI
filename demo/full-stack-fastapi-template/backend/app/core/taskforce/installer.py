@@ -26,6 +26,13 @@ HOOKS = (
         15,
         "TASKFORCE_POST_TOOL_USE_EOF",
     ),
+    (
+        "session-end.sh",
+        "taskforce-session-end.sh",
+        "SessionEnd",
+        15,
+        "TASKFORCE_SESSION_END_EOF",
+    ),
 )
 
 
