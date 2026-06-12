@@ -47,33 +47,43 @@ If it fails, stop here — it names the broken link (token, shadow mode, or reca
 
 ## Step 3 — The actual test: two Claudes, no re-explaining
 
-**Terminal 1** — start a brand-new `claude` session, give it a distinctive fact,
-and make it touch a file (so the session is "material" and gets captured):
+### Terminal 1 — "teach" Claude something
 
-> Note for later: our staging Postgres DSN rotates every **14 days**, and the
-> runbook is at `ops/db-rotation.md`. Write that into a file called `db-note.md`.
+1. Open a **new terminal** and run `claude` to start a brand-new session.
+2. Paste this exact prompt:
 
-Let it create the file, then end the session (`/exit` or Ctrl-D). Confirm capture:
+   > Note for later: our staging Postgres DSN rotates every **14 days**, and the
+   > runbook is at `ops/db-rotation.md`. Write that into a file called `db-note.md`.
 
-```sh
-tail -n 3 ~/.claude/taskforce-observe.log     # want: POST /v2/taskforce/observe → 202
-```
+3. Let it create the file (this makes the session "material" so it gets captured).
+4. End the session: type `/exit` (or Ctrl-D).
+5. Back in a normal shell, confirm capture happened:
 
-**Terminal 2** — start a **separate** new `claude` session (your "second instance
-/ other VM") and ask, *without restating the facts*:
+   ```sh
+   tail -n 3 ~/.claude/taskforce-observe.log     # want: POST /v2/taskforce/observe → 202
+   ```
 
-> What's our staging Postgres rotation cadence, and where's the runbook?
+### Terminal 2 — the "other instance" that wasn't told anything
+
+1. Open **another new terminal** and run `claude` to start a separate session
+   (this must start *after* Terminal 1's session ended — see gotchas below).
+2. Paste this prompt, *without restating any facts*:
+
+   > What's our staging Postgres rotation cadence, and where's the runbook?
 
 ---
 
 ## What success looks like
 
-In Terminal 2, before Claude even answers, you should see:
+In Terminal 2, **before Claude even answers**, you should see:
 
 - a banner: `[Taskforce] 1 related doc pulled · …`
 - the prompt silently prefixed with a `─── Related prior work (Taskforce) ───`
   block containing the **14 days / `ops/db-rotation.md`** fact,
-- Claude answering correctly **from that** — though you never told Terminal 2.
+- Claude answering correctly with **14 days** and `ops/db-rotation.md` — even
+  though you never told Terminal 2 those facts.
+
+Confirm via:
 
 ```sh
 tail -n 3 ~/.claude/taskforce-discover.log     # want: ok: 1 matches injected
