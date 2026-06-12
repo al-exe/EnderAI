@@ -13,7 +13,7 @@
 # - stdout is the augmented prompt; Claude Code prepends it.
 #
 # Required:
-#   ~/.enderai_mcp_token          (created by the Connect Agent flow)
+#   ~/.taskforce_mcp_token        (created by the Connect Agent flow)
 # Optional:
 #   ENDERAI_BACKEND_URL           (default https://enderai-backend.onrender.com)
 #   TASKFORCE_PREAMBLE_BUDGET     (default 1500; tokens budget for the preamble)
@@ -25,7 +25,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/taskforce-discover.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
 
@@ -57,11 +58,15 @@ if [[ "${TASKFORCE_HOOKS_DISABLED:-0}" == "1" ]]; then
     exit 0
 fi
 
-if [[ ! -r "$TOKEN_FILE" ]]; then
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+if [[ ! -r "$token_file" ]]; then
     log "skip: no token at $TOKEN_FILE"
     exit 0
 fi
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && { log "skip: token empty"; exit 0; }
 
 # Claude Code hands us a JSON payload on stdin: {session_id, prompt, cwd,

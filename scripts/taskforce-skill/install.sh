@@ -32,9 +32,11 @@ install_file "tf-discover.sh"  "${SKILL_DIR}/tf-discover.sh"  0755
 install_file "tf-reference.sh" "${SKILL_DIR}/tf-reference.sh" 0755
 install_file "tf-savings.sh"   "${SKILL_DIR}/tf-savings.sh"   0755
 
-if [[ ! -r "${HOME}/.enderai_mcp_token" ]]; then
+TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
+if [[ ! -r "$TOKEN_FILE" && ! -r "$LEGACY_TOKEN_FILE" ]]; then
     echo ""
-    echo "⚠ No Taskforce token at ~/.enderai_mcp_token."
+    echo "⚠ No Taskforce token at ~/.taskforce_mcp_token."
     echo "  Connect a Claude Code agent at https://www.taskforce.tools to create one."
     echo "  The /tf skill will degrade gracefully (announce 'not connected') until it exists."
 fi
