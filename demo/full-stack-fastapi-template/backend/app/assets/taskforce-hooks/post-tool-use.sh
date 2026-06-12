@@ -88,7 +88,12 @@ transcript_array="$(
             role: (if .type == "user" then "user" elif .type == "assistant" then "assistant" else "tool" end),
             content: (
                 if .type == "assistant" then ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-                elif .type == "user" then (.message.content // "")
+                elif .type == "user" then (
+                    if (.message.content | type) == "array"
+                    then ([.message.content[]? | if .type == "tool_result" then (.content | (if type == "array" then ([.[] | (.text // tostring)] | join("\n")) else tostring end)) else (.text // "") end] | join("\n"))
+                    else (.message.content // "")
+                    end
+                )
                 else (.content // "" | tostring) end
             )
         }]' 2>/dev/null
