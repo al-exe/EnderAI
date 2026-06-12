@@ -87,7 +87,7 @@ read -r -d '' body <<JSON
   "summary_points":["$marker: widget cache TTL set to 900s to match the upstream refresh window"],
   "details_sections":[{"anchor_id":"decision","markdown":"# Decision\\nWidget cache TTL = 900s. Marker $marker."}],
   "decisions":["Widget cache TTL = 900s"],
-  "outcome":"Decided and documented"
+  "outcome":"shipped"
 }
 JSON
 code="$(curl -sS -o /tmp/tf_smoke_obs.json -w '%{http_code}' "${auth[@]}" -X POST \

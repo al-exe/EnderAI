@@ -15,6 +15,7 @@ to swap.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 # ~4 characters per token is the canonical ballpark for English / code under
@@ -36,7 +37,13 @@ def count_tokens(text: str) -> int:
     return max(0, len(text) // _CHARS_PER_TOKEN)
 
 
-def count_paragraph_tokens(paragraphs: list[dict[str, Any]]) -> int:
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def count_paragraph_tokens(paragraphs: Iterable[Any]) -> int:
     """Sum estimated tokens across the V2Document ``main_body`` shape.
 
     Each paragraph is ``{"segments": [{"text": ..., ...}, ...]}``. Anchor
@@ -45,15 +52,15 @@ def count_paragraph_tokens(paragraphs: list[dict[str, Any]]) -> int:
 
     total = 0
     for paragraph in paragraphs:
-        segments = paragraph.get("segments") or []
+        segments = _field(paragraph, "segments") or []
         for segment in segments:
-            value = segment.get("text") if isinstance(segment, dict) else None
+            value = _field(segment, "text")
             if isinstance(value, str):
                 total += count_tokens(value)
     return total
 
 
-def count_details_sections_tokens(sections: list[dict[str, Any]]) -> int:
+def count_details_sections_tokens(sections: Iterable[Any]) -> int:
     """Sum estimated tokens across the V2Document ``details_markdown_sections``.
 
     Each section is ``{"anchor_id": ..., "markdown": ...}``. Only the
@@ -62,7 +69,7 @@ def count_details_sections_tokens(sections: list[dict[str, Any]]) -> int:
 
     total = 0
     for section in sections:
-        markdown = section.get("markdown") if isinstance(section, dict) else None
+        markdown = _field(section, "markdown")
         if isinstance(markdown, str):
             total += count_tokens(markdown)
     return total

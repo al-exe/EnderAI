@@ -67,7 +67,11 @@ DEFAULT_DAILY_USD_CAP = Decimal("1.00")
 
 
 def _shadow_mode() -> bool:
-    return os.environ.get("TASKFORCE_OBSERVE_SHADOW", "1") not in {"0", "false", "False"}
+    return os.environ.get("TASKFORCE_OBSERVE_SHADOW", "1") not in {
+        "0",
+        "false",
+        "False",
+    }
 
 
 def _has_structured_payload(request: TaskforceObserveRequest) -> bool:
@@ -383,9 +387,11 @@ def _build_update_payload(summary: SummarizerResult) -> dict[str, Any]:
     return payload
 
 
-def _main_body_from_summary(summary: SummarizerResult) -> list[V2DocumentParagraph]:
+def _main_body_from_summary(summary: SummarizerResult) -> list[dict[str, Any]]:
     return [
-        V2DocumentParagraph(segments=[V2DocumentSegment(text=point)])
+        V2DocumentParagraph(segments=[V2DocumentSegment(text=point)]).model_dump(
+            mode="json"
+        )
         for point in summary.summary_points
     ]
 
