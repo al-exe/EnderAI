@@ -54,7 +54,7 @@ Drill-down reuses **existing** endpoints — no new read surface needed:
 
 ## Frontend: `/v2/fleet`
 
-New top-level tab alongside Library/Agents/Metrics/Ledger (`TaskforceShell.tsx` nav).
+New top-level tab alongside Library/Agents/Metrics/Ledger (`TaskforceShell.tsx` nav). Icon: `LayoutGrid` (lucide-react).
 
 **Layout (MVP):**
 - A column/board of **Fleet session cards**, each a labeled box (rename inline) containing **agent chips** (reuse the roster card from the active-sessions rail: title, repo/branch, summary snippet, presence dot, `specialist_slug` badge).
