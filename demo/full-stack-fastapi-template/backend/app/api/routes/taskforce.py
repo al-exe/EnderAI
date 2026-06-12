@@ -22,6 +22,7 @@ from sqlmodel import col, select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.metrics.ledger import ledger_session_detail, ledger_sessions
 from app.core.metrics.queries import taskforce_session_savings
+from app.core.taskforce.active_sessions import get_active_sessions
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.installer import build_hook_installer
 from app.core.taskforce.observe import observe as run_observe
@@ -35,6 +36,7 @@ from app.models import (
     LedgerSessionRowPublic,
     LedgerTranscriptEventPublic,
     MetricsEvent,
+    TaskforceActiveSessionsResponse,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
     TaskforceObserveRequest,
@@ -150,6 +152,30 @@ def discover_route(
     )
     session.commit()
     return response
+
+
+@router.get("/active-sessions", response_model=TaskforceActiveSessionsResponse)
+def active_sessions_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    demo: bool = Query(default=False),
+    session_id: str | None = Query(default=None),
+) -> Any:
+    """The actor's other currently-active sessions (TF-225 presence rail).
+
+    Read-only counterpart to the ``active_sessions`` roster returned by
+    ``/discover`` — used by the frontend, which doesn't run a discover-style
+    query on every poll. Pass ``session_id`` to exclude that session from
+    its own roster (e.g. a Claude Code session polling on its own behalf).
+    """
+
+    active_sessions = get_active_sessions(
+        session,
+        actor=current_user,
+        demo=demo,
+        exclude_session_id=session_id,
+    )
+    return TaskforceActiveSessionsResponse(active_sessions=active_sessions)
 
 
 @router.post("/reference", response_model=TaskforceReferenceResponse)

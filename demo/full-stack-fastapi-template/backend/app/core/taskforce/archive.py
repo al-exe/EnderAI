@@ -84,6 +84,10 @@ def upsert_session_archive_from_observe(
     archive.title = _title_from_request(request) or archive.title
     archive.started_at = _earliest(archive.started_at, started_at)
     archive.ended_at = now if request.kind == "final" else archive.ended_at
+    archive.last_seen_at = now
+    archive.active_document_id = (
+        document_id or request.active_document_id or archive.active_document_id
+    )
     archive.duration_ms = max(archive.duration_ms or 0, request.duration_ms or 0)
     archive.message_count = max(archive.message_count or 0, len(request.transcript))
     archive.command_count = max(

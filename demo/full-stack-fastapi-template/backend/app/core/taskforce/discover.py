@@ -13,6 +13,10 @@ from collections.abc import Sequence
 from sqlmodel import Session
 
 from app.core.metrics.events import record_document_consulted
+from app.core.taskforce.active_sessions import (
+    get_active_sessions,
+    touch_session_heartbeat,
+)
 from app.core.taskforce.scoring import (
     DiscoveryRequest,
     ScoredCandidate,
@@ -191,7 +195,17 @@ def discover(
             consumed_by_client=request.client,
         )
 
-    return TaskforceDiscoverResponse(query_id=query_id, matches=matches)
+    touch_session_heartbeat(session, actor=actor, request=request, demo=demo)
+    active_sessions = get_active_sessions(
+        session,
+        actor=actor,
+        demo=demo,
+        exclude_session_id=request.session_id,
+    )
+
+    return TaskforceDiscoverResponse(
+        query_id=query_id, matches=matches, active_sessions=active_sessions
+    )
 
 
 def _placeholder_rediscovery_cost(document: V2Document) -> int:

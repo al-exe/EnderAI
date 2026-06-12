@@ -1478,6 +1478,17 @@ class TaskforceSessionArchive(SQLModel, table=True):
         sa_type=DateTime(timezone=True),  # type: ignore
         index=True,
     )
+    last_seen_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    active_document_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="v2_document.id",
+        index=True,
+        ondelete="SET NULL",
+    )
     duration_ms: int = Field(default=0)
     imported_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -1629,6 +1640,25 @@ class TaskforceDiscoverMatch(SQLModel):
     consult_token_cost: int = 0
 
 
+class TaskforceActiveSession(SQLModel):
+    """One sibling session in the active-sessions roster (TF-225).
+
+    Surfaces what the actor's *other* currently-open Claude Code sessions
+    are doing, so a session can render the
+    "Active sibling sessions" preamble block without a second round trip.
+    """
+
+    session_id: str
+    cwd: str | None = None
+    branch: str | None = None
+    repo: str | None = None
+    active_document_id: uuid.UUID | None = None
+    title: str | None = None
+    summary_markdown: str = ""
+    last_seen_at: datetime
+    minutes_ago: int
+
+
 class TaskforceDiscoverResponse(SQLModel):
     """Response from POST /v2/taskforce/discover.
 
@@ -1639,6 +1669,13 @@ class TaskforceDiscoverResponse(SQLModel):
 
     query_id: uuid.UUID
     matches: list[TaskforceDiscoverMatch]
+    active_sessions: list[TaskforceActiveSession] = Field(default_factory=list)
+
+
+class TaskforceActiveSessionsResponse(SQLModel):
+    """Response from GET /v2/taskforce/active-sessions (TF-225 frontend surface)."""
+
+    active_sessions: list[TaskforceActiveSession]
 
 
 class TaskforceSessionLogEntry(SQLModel):
