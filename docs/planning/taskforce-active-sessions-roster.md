@@ -91,3 +91,36 @@ Refinements, roughly in order of value:
 2. Backend: `/discover` updates `last_seen_at` for `session_id` (heartbeat) and returns `active_sessions` (query above).
 3. Hook: `taskforce-user-prompt-submit.sh` renders the new preamble block + banner segment.
 4. Test: 3-4 concurrent `claude` sessions in different `cwd`s under the same user; confirm each sees the others within ~1 prompt cycle, roster shrinks as sessions `/exit` or age past 8h.
+
+## Frontend surface
+
+**Why this matters beyond the hook.** The roster gives *agents* cross-instance awareness; the frontend version gives the *human* the same view — "what are my 4 open Claudes doing right now," glanceable without alt-tabbing through terminals. It's also the natural place to demo this to an EM (a live dashboard reads better than a terminal banner).
+
+### Placement: presence rail on `/v2/library`
+
+`EnderAI-frontend/src/routes/v2/library.tsx` already renders `LibraryRecentReel` (recently-touched documents) right above the folder/file grid (`library.tsx:838`). Add a new **`ActiveSessionsRail`** component directly above it, in the same horizontal-reel style:
+
+- One small card per active session: repo/cwd + branch chip, document title, 2-3 line `ai_generated_summary` clamp, and a relative-time badge (`formatRelativeTime`, already used by `AgentSessionCard`/`LibraryRecentReel`).
+- A small presence dot: green/pulsing if `minutes_ago < 5` ("live"), gray otherwise ("idle, still open").
+- Click → `/v2/library/$documentId` (existing route) for the full document.
+- **Empty state: hide the rail entirely** when `active_sessions` is empty (single-session users, or right after the only session exits) — same pattern as the `documents.length > 0` guard around `LibraryRecentReel`.
+
+### New read endpoint
+
+Reuse the backend query from the roster design (§2), but as its own endpoint rather than folded into `/discover`'s response, since the frontend isn't running a discover-style query:
+
+```
+GET /v2/taskforce/active-sessions
+→ { active_sessions: [ { session_id, cwd, branch, repo, active_document_id, title, summary_markdown, last_seen_at, minutes_ago } ] }
+```
+
+Same underlying query (`actor_id = me`, `ended_at IS NULL`, `last_seen_at >= now() - 8h`, top 5 by recency) — factor it into a shared helper so the `/discover` roster and this endpoint can't drift.
+
+### Freshness on the frontend
+
+Polling fits the existing patterns (`staleTime: 30_000` on `AgentSessionCard`'s query) — no websockets needed. `refetchInterval: 30_000` keeps the presence dots and relative-time labels current without much load, since this is a small, capped (≤5 row) query.
+
+### Later ideas (don't build now)
+
+- Cross-link from `/v2/agents/$slug` — if a sibling session's routed specialist matches the agent being viewed, show "live session in progress" on `AgentProfileCard`.
+- Org-wide presence (which teammates have active sessions right now) once cross-user visibility (§"Staleness" notes) is built — natural fit for a future team-dashboard view, not this iteration.
