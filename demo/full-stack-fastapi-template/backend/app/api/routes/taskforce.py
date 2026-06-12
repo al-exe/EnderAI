@@ -22,7 +22,10 @@ from sqlmodel import col, select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.metrics.ledger import ledger_session_detail, ledger_sessions
 from app.core.metrics.queries import taskforce_session_savings
-from app.core.taskforce.active_sessions import get_active_sessions
+from app.core.taskforce.active_sessions import (
+    active_sessions_for_actor,
+    get_active_sessions,
+)
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.installer import build_hook_installer
 from app.core.taskforce.observe import observe as run_observe
@@ -39,10 +42,18 @@ from app.models import (
     TaskforceActiveSessionsResponse,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
+    TaskforceFleetAgentPublic,
+    TaskforceFleetResponse,
+    TaskforceFleetSession,
+    TaskforceFleetSessionAssignment,
+    TaskforceFleetSessionCreate,
+    TaskforceFleetSessionPublic,
+    TaskforceFleetSessionUpdate,
     TaskforceObserveRequest,
     TaskforceObserveResponse,
     TaskforceReferenceRequest,
     TaskforceReferenceResponse,
+    TaskforceSessionArchive,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     TaskforceSessionSavingsResponse,
@@ -359,6 +370,203 @@ def session_savings_route(
         specialist_slug=savings.specialist_slug,
         specialist_name=savings.specialist_name,
     )
+
+
+def _fleet_session_for_actor(
+    session: SessionDep,
+    *,
+    actor_id: uuid.UUID,
+    fleet_session_id: uuid.UUID,
+) -> TaskforceFleetSession:
+    fleet_session = session.get(TaskforceFleetSession, fleet_session_id)
+    if fleet_session is None or fleet_session.actor_id != actor_id:
+        raise HTTPException(status_code=404, detail="Fleet session not found")
+    return fleet_session
+
+
+def _fleet_name(value: str) -> str:
+    name = value.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Fleet session name is required")
+    return name
+
+
+@router.get("/fleet", response_model=TaskforceFleetResponse)
+def fleet_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+) -> Any:
+    """Group the current actor's active-session roster into Fleet sessions."""
+
+    fleet_sessions = list(
+        session.exec(
+            select(TaskforceFleetSession)
+            .where(TaskforceFleetSession.actor_id == current_user.id)
+            .order_by(col(TaskforceFleetSession.created_at))
+        ).all()
+    )
+    agents = active_sessions_for_actor(session, actor=current_user)
+    agents_by_fleet: dict[uuid.UUID, list[Any]] = {}
+    unassigned: list[Any] = []
+    visible_fleet_ids = {fleet_session.id for fleet_session in fleet_sessions}
+    for agent in agents:
+        if (
+            agent.fleet_session_id is None
+            or agent.fleet_session_id not in visible_fleet_ids
+        ):
+            unassigned.append(agent)
+            continue
+        agents_by_fleet.setdefault(agent.fleet_session_id, []).append(agent)
+
+    return TaskforceFleetResponse(
+        fleet_sessions=[
+            TaskforceFleetSessionPublic(
+                id=fleet_session.id,
+                name=fleet_session.name,
+                created_at=fleet_session.created_at,
+                updated_at=fleet_session.updated_at,
+                agents=agents_by_fleet.get(fleet_session.id, []),
+            )
+            for fleet_session in fleet_sessions
+        ],
+        unassigned=unassigned,
+    )
+
+
+@router.post(
+    "/fleet",
+    response_model=TaskforceFleetSessionPublic,
+    status_code=201,
+)
+def create_fleet_session_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceFleetSessionCreate,
+) -> Any:
+    """Create an empty Fleet session owned by the current actor."""
+
+    fleet_session = TaskforceFleetSession(
+        actor_id=current_user.id,
+        organization_id=current_user.organization_id,
+        name=_fleet_name(body.name),
+    )
+    session.add(fleet_session)
+    session.commit()
+    session.refresh(fleet_session)
+    return TaskforceFleetSessionPublic(
+        id=fleet_session.id,
+        name=fleet_session.name,
+        created_at=fleet_session.created_at,
+        updated_at=fleet_session.updated_at,
+        agents=[],
+    )
+
+
+@router.patch("/fleet/{fleet_session_id}", response_model=TaskforceFleetSessionPublic)
+def update_fleet_session_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    fleet_session_id: uuid.UUID,
+    body: TaskforceFleetSessionUpdate,
+) -> Any:
+    """Rename one Fleet session owned by the current actor."""
+
+    fleet_session = _fleet_session_for_actor(
+        session,
+        actor_id=current_user.id,
+        fleet_session_id=fleet_session_id,
+    )
+    if body.name is not None:
+        fleet_session.name = _fleet_name(body.name)
+    fleet_session.updated_at = get_datetime_utc()
+    session.add(fleet_session)
+    session.commit()
+    session.refresh(fleet_session)
+    agents = [
+        agent
+        for agent in active_sessions_for_actor(session, actor=current_user)
+        if agent.fleet_session_id == fleet_session.id
+    ]
+    return TaskforceFleetSessionPublic(
+        id=fleet_session.id,
+        name=fleet_session.name,
+        created_at=fleet_session.created_at,
+        updated_at=fleet_session.updated_at,
+        agents=agents,
+    )
+
+
+@router.delete("/fleet/{fleet_session_id}", status_code=204)
+def delete_fleet_session_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    fleet_session_id: uuid.UUID,
+) -> Response:
+    """Delete a Fleet session without ending or otherwise mutating its agents."""
+
+    fleet_session = _fleet_session_for_actor(
+        session,
+        actor_id=current_user.id,
+        fleet_session_id=fleet_session_id,
+    )
+    members = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == current_user.id)
+        .where(TaskforceSessionArchive.fleet_session_id == fleet_session.id)
+    ).all()
+    for member in members:
+        member.fleet_session_id = None
+        session.add(member)
+    session.delete(fleet_session)
+    session.commit()
+    return Response(status_code=204)
+
+
+@router.patch(
+    "/session/{session_id}",
+    response_model=TaskforceFleetAgentPublic,
+)
+def assign_fleet_session_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str,
+    body: TaskforceFleetSessionAssignment,
+) -> Any:
+    """Assign or unassign one actor-owned active session."""
+
+    agent = next(
+        (
+            item
+            for item in active_sessions_for_actor(session, actor=current_user)
+            if item.session_id == session_id
+        ),
+        None,
+    )
+    if agent is None:
+        raise HTTPException(
+            status_code=404, detail="Active Taskforce session not found"
+        )
+
+    archive = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == current_user.id)
+        .where(TaskforceSessionArchive.session_id == session_id)
+    ).first()
+    if archive is None:
+        raise HTTPException(status_code=404, detail="Taskforce session not found")
+    if body.fleet_session_id is not None:
+        _fleet_session_for_actor(
+            session,
+            actor_id=current_user.id,
+            fleet_session_id=body.fleet_session_id,
+        )
+
+    archive.fleet_session_id = body.fleet_session_id
+    archive.updated_at = get_datetime_utc()
+    session.add(archive)
+    session.commit()
+    agent.fleet_session_id = body.fleet_session_id
+    return agent
 
 
 def _ledger_response_from_page(
