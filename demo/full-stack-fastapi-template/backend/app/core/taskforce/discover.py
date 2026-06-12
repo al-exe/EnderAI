@@ -132,7 +132,15 @@ def discover(
 
     query_id = uuid.uuid4()
 
+    archive = touch_session_heartbeat(session, actor=actor, request=request, demo=demo)
     raw_candidates = list_v2_documents_for_actor(session, actor, demo=demo)
+    if archive is not None:
+        raw_candidates = [
+            document
+            for document in raw_candidates
+            if document.fleet_session_id is None
+            or document.fleet_session_id == archive.fleet_session_id
+        ]
     capped = raw_candidates[:CANDIDATE_LIMIT]
 
     scoring_request = DiscoveryRequest(
@@ -195,7 +203,6 @@ def discover(
             consumed_by_client=request.client,
         )
 
-    touch_session_heartbeat(session, actor=actor, request=request, demo=demo)
     active_sessions = get_active_sessions(
         session,
         actor=actor,

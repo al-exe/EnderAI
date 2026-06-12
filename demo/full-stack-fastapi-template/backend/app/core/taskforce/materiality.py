@@ -7,8 +7,8 @@ short-circuit that keeps the per-user daily cost bounded.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from app.models import (
     TaskforceCommandRun,
@@ -68,7 +68,7 @@ def _count_assistant_turns(transcript: Sequence[TaskforceTranscriptTurn]) -> int
 def _distinct_commands(commands: Sequence[TaskforceCommandRun]) -> int:
     seen: set[str] = set()
     for command in commands:
-        token = command.cmd.strip().split(maxsplit=1)
-        if token:
-            seen.add(token[0])
+        normalized = " ".join(command.cmd.split())
+        if normalized:
+            seen.add(normalized)
     return len(seen)

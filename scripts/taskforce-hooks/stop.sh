@@ -67,7 +67,12 @@ session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
 transcript_path="$(jq -r '.transcript_path // empty' <<<"$payload" 2>/dev/null)"
 cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
 
-prompt_user="$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null)"
+prompt_user="$(
+    jq -r '
+        (.prompt // "")
+        | if length > 8000 then .[:7997] + "..." else . end
+    ' <<<"$payload" 2>/dev/null
+)"
 
 # Build a compact transcript from the session JSONL (best effort).
 transcript_array="[]"
@@ -112,7 +117,13 @@ if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
             | jq -sc '[
                 .[] | select(.message?.content?[]? | (.type == "tool_use" and .name == "Bash"))
                 | .message.content[] | select(.type == "tool_use" and .name == "Bash")
-                | { cmd: (.input.command // ""), exit_code: null }
+                | {
+                    cmd: (
+                        (.input.command // "")
+                        | if length > 2000 then .[:1997] + "..." else . end
+                    ),
+                    exit_code: null
+                  }
             ] | map(select(.cmd != ""))' 2>/dev/null
     )"
     [[ -z "$commands_run" || "$commands_run" == "null" ]] && commands_run="[]"

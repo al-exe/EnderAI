@@ -152,3 +152,92 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
             }
         ],
     }
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+@pytest.mark.parametrize(
+    ("hook_name", "include_prompt"),
+    [("post-tool-use.sh", False), ("stop.sh", True)],
+)
+def test_observe_hooks_clamp_payloads_and_report_model(
+    tmp_path: Path,
+    hook_name: str,
+    include_prompt: bool,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "model": "claude-opus-4-8",
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 7,
+                        "cache_read_input_tokens": 3,
+                        "cache_creation_input_tokens": 2,
+                    },
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "Bash",
+                            "input": {"command": "x" * 2500},
+                        },
+                        {"type": "text", "text": "Implemented the checkpoint."},
+                    ],
+                },
+            }
+        )
+        + "\n"
+    )
+
+    capture_file = tmp_path / "payload.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+while (($#)); do
+    if [[ "$1" == "--data" ]]; then
+        shift
+        printf '%s' "$1" > "$CAPTURE_FILE"
+    fi
+    shift
+done
+printf '202'
+"""
+    )
+    curl.chmod(0o755)
+
+    hook_payload = {
+        "session_id": f"hook-{hook_name}",
+        "transcript_path": str(transcript),
+        "cwd": str(tmp_path),
+    }
+    if include_prompt:
+        hook_payload["prompt"] = "p" * 9000
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE_FILE": str(capture_file),
+        "TASKFORCE_CHECKPOINT_EVERY": "1",
+    }
+    subprocess.run(
+        ["bash", str(CANONICAL_HOOK_DIR / hook_name)],
+        input=json.dumps(hook_payload),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    body = json.loads(capture_file.read_text())
+    assert len(body["commands_run"][0]["cmd"]) <= 2000
+    assert body["harness"]["model_id"] == "claude-opus-4-8"
+    if include_prompt:
+        assert len(body["prompt"]) <= 8000

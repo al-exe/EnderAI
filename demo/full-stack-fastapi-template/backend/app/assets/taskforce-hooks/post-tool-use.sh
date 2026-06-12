@@ -116,10 +116,30 @@ commands_run="$(
         | jq -sc '[
             .[] | select(.message?.content?[]? | (.type == "tool_use" and .name == "Bash"))
             | .message.content[] | select(.type == "tool_use" and .name == "Bash")
-            | { cmd: (.input.command // ""), exit_code: null }
+            | {
+                cmd: (
+                    (.input.command // "")
+                    | if length > 2000 then .[:1997] + "..." else . end
+                ),
+                exit_code: null
+              }
         ] | map(select(.cmd != ""))' 2>/dev/null
 )"
 [[ -z "$commands_run" || "$commands_run" == "null" ]] && commands_run="[]"
+
+harness_payload="$(
+    tail -n 80 "$transcript_path" 2>/dev/null \
+        | jq -sc '
+            [.[] | select(.type == "assistant" and .message.usage)] as $turns
+            | if ($turns | length) == 0 then null else {
+                model_id: ($turns[-1].message.model // "unknown"),
+                total_input_tokens: ([$turns[].message.usage.input_tokens // 0] | add),
+                total_output_tokens: ([$turns[].message.usage.output_tokens // 0] | add),
+                total_cache_read_tokens: ([$turns[].message.usage.cache_read_input_tokens // 0] | add),
+                total_cache_write_tokens: ([$turns[].message.usage.cache_creation_input_tokens // 0] | add)
+              } end' 2>/dev/null
+)"
+[[ -z "$harness_payload" ]] && harness_payload="null"
 
 active_doc_id="null"
 if [[ -f "${STATE_DIR}/${session_id}.active" ]]; then
@@ -139,6 +159,7 @@ body="$(jq -cn \
     --argjson transcript "$transcript_array" \
     --argjson files "$files_touched" \
     --argjson commands "$commands_run" \
+    --argjson harness "$harness_payload" \
     --argjson active "$active_doc_id" \
     --argjson checkpoint_index "$checkpoint_index" \
     '{
@@ -153,7 +174,7 @@ body="$(jq -cn \
         files_touched: $files,
         commands_run: $commands,
         duration_ms: 0,
-        harness: null,
+        harness: $harness,
         checkpoint_index: $checkpoint_index
     }')"
 

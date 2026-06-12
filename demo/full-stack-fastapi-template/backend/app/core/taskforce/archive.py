@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import String, func
 from sqlmodel import Session, col, select
 
+from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
 from app.models import (
     MetricsEvent,
     TaskforceObserveRequest,
@@ -57,6 +58,10 @@ def upsert_session_archive_from_observe(
             imported_at=now,
             created_at=now,
         )
+    if archive.fleet_session_id is None:
+        archive.fleet_session_id = get_or_create_default_fleet_session(
+            session, actor
+        ).id
 
     started_at = _started_at(now, request.duration_ms)
     events = _normalized_events(request, now=now)

@@ -26,6 +26,7 @@ from sqlalchemy import desc
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
+from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
 from app.models import (
     TaskforceActiveSession,
     TaskforceDiscoverRequest,
@@ -50,7 +51,7 @@ def touch_session_heartbeat(
     actor: User,
     request: TaskforceDiscoverRequest,
     demo: bool,
-) -> None:
+) -> TaskforceSessionArchive | None:
     """Record "this session is still alive" on every ``/discover`` call.
 
     Creates a minimal archive row if one doesn't exist yet (e.g. the first
@@ -60,7 +61,7 @@ def touch_session_heartbeat(
     """
 
     if not request.session_id:
-        return
+        return None
 
     now = _now()
     archive = session.exec(
@@ -89,10 +90,17 @@ def touch_session_heartbeat(
         archive.repo = archive.repo or _repo_from_cwd(request.cwd)
         archive.branch = archive.branch or request.git_branch
         archive.client = archive.client or request.client
+    if archive.fleet_session_id is None:
+        archive.fleet_session_id = get_or_create_default_fleet_session(
+            session, actor
+        ).id
+    if request.prompt.strip():
+        archive.title = " ".join(request.prompt.split())[:255]
 
     archive.last_seen_at = now
     archive.updated_at = now
     session.add(archive)
+    return archive
 
 
 def _active_session_rows(
@@ -188,7 +196,7 @@ def get_active_sessions(
                 title=document.title if document else None,
                 summary_markdown=(document.ai_generated_summary or "")
                 if document
-                else "",
+                else (row.title or ""),
                 last_seen_at=last_seen_at,
                 minutes_ago=minutes_ago,
             )
@@ -300,7 +308,7 @@ def active_sessions_for_actor(
                         or ""
                     )
                     if active_document is not None
-                    else ""
+                    else (archive.title or "")
                 ),
                 last_seen_at=last_seen_at,
                 minutes_ago=_minutes_ago(now_utc, last_seen_at),
