@@ -1458,6 +1458,12 @@ class TaskforceSessionArchive(SQLModel, table=True):
         index=True,
         ondelete="SET NULL",
     )
+    fleet_session_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="taskforce_fleet_session.id",
+        index=True,
+        ondelete="SET NULL",
+    )
     is_demo: bool = Field(default=False, nullable=False, index=True)
     client: str | None = Field(default=None, max_length=32)
     specialist_slug: str | None = Field(default=None, max_length=64)
@@ -1523,6 +1529,35 @@ class TaskforceSessionArchive(SQLModel, table=True):
         sa_type=DateTime(timezone=True),  # type: ignore
     )
     updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class TaskforceFleetSession(SQLModel, table=True):
+    """A user-owned grouping for currently active Taskforce sessions."""
+
+    __tablename__ = "taskforce_fleet_session"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    actor_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    name: str = Field(min_length=1, max_length=120)
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    updated_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
     )
@@ -1697,6 +1732,48 @@ class TaskforceSessionLogResponse(SQLModel):
 
     session_id: str
     entries: list[TaskforceSessionLogEntry]
+
+
+class TaskforceFleetAgentPublic(SQLModel):
+    """One active CLI session rendered in the Fleet control panel."""
+
+    session_id: str
+    fleet_session_id: uuid.UUID | None = None
+    cwd: str | None = None
+    branch: str | None = None
+    repo: str | None = None
+    active_document_id: uuid.UUID | None = None
+    referenced_document_ids: list[uuid.UUID] = Field(default_factory=list)
+    title: str | None = None
+    summary_markdown: str = ""
+    last_seen_at: datetime
+    minutes_ago: int = Field(ge=0)
+    specialist_slug: str | None = None
+
+
+class TaskforceFleetSessionCreate(SQLModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class TaskforceFleetSessionUpdate(SQLModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class TaskforceFleetSessionAssignment(SQLModel):
+    fleet_session_id: uuid.UUID | None = None
+
+
+class TaskforceFleetSessionPublic(SQLModel):
+    id: uuid.UUID
+    name: str
+    created_at: datetime
+    updated_at: datetime
+    agents: list[TaskforceFleetAgentPublic] = Field(default_factory=list)
+
+
+class TaskforceFleetResponse(SQLModel):
+    fleet_sessions: list[TaskforceFleetSessionPublic] = Field(default_factory=list)
+    unassigned: list[TaskforceFleetAgentPublic] = Field(default_factory=list)
 
 
 class TaskforceSessionSavingsResponse(SQLModel):
