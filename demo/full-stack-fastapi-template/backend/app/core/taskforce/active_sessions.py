@@ -305,6 +305,7 @@ def active_sessions_for_actor(
                 last_seen_at=last_seen_at,
                 minutes_ago=_minutes_ago(now_utc, last_seen_at),
                 specialist_slug=archive.specialist_slug,
+                model_id=archive.model_id,
             )
         )
 

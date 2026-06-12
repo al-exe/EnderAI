@@ -1749,6 +1749,7 @@ class TaskforceFleetAgentPublic(SQLModel):
     last_seen_at: datetime
     minutes_ago: int = Field(ge=0)
     specialist_slug: str | None = None
+    model_id: str | None = None
 
 
 class TaskforceFleetSessionCreate(SQLModel):
