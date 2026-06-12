@@ -3,6 +3,7 @@ from typing import Any
 from sqlmodel import Session, select
 
 from app.core.security import get_password_hash, verify_password
+from app.core.tiering import default_comp_tier_for_new_user
 from app.models import Organization, User, UserCreate, UserUpdate
 
 
@@ -18,6 +19,11 @@ def create_user(
     if user_create.password:
         extra_data["hashed_password"] = get_password_hash(user_create.password)
     db_obj = User.model_validate(user_create, update=extra_data)
+    # New-user promo: grant the complimentary tier unless one was already
+    # set (UserCreate has no comp_tier field, so this is the grant point
+    # for every account created through crud).
+    if db_obj.comp_tier is None:
+        db_obj.comp_tier = default_comp_tier_for_new_user()
     session.add(db_obj)
     session.flush()
     if db_obj.organization_id is None:

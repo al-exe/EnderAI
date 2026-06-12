@@ -11,7 +11,7 @@ from app.core import firebase_auth, security
 from app.core.config import settings
 from app.core.db import is_v2_enabled_identity
 from app.core.demo import ensure_demo_workspace
-from app.core.tiering import resolve_public_tier
+from app.core.tiering import default_comp_tier_for_new_user, resolve_public_tier
 from app.models import (
     FirebaseTokenExchange,
     Message,
@@ -94,6 +94,9 @@ def _exchange_firebase_identity_for_user(
         firebase_uid=firebase_uid,
         is_superuser=False,
         v2=is_v2_enabled_identity(email),
+        # New-user promo grant — this Firebase first-login path builds the
+        # User directly, so it mirrors crud.create_user's comp_tier grant.
+        comp_tier=default_comp_tier_for_new_user(),
     )
     session.add(user)
     session.flush()

@@ -33,6 +33,45 @@ class Tier(str, Enum):
     ADMIN = "admin"
 
 
+# Ordering used to combine a complimentary grant with a paid tier. The
+# higher rank wins, so a comp grant only ever *raises* a user's tier.
+# ADMIN sits above MAX so a comp="max" never shadows the legacy
+# admin-checkout price.
+_TIER_RANK: dict[Tier, int] = {
+    Tier.FREE: 0,
+    Tier.PRO: 1,
+    Tier.MAX: 2,
+    Tier.ADMIN: 3,
+}
+
+
+def _coerce_tier(value: str | None) -> Tier | None:
+    """Parse a stored/configured tier string into a ``Tier``.
+
+    Unknown or empty values yield ``None`` rather than raising, so a
+    typo'd ``comp_tier`` / ``NEW_USER_DEFAULT_TIER`` degrades to "no
+    grant" instead of taking down tier resolution on every request."""
+
+    if not value:
+        return None
+    try:
+        return Tier(value)
+    except ValueError:
+        return None
+
+
+def default_comp_tier_for_new_user() -> str | None:
+    """Complimentary tier auto-granted to every newly created user while
+    the new-user promo is running.
+
+    Returns the canonical ``comp_tier`` value to store (e.g. ``"max"``)
+    or ``None`` when the promo is off (``NEW_USER_DEFAULT_TIER`` unset)
+    or misconfigured. Read lazily so tests can monkeypatch ``settings``."""
+
+    tier = _coerce_tier(settings.NEW_USER_DEFAULT_TIER)
+    return tier.value if tier is not None else None
+
+
 def _price_id_to_tier() -> dict[str, Tier]:
     """Built lazily so test code that monkeypatches ``settings`` after
     import time sees the override."""
@@ -51,8 +90,8 @@ def _price_id_to_tier() -> dict[str, Tier]:
     return mapping
 
 
-def resolve_tier(user: User) -> Tier:
-    """Resolve a user's current paid tier from Stripe state.
+def _paid_tier(user: User) -> Tier:
+    """Resolve a user's paid tier from Stripe state alone.
 
     A subscription is "live" only when its status is active/trialing AND
     its price_id maps to a known tier. Cancelled/past_due subscriptions
@@ -66,6 +105,23 @@ def resolve_tier(user: User) -> Tier:
     if not price_id:
         return Tier.FREE
     return _price_id_to_tier().get(price_id, Tier.FREE)
+
+
+def resolve_tier(user: User) -> Tier:
+    """Resolve a user's effective tier.
+
+    The paid (Stripe) tier and any complimentary ``comp_tier`` grant are
+    combined by rank, and the higher of the two wins. The grant is thus a
+    *floor*: it can raise a Free/Pro user to Max (the new-user promo) but
+    never demotes someone whose Stripe subscription already outranks it.
+    Every tier-aware gate composes against this function, so the floor
+    applies everywhere uniformly."""
+
+    paid = _paid_tier(user)
+    comp = _coerce_tier(user.comp_tier)
+    if comp is not None and _TIER_RANK[comp] > _TIER_RANK[paid]:
+        return comp
+    return paid
 
 
 def public_tier(tier: Tier) -> PublicTier:

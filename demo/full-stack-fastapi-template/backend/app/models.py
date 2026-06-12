@@ -203,6 +203,13 @@ class User(UserBase, table=True):
     )
     stripe_subscription_cancel_at_period_end: bool = False
     stripe_price_id: str | None = Field(default=None, max_length=255)
+    # Complimentary tier grant, independent of Stripe. Set at signup by
+    # the new-user promo (settings.NEW_USER_DEFAULT_TIER) and honored as a
+    # *floor* over the Stripe-resolved tier in tiering.resolve_tier — it
+    # only ever raises a user's tier, never lowers it. Stored as a plain
+    # str ("free" | "pro" | "max"); the Literal lives on the public shapes
+    # rather than on this table model.
+    comp_tier: str | None = Field(default=None, max_length=16)
 
 
 class UserPublic(UserBase):
