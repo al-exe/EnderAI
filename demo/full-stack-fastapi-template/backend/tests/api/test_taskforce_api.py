@@ -22,6 +22,7 @@ from app.models import (
     AgentSpecialistDocumentLink,
     MetricsEvent,
     ModelPricing,
+    TaskforceSessionArchive,
     User,
     V2Document,
 )
@@ -1149,3 +1150,244 @@ def test_avoided_rediscovery_metric_accumulates_from_consults(
     # net_saved_tokens for at least one consult should be > 0 since the doc
     # has real rediscovery cost and the summary readout is small.
     assert int(float(metric["total"])) >= 0
+
+
+# ----- TF-225: active-sessions roster ---------------------------------------
+
+
+def test_discover_heartbeat_creates_archive_row(client: TestClient, db: Session) -> None:
+    _, headers = _signup(client)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "set up the roster",
+            "session_id": "tf225-alpha",
+            "cwd": "/home/alexlee/dev/EnderAI",
+            "git_branch": "main",
+            "min_score": 0.0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["active_sessions"] == []
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == "tf225-alpha"
+        )
+    ).one()
+    assert archive.last_seen_at is not None
+    assert archive.cwd == "/home/alexlee/dev/EnderAI"
+    assert archive.branch == "main"
+    assert archive.repo == "EnderAI"
+    assert archive.ended_at is None
+
+
+def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    alpha = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "working on the frontend",
+            "session_id": "tf225-sibling-alpha",
+            "cwd": "/home/alexlee/dev/EnderAI-frontend",
+            "git_branch": "feature/checkout",
+            "min_score": 0.0,
+        },
+    )
+    assert alpha.status_code == 200, alpha.text
+    # alpha is the only session so far → no siblings yet.
+    assert alpha.json()["active_sessions"] == []
+
+    beta = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "working on the backend",
+            "session_id": "tf225-sibling-beta",
+            "cwd": "/home/alexlee/dev/EnderAI-backend",
+            "git_branch": "main",
+            "min_score": 0.0,
+        },
+    )
+    assert beta.status_code == 200, beta.text
+    siblings = beta.json()["active_sessions"]
+    assert len(siblings) == 1
+    sibling = siblings[0]
+    assert sibling["session_id"] == "tf225-sibling-alpha"
+    assert sibling["cwd"] == "/home/alexlee/dev/EnderAI-frontend"
+    assert sibling["branch"] == "feature/checkout"
+    assert sibling["repo"] == "EnderAI-frontend"
+    assert sibling["active_document_id"] is None
+    assert sibling["minutes_ago"] == 0
+
+    # alpha, polling again, should now see beta as its only sibling — and
+    # should not see itself.
+    alpha_again = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "still working on the frontend",
+            "session_id": "tf225-sibling-alpha",
+            "min_score": 0.0,
+        },
+    )
+    assert alpha_again.status_code == 200, alpha_again.text
+    siblings_for_alpha = alpha_again.json()["active_sessions"]
+    assert [s["session_id"] for s in siblings_for_alpha] == ["tf225-sibling-beta"]
+
+
+def test_discover_active_sessions_excludes_ended_sessions(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "ending this session",
+            "session_id": "tf225-ended",
+            "min_score": 0.0,
+        },
+    )
+    # A "final" observe sets ended_at — the session should drop off the
+    # roster even though last_seen_at is recent.
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "wrapping up",
+            "session_id": "tf225-ended",
+            "summary_points": ["Wrapped up the roster work."],
+            "outcome": "shipped",
+            "duration_ms": 1000,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+
+    other = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "another session",
+            "session_id": "tf225-other",
+            "min_score": 0.0,
+        },
+    )
+    assert other.status_code == 200, other.text
+    assert other.json()["active_sessions"] == []
+
+
+def test_discover_active_sessions_includes_document_summary(
+    client: TestClient, monkeypatch
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Capture Postgres rotation notes",
+            "client": "claude-code",
+            "session_id": "tf225-doc-session",
+            "cwd": "/home/alexlee/dev/EnderAI-backend",
+            "checkpoint_index": 1,
+            "summary_points": ["Documented the Postgres rotation runbook."],
+            "details_sections": [
+                {
+                    "anchor_id": "decision",
+                    "markdown": "Rotate the staging DSN every 14 days.",
+                }
+            ],
+            "outcome": "shipped",
+            "files_touched": ["ops/db-rotation.md"],
+            "duration_ms": 1000,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+    document_id = observe.json()["document_id"]
+
+    # The observing session isn't "ended" (checkpoint, not final), so it
+    # should appear in a sibling's roster with its active document's title +
+    # summary.
+    sibling = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "another terminal",
+            "session_id": "tf225-doc-sibling",
+            "min_score": 0.0,
+        },
+    )
+    assert sibling.status_code == 200, sibling.text
+    siblings = sibling.json()["active_sessions"]
+    assert len(siblings) == 1
+    entry = siblings[0]
+    assert entry["session_id"] == "tf225-doc-session"
+    assert entry["active_document_id"] == document_id
+    assert entry["title"]
+    assert entry["summary_markdown"]
+
+
+def test_active_sessions_endpoint_returns_roster(client: TestClient) -> None:
+    _, headers = _signup(client)
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "terminal one",
+            "session_id": "tf225-rail-one",
+            "cwd": "/home/alexlee/dev/EnderAI",
+            "min_score": 0.0,
+        },
+    )
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "terminal two",
+            "session_id": "tf225-rail-two",
+            "cwd": "/home/alexlee/dev/EnderAI-frontend",
+            "min_score": 0.0,
+        },
+    )
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/active-sessions",
+        headers=headers,
+        params={"session_id": "tf225-rail-two"},
+    )
+    assert response.status_code == 200, response.text
+    sessions = response.json()["active_sessions"]
+    assert [s["session_id"] for s in sessions] == ["tf225-rail-one"]
+
+
+def test_active_sessions_scoped_per_actor(client: TestClient) -> None:
+    _, headers_a = _signup(client)
+    _, headers_b = _signup(client)
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers_a,
+        json={
+            "prompt": "user a session",
+            "session_id": "tf225-actor-a",
+            "min_score": 0.0,
+        },
+    )
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/active-sessions",
+        headers=headers_b,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["active_sessions"] == []
