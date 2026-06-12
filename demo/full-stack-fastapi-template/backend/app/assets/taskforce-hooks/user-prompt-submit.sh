@@ -96,7 +96,8 @@ body="$(jq -cn \
         prompt: $prompt,
         cwd: (if $cwd == "" then null else $cwd end),
         session_id: (if $session_id == "" then null else $session_id end),
-        git_branch: (if $git_branch == "" then null else $git_branch end)
+        git_branch: (if $git_branch == "" then null else $git_branch end),
+        min_score: 0.2
     }')"
 
 http_status="$(
