@@ -18,6 +18,7 @@ USER_PROMPT_HOOK="${HOOK_DIR}/taskforce-user-prompt-submit.sh"
 STOP_HOOK="${HOOK_DIR}/taskforce-stop.sh"
 POST_TOOL_HOOK="${HOOK_DIR}/taskforce-post-tool-use.sh"
 SESSION_END_HOOK="${HOOK_DIR}/taskforce-session-end.sh"
+RECORD_USAGE_HOOK="${HOOK_DIR}/taskforce-record-usage.sh"
 
 REPO_RAW_BASE="${TASKFORCE_HOOK_REPO_RAW:-https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks}"
 
@@ -38,6 +39,7 @@ install_hook "user-prompt-submit.sh" "$USER_PROMPT_HOOK"
 install_hook "stop.sh"                "$STOP_HOOK"
 install_hook "post-tool-use.sh"       "$POST_TOOL_HOOK"
 install_hook "session-end.sh"         "$SESSION_END_HOOK"
+install_hook "record-usage.sh"        "$RECORD_USAGE_HOOK"
 
 # Merge the hooks block into ~/.claude/settings.json. Uses jq so any
 # existing entries (e.g. the Stop hook from the EnderAI Connect Agent
@@ -94,6 +96,7 @@ merge_hook UserPromptSubmit "$USER_PROMPT_HOOK"  5
 merge_hook Stop             "$STOP_HOOK"        30
 merge_hook PostToolUse      "$POST_TOOL_HOOK"   15
 merge_hook SessionEnd       "$SESSION_END_HOOK" 15
+merge_hook Stop             "$RECORD_USAGE_HOOK" 10
 
 echo "✓ Hook installed and ~/.claude/settings.json updated."
 echo ""

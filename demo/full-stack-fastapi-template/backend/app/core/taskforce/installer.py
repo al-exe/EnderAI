@@ -33,6 +33,13 @@ HOOKS = (
         15,
         "TASKFORCE_SESSION_END_EOF",
     ),
+    (
+        "record-usage.sh",
+        "taskforce-record-usage.sh",
+        "Stop",
+        10,
+        "TASKFORCE_RECORD_USAGE_EOF",
+    ),
 )
 
 
@@ -120,7 +127,8 @@ def build_hook_installer() -> str:
     lines.extend(
         [
             "",
-            'echo "✓ Taskforce hooks installed — restart Claude Code to activate."',
+            'echo "✓ Taskforce hooks installed (discovery, capture, metrics) '
+            '— restart Claude Code to activate."',
             "",
         ]
     )

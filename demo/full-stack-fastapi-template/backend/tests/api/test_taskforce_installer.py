@@ -62,7 +62,9 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
     claude_dir = home / ".claude"
     claude_dir.mkdir(parents=True)
     settings_file = claude_dir / "settings.json"
-    metrics_command = "$HOME/.claude/hooks/taskforce-record-usage.sh"
+    # A user-supplied Stop hook that the installer must leave untouched while
+    # it merges in its own (record-usage, stop, …) commands.
+    external_stop_command = "$HOME/.claude/hooks/my-custom-stop-hook.sh"
     settings_file.write_text(
         json.dumps(
             {
@@ -85,7 +87,7 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": metrics_command,
+                                    "command": external_stop_command,
                                     "timeout": 10,
                                 }
                             ],
@@ -141,7 +143,7 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
     stop_commands = [
         hook["command"] for matcher in hooks["Stop"] for hook in matcher["hooks"]
     ]
-    assert stop_commands.count(metrics_command) == 1
+    assert stop_commands.count(external_stop_command) == 1
     assert hooks["UserPromptSubmit"][0] == {
         "matcher": "Bash",
         "hooks": [
