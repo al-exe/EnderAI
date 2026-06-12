@@ -42,6 +42,7 @@ def _create_archive(
     ended_at: datetime | None = None,
     fleet_session_id: uuid.UUID | None = None,
     referenced_document_ids: list[str] | None = None,
+    model_id: str | None = "claude-opus-4-8",
 ) -> TaskforceSessionArchive:
     archive = TaskforceSessionArchive(
         session_id=session_id,
@@ -52,6 +53,7 @@ def _create_archive(
         cwd="/workspace/EnderAI",
         title=f"Archive {session_id}",
         specialist_slug="backend",
+        model_id=model_id,
         imported_at=imported_at,
         last_seen_at=imported_at,
         ended_at=ended_at,
@@ -172,6 +174,7 @@ def test_fleet_groups_top_five_recent_active_sessions(
     assert grouped["agents"][0]["active_document_id"] == str(document.id)
     assert grouped["agents"][0]["title"] == "Fleet document"
     assert "implemented the Fleet backend" in grouped["agents"][0]["summary_markdown"]
+    assert grouped["agents"][0]["model_id"] == "claude-opus-4-8"
 
 
 def test_assign_unassign_and_delete_never_end_session(
