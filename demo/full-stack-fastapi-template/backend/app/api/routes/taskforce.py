@@ -543,7 +543,9 @@ def assign_fleet_session_route(
         None,
     )
     if agent is None:
-        raise HTTPException(status_code=404, detail="Active Taskforce session not found")
+        raise HTTPException(
+            status_code=404, detail="Active Taskforce session not found"
+        )
 
     archive = session.exec(
         select(TaskforceSessionArchive)

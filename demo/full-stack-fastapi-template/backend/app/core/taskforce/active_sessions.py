@@ -131,9 +131,9 @@ def _active_session_rows(
         statement = statement.where(
             TaskforceSessionArchive.session_id != exclude_session_id
         )
-    statement = statement.order_by(
-        desc(TaskforceSessionArchive.last_seen_at)
-    ).limit(limit)
+    statement = statement.order_by(desc(TaskforceSessionArchive.last_seen_at)).limit(
+        limit
+    )
 
     return list(session.exec(statement)), now
 
@@ -173,9 +173,7 @@ def get_active_sessions(
     entries: list[TaskforceActiveSession] = []
     for row in rows:
         document = (
-            documents.get(row.active_document_id)
-            if row.active_document_id
-            else None
+            documents.get(row.active_document_id) if row.active_document_id else None
         )
         last_seen_at = row.last_seen_at
         assert last_seen_at is not None  # filtered above
@@ -212,7 +210,9 @@ def _minutes_ago(now: datetime, value: datetime) -> int:
     normalized = value
     if normalized.tzinfo is None:
         normalized = normalized.replace(tzinfo=timezone.utc)
-    return max(0, int((now - normalized.astimezone(timezone.utc)).total_seconds() // 60))
+    return max(
+        0, int((now - normalized.astimezone(timezone.utc)).total_seconds() // 60)
+    )
 
 
 def active_sessions_for_actor(
@@ -294,7 +294,11 @@ def active_sessions_for_actor(
                     else archive.title
                 ),
                 summary_markdown=(
-                    (active_document.ai_generated_summary or active_document.description or "")
+                    (
+                        active_document.ai_generated_summary
+                        or active_document.description
+                        or ""
+                    )
                     if active_document is not None
                     else ""
                 ),

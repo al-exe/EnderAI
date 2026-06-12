@@ -53,6 +53,7 @@ def _create_archive(
         title=f"Archive {session_id}",
         specialist_slug="backend",
         imported_at=imported_at,
+        last_seen_at=imported_at,
         ended_at=ended_at,
         fleet_session_id=fleet_session_id,
         referenced_document_ids=referenced_document_ids or [],
@@ -157,7 +158,9 @@ def test_fleet_groups_top_five_recent_active_sessions(
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    grouped = next(item for item in body["fleet_sessions"] if item["id"] == str(fleet_id))
+    grouped = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
+    )
     grouped_ids = [agent["session_id"] for agent in grouped["agents"]]
     unassigned_ids = [agent["session_id"] for agent in body["unassigned"]]
 
