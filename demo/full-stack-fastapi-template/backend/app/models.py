@@ -954,6 +954,12 @@ class V2Document(SQLModel, table=True):
         index=True,
         ondelete="SET NULL",
     )
+    fleet_session_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="taskforce_fleet_session.id",
+        index=True,
+        ondelete="SET NULL",
+    )
     visibility: str = Field(default="private", index=True, max_length=16)
     produced_by_client: str | None = Field(default=None, max_length=32)
     title: str = Field(min_length=1, max_length=255)
@@ -1753,7 +1759,7 @@ class TaskforceFleetAgentPublic(SQLModel):
 
 
 class TaskforceFleetSessionCreate(SQLModel):
-    name: str = Field(min_length=1, max_length=120)
+    pass
 
 
 class TaskforceFleetSessionUpdate(SQLModel):
@@ -1761,7 +1767,7 @@ class TaskforceFleetSessionUpdate(SQLModel):
 
 
 class TaskforceFleetSessionAssignment(SQLModel):
-    fleet_session_id: uuid.UUID | None = None
+    fleet_session_id: uuid.UUID
 
 
 class TaskforceFleetSessionPublic(SQLModel):
@@ -1774,7 +1780,6 @@ class TaskforceFleetSessionPublic(SQLModel):
 
 class TaskforceFleetResponse(SQLModel):
     fleet_sessions: list[TaskforceFleetSessionPublic] = Field(default_factory=list)
-    unassigned: list[TaskforceFleetAgentPublic] = Field(default_factory=list)
 
 
 class TaskforceSessionSavingsResponse(SQLModel):

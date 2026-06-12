@@ -122,7 +122,7 @@ async def observe(
 ) -> TaskforceObserveResponse:
     shadow = _shadow_mode()
     structured = _has_structured_payload(request)
-    upsert_session_archive_from_observe(
+    archive = upsert_session_archive_from_observe(
         session,
         actor=actor,
         request=request,
@@ -272,7 +272,12 @@ async def observe(
     target_doc: V2Document
     if document is None:
         target_doc = _create_document_from_summary(
-            session, actor=actor, summary=summary, is_demo=demo, request=request
+            session,
+            actor=actor,
+            summary=summary,
+            is_demo=demo,
+            request=request,
+            fleet_session_id=archive.fleet_session_id if archive else None,
         )
         action = "created"
     else:
@@ -340,6 +345,7 @@ def _create_document_from_summary(
     summary: SummarizerResult,
     is_demo: bool,
     request: TaskforceObserveRequest,
+    fleet_session_id: uuid_module.UUID | None,
 ) -> V2Document:
     title = (
         (summary.summary_points[0] if summary.summary_points else request.prompt)
@@ -355,6 +361,7 @@ def _create_document_from_summary(
         organization_id=actor.organization_id if visibility == "organization" else None,
         visibility=visibility,
         produced_by_client=request.client,
+        fleet_session_id=fleet_session_id,
         title=title.strip() or "Taskforce session",
         description=request.prompt.strip()[:500],
         human_summary="",

@@ -27,6 +27,10 @@ from app.core.taskforce.active_sessions import (
     get_active_sessions,
 )
 from app.core.taskforce.discover import discover as run_discover
+from app.core.taskforce.fleet_sessions import (
+    get_or_create_default_fleet_session,
+    next_fleet_session_name,
+)
 from app.core.taskforce.installer import build_hook_installer
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
@@ -407,14 +411,9 @@ def fleet_route(
     )
     agents = active_sessions_for_actor(session, actor=current_user)
     agents_by_fleet: dict[uuid.UUID, list[Any]] = {}
-    unassigned: list[Any] = []
     visible_fleet_ids = {fleet_session.id for fleet_session in fleet_sessions}
     for agent in agents:
-        if (
-            agent.fleet_session_id is None
-            or agent.fleet_session_id not in visible_fleet_ids
-        ):
-            unassigned.append(agent)
+        if agent.fleet_session_id not in visible_fleet_ids:
             continue
         agents_by_fleet.setdefault(agent.fleet_session_id, []).append(agent)
 
@@ -428,8 +427,7 @@ def fleet_route(
                 agents=agents_by_fleet.get(fleet_session.id, []),
             )
             for fleet_session in fleet_sessions
-        ],
-        unassigned=unassigned,
+        ]
     )
 
 
@@ -441,14 +439,14 @@ def fleet_route(
 def create_fleet_session_route(
     session: SessionDep,
     current_user: CurrentUser,
-    body: TaskforceFleetSessionCreate,
+    _body: TaskforceFleetSessionCreate | None = None,
 ) -> Any:
-    """Create an empty Fleet session owned by the current actor."""
+    """Create an auto-named session owned by the current actor."""
 
     fleet_session = TaskforceFleetSession(
         actor_id=current_user.id,
         organization_id=current_user.organization_id,
-        name=_fleet_name(body.name),
+        name=next_fleet_session_name(session, current_user),
     )
     session.add(fleet_session)
     session.commit()
@@ -502,7 +500,7 @@ def delete_fleet_session_route(
     current_user: CurrentUser,
     fleet_session_id: uuid.UUID,
 ) -> Response:
-    """Delete a Fleet session without ending or otherwise mutating its agents."""
+    """Delete a session, moving its agents to the actor's default session."""
 
     fleet_session = _fleet_session_for_actor(
         session,
@@ -514,8 +512,13 @@ def delete_fleet_session_route(
         .where(TaskforceSessionArchive.actor_id == current_user.id)
         .where(TaskforceSessionArchive.fleet_session_id == fleet_session.id)
     ).all()
+    replacement = get_or_create_default_fleet_session(
+        session,
+        current_user,
+        exclude_id=fleet_session.id,
+    )
     for member in members:
-        member.fleet_session_id = None
+        member.fleet_session_id = replacement.id
         session.add(member)
     session.delete(fleet_session)
     session.commit()
@@ -532,7 +535,7 @@ def assign_fleet_session_route(
     session_id: str,
     body: TaskforceFleetSessionAssignment,
 ) -> Any:
-    """Assign or unassign one actor-owned active session."""
+    """Move one actor-owned active agent into another session."""
 
     agent = next(
         (
@@ -554,12 +557,11 @@ def assign_fleet_session_route(
     ).first()
     if archive is None:
         raise HTTPException(status_code=404, detail="Taskforce session not found")
-    if body.fleet_session_id is not None:
-        _fleet_session_for_actor(
-            session,
-            actor_id=current_user.id,
-            fleet_session_id=body.fleet_session_id,
-        )
+    _fleet_session_for_actor(
+        session,
+        actor_id=current_user.id,
+        fleet_session_id=body.fleet_session_id,
+    )
 
     archive.fleet_session_id = body.fleet_session_id
     archive.updated_at = get_datetime_utc()

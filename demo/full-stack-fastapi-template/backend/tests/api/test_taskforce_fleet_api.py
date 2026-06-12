@@ -69,15 +69,24 @@ def _create_archive(
 def _create_fleet(
     client: TestClient,
     headers: dict[str, str],
-    name: str,
+    name: str | None = None,
 ) -> dict[str, object]:
     response = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/fleet",
         headers=headers,
-        json={"name": name},
+        json={},
     )
     assert response.status_code == 201, response.text
-    return response.json()
+    fleet = response.json()
+    if name is None:
+        return fleet
+    renamed = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet['id']}",
+        headers=headers,
+        json={"name": name},
+    )
+    assert renamed.status_code == 200, renamed.text
+    return renamed.json()
 
 
 def test_fleet_session_crud_is_actor_scoped(
@@ -137,7 +146,7 @@ def test_fleet_groups_top_five_recent_active_sessions(
             user=user,
             session_id=f"recent-{index}",
             imported_at=now - timedelta(minutes=index),
-            fleet_session_id=fleet_id if index < 2 else None,
+            fleet_session_id=fleet_id,
             referenced_document_ids=[str(document.id)] if index == 0 else None,
         )
     _create_archive(
@@ -164,43 +173,51 @@ def test_fleet_groups_top_five_recent_active_sessions(
         item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
     )
     grouped_ids = [agent["session_id"] for agent in grouped["agents"]]
-    unassigned_ids = [agent["session_id"] for agent in body["unassigned"]]
 
-    assert grouped_ids == ["recent-0", "recent-1"]
-    assert unassigned_ids == ["recent-2", "recent-3", "recent-4"]
-    assert "recent-5" not in grouped_ids + unassigned_ids
-    assert "too-old" not in grouped_ids + unassigned_ids
-    assert "ended" not in grouped_ids + unassigned_ids
+    assert "unassigned" not in body
+    assert grouped_ids == [
+        "recent-0",
+        "recent-1",
+        "recent-2",
+        "recent-3",
+        "recent-4",
+    ]
+    assert "recent-5" not in grouped_ids
+    assert "too-old" not in grouped_ids
+    assert "ended" not in grouped_ids
     assert grouped["agents"][0]["active_document_id"] == str(document.id)
     assert grouped["agents"][0]["title"] == "Fleet document"
     assert "implemented the Fleet backend" in grouped["agents"][0]["summary_markdown"]
     assert grouped["agents"][0]["model_id"] == "claude-opus-4-8"
 
 
-def test_assign_unassign_and_delete_never_end_session(
+def test_reassign_and_delete_move_agent_without_ending_session(
     client: TestClient,
     db: Session,
 ) -> None:
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    fleet = _create_fleet(client, headers, "Mutable Fleet")
-    fleet_id = uuid.UUID(str(fleet["id"]))
+    default_fleet = _create_fleet(client, headers)
+    destination = _create_fleet(client, headers)
+    default_fleet_id = uuid.UUID(str(default_fleet["id"]))
+    destination_id = uuid.UUID(str(destination["id"]))
     archive = _create_archive(
         db,
         user=user,
         session_id="assignable",
         imported_at=datetime.now(timezone.utc),
+        fleet_session_id=default_fleet_id,
     )
 
     assigned = client.patch(
         f"{settings.API_V1_STR}/v2/taskforce/session/{archive.session_id}",
         headers=headers,
-        json={"fleet_session_id": str(fleet_id)},
+        json={"fleet_session_id": str(destination_id)},
     )
     assert assigned.status_code == 200, assigned.text
-    assert assigned.json()["fleet_session_id"] == str(fleet_id)
+    assert assigned.json()["fleet_session_id"] == str(destination_id)
     db.refresh(archive)
-    assert archive.fleet_session_id == fleet_id
+    assert archive.fleet_session_id == destination_id
     assert archive.ended_at is None
 
     unassigned = client.patch(
@@ -208,22 +225,18 @@ def test_assign_unassign_and_delete_never_end_session(
         headers=headers,
         json={"fleet_session_id": None},
     )
-    assert unassigned.status_code == 200, unassigned.text
-    assert unassigned.json()["fleet_session_id"] is None
+    assert unassigned.status_code == 422, unassigned.text
     db.refresh(archive)
-    assert archive.fleet_session_id is None
+    assert archive.fleet_session_id == destination_id
     assert archive.ended_at is None
 
-    archive.fleet_session_id = fleet_id
-    db.add(archive)
-    db.commit()
     deleted = client.delete(
-        f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet_id}",
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{destination_id}",
         headers=headers,
     )
     assert deleted.status_code == 204, deleted.text
     db.refresh(archive)
-    assert archive.fleet_session_id is None
+    assert archive.fleet_session_id == default_fleet_id
     assert archive.ended_at is None
 
 
@@ -251,3 +264,232 @@ def test_assignment_rejects_another_actors_fleet(
     db.refresh(archive)
     assert archive.fleet_session_id is None
     assert archive.ended_at is None
+
+
+def test_first_agent_gets_session_one_and_provisional_current_work(
+    client: TestClient,
+    db: Session,
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Implement the fleet session defaults",
+            "session_id": "default-session-agent",
+            "min_score": 0.0,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == "default-session-agent",
+        )
+    ).one()
+    fleet_session = db.get(TaskforceFleetSession, archive.fleet_session_id)
+    assert fleet_session is not None
+    assert fleet_session.name == "Session 1"
+
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet.status_code == 200, fleet.text
+    body = fleet.json()
+    assert "unassigned" not in body
+    agent = body["fleet_sessions"][0]["agents"][0]
+    assert agent["session_id"] == "default-session-agent"
+    assert agent["summary_markdown"] == "Implement the fleet session defaults"
+
+
+def test_new_fleet_sessions_are_auto_named(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+
+    first = _create_fleet(client, headers)
+    second = _create_fleet(client, headers)
+
+    assert first["name"] == "Session 1"
+    assert second["name"] == "Session 2"
+
+
+def test_discovery_document_pool_flips_after_agent_reassignment(
+    client: TestClient,
+    db: Session,
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = "pool-flip-agent"
+
+    initial_discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "shared pool sentinel",
+            "session_id": session_id,
+            "min_score": 0.0,
+        },
+    )
+    assert initial_discover.status_code == 200, initial_discover.text
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    original_fleet_id = archive.fleet_session_id
+    destination = _create_fleet(client, headers)
+    destination_id = uuid.UUID(str(destination["id"]))
+
+    original_doc = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Original pool document",
+        description="shared pool sentinel",
+        fleet_session_id=original_fleet_id,
+    )
+    destination_doc = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Destination pool document",
+        description="shared pool sentinel",
+        fleet_session_id=destination_id,
+    )
+    global_doc = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Global pool document",
+        description="shared pool sentinel",
+        fleet_session_id=None,
+    )
+    db.add_all([original_doc, destination_doc, global_doc])
+    db.commit()
+    for document in (original_doc, destination_doc, global_doc):
+        db.refresh(document)
+
+    before = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "shared pool sentinel",
+            "session_id": session_id,
+            "k": 3,
+            "min_score": 0.0,
+        },
+    )
+    assert before.status_code == 200, before.text
+    before_ids = {match["document_id"] for match in before.json()["matches"]}
+    assert str(original_doc.id) in before_ids
+    assert str(global_doc.id) in before_ids
+    assert str(destination_doc.id) not in before_ids
+
+    reassigned = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/session/{session_id}",
+        headers=headers,
+        json={"fleet_session_id": str(destination_id)},
+    )
+    assert reassigned.status_code == 200, reassigned.text
+
+    after = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "shared pool sentinel",
+            "session_id": session_id,
+            "k": 3,
+            "min_score": 0.0,
+        },
+    )
+    assert after.status_code == 200, after.text
+    after_ids = {match["document_id"] for match in after.json()["matches"]}
+    assert str(destination_doc.id) in after_ids
+    assert str(global_doc.id) in after_ids
+    assert str(original_doc.id) not in after_ids
+
+    db.refresh(original_doc)
+    assert original_doc.fleet_session_id == original_fleet_id
+
+
+def test_observe_stamps_future_documents_without_moving_past_documents(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = "authoring-reassignment"
+
+    first = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "First authored document",
+            "session_id": session_id,
+            "summary_points": ["First authored document"],
+            "files_touched": ["app/first.py"],
+        },
+    )
+    assert first.status_code == 202, first.text
+    first_doc = db.get(V2Document, uuid.UUID(first.json()["document_id"]))
+    assert first_doc is not None
+    original_fleet_id = first_doc.fleet_session_id
+
+    destination = _create_fleet(client, headers)
+    destination_id = uuid.UUID(str(destination["id"]))
+    reassigned = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/session/{session_id}",
+        headers=headers,
+        json={"fleet_session_id": str(destination_id)},
+    )
+    assert reassigned.status_code == 200, reassigned.text
+
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Second authored document",
+            "session_id": session_id,
+            "summary_points": ["Second authored document"],
+            "files_touched": ["app/second.py"],
+        },
+    )
+    assert second.status_code == 202, second.text
+    second_doc = db.get(V2Document, uuid.UUID(second.json()["document_id"]))
+    assert second_doc is not None
+    assert second_doc.fleet_session_id == destination_id
+
+    db.refresh(first_doc)
+    assert first_doc.owner_id == user.id
+    assert first_doc.fleet_session_id == original_fleet_id
+
+    legacy_global_doc = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Legacy global document",
+        fleet_session_id=None,
+    )
+    db.add(legacy_global_doc)
+    db.commit()
+    db.refresh(legacy_global_doc)
+    updated = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Update a pre-feature document",
+            "session_id": session_id,
+            "active_document_id": str(legacy_global_doc.id),
+            "summary_points": ["Updated the pre-feature document"],
+        },
+    )
+    assert updated.status_code == 202, updated.text
+    db.refresh(legacy_global_doc)
+    assert legacy_global_doc.fleet_session_id is None
