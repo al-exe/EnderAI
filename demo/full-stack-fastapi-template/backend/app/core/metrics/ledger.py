@@ -36,6 +36,7 @@ from app.models import (
 # scope; we don't restrict by kind so observe/consult/reuse all contribute.
 _LEDGER_MAX_LIMIT = 200
 _LEDGER_MAX_DOCS_PER_ROW = 20
+KNOWN_LEDGER_CLIENTS = frozenset({"claude-code", "codex", "cursor"})
 
 
 def _session_id_expr() -> Any:
@@ -282,7 +283,7 @@ def ledger_sessions(
         grouped = grouped.where(MetricsEvent.document_id == document_id)
     if actor_id is not None:
         grouped = grouped.where(MetricsEvent.user_id == actor_id)
-    if client is not None:
+    if client is not None and client != "other":
         grouped = grouped.where(
             or_(
                 _consumed_client_expr() == client,
@@ -317,7 +318,19 @@ def ledger_sessions(
         )
 
     grouped = grouped.group_by(sid)
-    if cross_boundary_only:
+    if client == "other":
+        session_harness = func.coalesce(
+            func.max(TaskforceSessionArchive.harness_label),
+            func.max(TaskforceSessionArchive.client),
+            func.max(_consumed_client_expr()),
+        )
+        grouped = grouped.having(
+            or_(
+                session_harness.is_(None),
+                ~session_harness.in_(KNOWN_LEDGER_CLIENTS),
+            )
+        )
+    elif cross_boundary_only:
         grouped = grouped.having(func.bool_or(xb).is_(True))
 
     count_subq = grouped.subquery()
