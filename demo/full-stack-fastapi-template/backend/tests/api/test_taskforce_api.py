@@ -191,7 +191,9 @@ def test_taskforce_discover_records_consulted_events(
 ) -> None:
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    doc_id = uuid.UUID(_create_document(client, headers, title="Important library work"))
+    doc_id = uuid.UUID(
+        _create_document(client, headers, title="Important library work")
+    )
     document = db.exec(select(V2Document).where(V2Document.id == doc_id)).one()
     document.produced_by_client = "codex"
     db.add(document)
@@ -410,6 +412,8 @@ def test_session_savings_empty_session_returns_zeroes(client: TestClient) -> Non
         "net_saved_tokens": 0,
         "usd_saved": "0.000000",
         "pricing_model_id": None,
+        "specialist_slug": None,
+        "specialist_name": None,
         "occurred_at_first": None,
         "occurred_at_last": None,
     }
@@ -788,9 +792,7 @@ def test_session_start_routes_to_seeded_specialist(
     ).all()
     assert events, "discover should have emitted at least one consult event"
     for event in events:
-        assert (
-            event.payload.get("specialist_slug") == "jensen-test"
-        ), event.payload
+        assert event.payload.get("specialist_slug") == "jensen-test", event.payload
         # TF-201: prompt must also be threaded into the payload so the
         # Agents page Recent Invocations table shows real queries instead
         # of "" — _recent_invocations reads payload->>'prompt'.
@@ -960,6 +962,55 @@ def test_session_observe_created_document_stamps_produced_by_client(
     assert document.produced_by_client == "codex"
 
 
+def test_demo_structured_observe_creates_recallable_document(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+    marker = f"SMOKE-{uuid.uuid4()}"
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe?demo=true",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": f"Record the widget cache TTL decision {marker}",
+            "client": "smoke-test",
+            "session_id": str(uuid.uuid4()),
+            "summary_points": [f"{marker}: widget cache TTL is 900 seconds."],
+            "details_sections": [
+                {
+                    "anchor_id": "decision",
+                    "markdown": f"Widget cache TTL = 900s. Marker {marker}.",
+                }
+            ],
+            "decisions": ["Widget cache TTL = 900s"],
+            "outcome": "shipped",
+            "files_touched": ["config/widget_cache.yaml"],
+            "duration_ms": 1000,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+    observe_body = observe.json()
+    assert observe_body["action"] == "created"
+    assert observe_body["shadow"] is False
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover?demo=true",
+        headers=headers,
+        json={
+            "prompt": f"What did we decide about the widget cache TTL? {marker}",
+            "k": 3,
+            "min_score": 0.1,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+    assert observe_body["document_id"] in {
+        match["document_id"] for match in discover.json()["matches"]
+    }
+
+
 def test_session_observe_created_document_can_be_org_visible(
     client: TestClient,
     db: Session,
@@ -977,7 +1028,9 @@ def test_session_observe_created_document_can_be_org_visible(
             "prompt": "Capture shared Stripe refund webhook idempotency notes",
             "visibility": "organization",
             "session_id": "org-visible-observe-test",
-            "summary_points": ["Use durable Stripe event-id dedupe for refund webhooks."],
+            "summary_points": [
+                "Use durable Stripe event-id dedupe for refund webhooks."
+            ],
             "details_sections": [
                 {
                     "anchor_id": "decision",

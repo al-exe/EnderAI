@@ -15,6 +15,8 @@ Revises: b2c3d4e5f6a7
 Create Date: 2026-05-21 00:00:00.000000
 """
 
+from types import SimpleNamespace
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -37,19 +39,36 @@ def upgrade() -> None:
     )
     # Backfill: recompute the structural formula for every existing row so
     # the metric is meaningful on day one rather than starting at zero.
-    # We import the formula inside the migration to keep alembic agnostic
-    # about app boot order.
+    # Select only columns available at this revision. Importing/querying the
+    # current V2Document model makes fresh installs fail when later columns
+    # have been added to the model but not yet created by Alembic.
     from app.core.taskforce.rediscovery import compute_rediscovery_cost
-    from app.models import V2Document
-    from sqlmodel import Session, select
 
     bind = op.get_bind()
-    with Session(bind) as session:
-        documents = session.exec(select(V2Document)).all()
-        for document in documents:
-            document.rediscovery_cost_tokens = compute_rediscovery_cost(document)
-            session.add(document)
-        session.commit()
+    document_table = sa.table(
+        "v2_document",
+        sa.column("id"),
+        sa.column("main_body"),
+        sa.column("details_markdown_sections"),
+        sa.column("rediscovery_cost_tokens"),
+    )
+    documents = bind.execute(
+        sa.select(
+            document_table.c.id,
+            document_table.c.main_body,
+            document_table.c.details_markdown_sections,
+        )
+    )
+    for row in documents:
+        document = SimpleNamespace(
+            main_body=row.main_body or [],
+            details_markdown_sections=row.details_markdown_sections or [],
+        )
+        bind.execute(
+            document_table.update()
+            .where(document_table.c.id == row.id)
+            .values(rediscovery_cost_tokens=compute_rediscovery_cost(document))
+        )
 
 
 def downgrade() -> None:
