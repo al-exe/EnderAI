@@ -16,6 +16,7 @@ from app.core.tiering import (
     SearchEligibility,
     Tier,
     can_use_search,
+    default_comp_tier_for_new_user,
     resolve_public_tier,
     resolve_tier,
 )
@@ -41,7 +42,10 @@ def _patch_price_ids(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _make_user(
-    *, status: str | None = None, price_id: str | None = None
+    *,
+    status: str | None = None,
+    price_id: str | None = None,
+    comp_tier: str | None = None,
 ) -> User:
     return User(
         id=uuid.uuid4(),
@@ -49,6 +53,7 @@ def _make_user(
         hashed_password="x",
         stripe_subscription_status=status,
         stripe_price_id=price_id,
+        comp_tier=comp_tier,
     )
 
 
@@ -106,6 +111,80 @@ def test_resolve_tier_maps_live_taskforce_prices() -> None:
         resolve_tier(_make_user(status="active", price_id=TASKFORCE_MAX_PRICE))
         == Tier.MAX
     )
+
+
+# ---- comp_tier grant (new-user promo) --------------------------------
+
+
+def test_comp_tier_raises_free_user_to_max() -> None:
+    """The new-user promo grant: a user with no Stripe subscription but a
+    stored comp_tier="max" resolves to Max."""
+
+    user = _make_user(comp_tier="max")
+    assert resolve_tier(user) == Tier.MAX
+    assert resolve_public_tier(user) == "max"
+
+
+def test_comp_tier_acts_as_floor_not_a_cap() -> None:
+    """A lower comp grant never demotes a higher paid tier."""
+
+    user = _make_user(status="active", price_id=MAX_PRICE, comp_tier="pro")
+    assert resolve_tier(user) == Tier.MAX
+
+
+def test_comp_tier_does_not_shadow_admin() -> None:
+    user = _make_user(status="active", price_id=ADMIN_PRICE, comp_tier="max")
+    assert resolve_tier(user) == Tier.ADMIN
+
+
+def test_comp_tier_upgrades_pro_to_max() -> None:
+    user = _make_user(status="active", price_id=PRO_PRICE, comp_tier="max")
+    assert resolve_tier(user) == Tier.MAX
+
+
+def test_comp_tier_none_leaves_stripe_tier_unchanged() -> None:
+    assert resolve_tier(_make_user(comp_tier=None)) == Tier.FREE
+    user = _make_user(status="active", price_id=PRO_PRICE, comp_tier=None)
+    assert resolve_tier(user) == Tier.PRO
+
+
+def test_comp_tier_invalid_value_is_ignored() -> None:
+    """A typo'd grant degrades to "no grant" rather than raising."""
+
+    assert resolve_tier(_make_user(comp_tier="platinum")) == Tier.FREE
+
+
+def test_comp_tier_max_grants_search_access() -> None:
+    """The grant flows through every tier-aware gate, including Search."""
+
+    out = can_use_search(_make_user(comp_tier="max"), [])
+    assert out.tier == Tier.MAX
+    assert out.allowed is True
+    assert out.route == "managed"
+
+
+# ---- default_comp_tier_for_new_user (promo knob) ---------------------
+
+
+def test_default_comp_tier_returns_configured_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tiering.settings, "NEW_USER_DEFAULT_TIER", "max")
+    assert default_comp_tier_for_new_user() == "max"
+
+
+def test_default_comp_tier_none_when_promo_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tiering.settings, "NEW_USER_DEFAULT_TIER", None)
+    assert default_comp_tier_for_new_user() is None
+
+
+def test_default_comp_tier_none_when_misconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tiering.settings, "NEW_USER_DEFAULT_TIER", "platinum")
+    assert default_comp_tier_for_new_user() is None
 
 
 # ---- can_use_search --------------------------------------------------

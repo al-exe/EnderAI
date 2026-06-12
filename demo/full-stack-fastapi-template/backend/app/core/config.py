@@ -123,6 +123,16 @@ class Settings(BaseSettings):
     STRIPE_TASKFORCE_MAX: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_API_BASE_URL: str = "https://api.stripe.com"
+    # New-user promo: complimentary tier auto-granted to every newly
+    # created user (the "special for new users"). The value is stored
+    # per-user in ``User.comp_tier`` at signup and acts as a floor over
+    # the user's Stripe-resolved tier (see ``tiering.resolve_tier``), so
+    # the grant is grandfathered — turning the promo off only stops
+    # *future* signups from being comped; it never revokes a grant that
+    # is already stored. Set to ``None`` / empty to end the promo.
+    # Accepts "free" | "pro" | "max"; an unrecognized value is treated
+    # as "promo off".
+    NEW_USER_DEFAULT_TIER: str | None = "max"
     FIREBASE_PROJECT_ID: str | None = None
     FIREBASE_SERVICE_ACCOUNT_JSON: str | None = None
     # Taskforce Search — managed inference + BYOK + embeddings.

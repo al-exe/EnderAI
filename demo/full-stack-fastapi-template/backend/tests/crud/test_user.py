@@ -1,10 +1,13 @@
+import pytest
 from fastapi.encoders import jsonable_encoder
 from pwdlib.hashers.bcrypt import BcryptHasher
 from sqlmodel import Session
 
 from app import crud
+from app.core import tiering
 from app.core.db import is_v2_enabled_identity
 from app.core.security import verify_password
+from app.core.tiering import Tier, resolve_tier
 from app.models import User, UserCreate, UserUpdate
 from tests.utils.utils import random_email, random_lower_string
 
@@ -41,6 +44,29 @@ def test_create_user_defaults_to_active_legacy_flag(db: Session) -> None:
     user_in = UserCreate(email=email, password=password)
     user = crud.create_user(session=db, user_create=user_in)
     assert user.is_active is True
+
+
+def test_create_user_grants_promo_comp_tier(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While the new-user promo is on, every account created through crud
+    is stored with the complimentary tier and resolves to it."""
+
+    monkeypatch.setattr(tiering.settings, "NEW_USER_DEFAULT_TIER", "max")
+    user_in = UserCreate(email=random_email(), password=random_lower_string())
+    user = crud.create_user(session=db, user_create=user_in)
+    assert user.comp_tier == "max"
+    assert resolve_tier(user) == Tier.MAX
+
+
+def test_create_user_no_comp_tier_when_promo_off(
+    db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(tiering.settings, "NEW_USER_DEFAULT_TIER", None)
+    user_in = UserCreate(email=random_email(), password=random_lower_string())
+    user = crud.create_user(session=db, user_create=user_in)
+    assert user.comp_tier is None
+    assert resolve_tier(user) == Tier.FREE
 
 
 def test_create_user_defaults_to_v2_disabled(db: Session) -> None:
