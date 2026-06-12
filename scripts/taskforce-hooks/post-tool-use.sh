@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Claude Code PostToolUse hook → Taskforce checkpoint observe (TF-178).
 #
-# Fires after every tool call. We don't actually call /observe every tool
-# call — that's too noisy and expensive. Instead we tick a counter in
-# ~/.taskforce/<session_id>.counter and only POST when the counter
-# rolls over the threshold (default 10).
+# Fires after every tool call. We tick a counter in
+# ~/.taskforce/<session_id>.counter and POST a checkpoint when the counter
+# rolls over the threshold. Default is 1 (capture every tool call) so nothing
+# is missed during the early-access rollout; raise TASKFORCE_CHECKPOINT_EVERY
+# later to trade freshness for fewer backend/summarizer calls.
 #
 # When the threshold trips, the script forwards to stop.sh's body
 # builder by re-using the same transcript-path logic, but ships
@@ -19,7 +20,7 @@ readonly LOG_FILE="${HOME}/.claude/taskforce-observe.log"
 readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
-readonly CHECKPOINT_EVERY="${TASKFORCE_CHECKPOINT_EVERY:-10}"
+readonly CHECKPOINT_EVERY="${TASKFORCE_CHECKPOINT_EVERY:-1}"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 

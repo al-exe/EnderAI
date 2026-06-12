@@ -6,7 +6,7 @@ Drop-in hooks that wire the **Taskforce** workflow into Claude Code without the 
 
 - **UserPromptSubmit** (TF-176) — on every prompt, asks the backend for related prior work and prepends a preamble.
 - **Stop** (TF-178) — when a session ends, ships a redacted transcript digest to `/v2/taskforce/observe` with `kind: "final"`. The backend summarizes it via haiku and PATCHes the active document (or creates a fresh one).
-- **PostToolUse** (TF-178) — every 10 tool calls (configurable via `TASKFORCE_CHECKPOINT_EVERY`), ships a mid-session checkpoint to the same endpoint with `kind: "checkpoint"`.
+- **PostToolUse** (TF-178) — after every tool call by default (`TASKFORCE_CHECKPOINT_EVERY=1`; raise it to checkpoint less often), ships a mid-session checkpoint to the same endpoint with `kind: "checkpoint"`.
 
 ## What it does
 
@@ -19,7 +19,7 @@ Every time you submit a prompt to Claude Code:
 
 When there are no matches, the hook is silent — Claude Code sees your prompt unchanged.
 
-When the session ends (Stop hook) or every 10 tool calls (PostToolUse hook), the backend gets a digest of what happened. **The observe endpoint defaults to shadow mode** (`TASKFORCE_OBSERVE_SHADOW=1`): it records what *would* happen but doesn't touch any documents until someone flips the flag server-side. That's the §7.4 rollout safety net.
+When the session ends (Stop hook) or after each tool call (PostToolUse hook), the backend gets a digest of what happened. **The observe endpoint defaults to shadow mode** (`TASKFORCE_OBSERVE_SHADOW=1`): it records what *would* happen but doesn't touch any documents until someone flips the flag server-side. That's the §7.4 rollout safety net.
 
 ## Install
 
@@ -61,6 +61,7 @@ After a prompt that triggers a match you should see the banner in your Claude Co
 | `ENDERAI_BACKEND_URL` | `https://enderai-backend.onrender.com` | Backend base URL. Override for local dev. |
 | `TASKFORCE_HOOKS_DISABLED` | `0` | Set to `1` to make all Taskforce hooks exit 0 after dependency checks. Useful when invoking `/tf` manually so hooks and the skill do not both emit context. |
 | `TASKFORCE_PREAMBLE_BUDGET` | `1500` | Approximate token budget for the injected preamble. Higher = more context, more prompt cost. |
+| `TASKFORCE_CHECKPOINT_EVERY` | `1` | PostToolUse checkpoints every Nth tool call. `1` captures everything; raise it to reduce backend/summarizer load. |
 | `TASKFORCE_HOOK_DEBUG` | `0` | Mirror logs to stderr (helpful while iterating on the hook). |
 
 ## How it's safe
