@@ -6,7 +6,7 @@
 # a consistent state.
 #
 # Usage:
-#   curl -fsSL <raw url> | bash
+#   curl -fsSL https://enderai-backend.onrender.com/api/v1/v2/taskforce/install.sh | bash
 # or
 #   bash scripts/taskforce-hooks/install.sh
 
@@ -67,7 +67,7 @@ merge_hook() {
             # whole array alone. Otherwise, append to the wildcard matcher.
             if (any(.[]; .hooks[]?.command == $cmd)) then
                 .
-            else
+            elif (any(.[]; .matcher == "*")) then
                 map(
                     if .matcher == "*" then
                         .hooks = ((.hooks // []) + [
@@ -75,6 +75,13 @@ merge_hook() {
                         ])
                     else . end
                 )
+            else
+                . + [{
+                    matcher: "*",
+                    hooks: [
+                        {type: "command", command: $cmd, timeout: $timeout}
+                    ]
+                }]
             end
         )
     ' "$SETTINGS_FILE" > "$tmp_file"

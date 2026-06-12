@@ -26,7 +26,7 @@ When the session ends (Stop hook) or after each tool call (PostToolUse hook), th
 Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.taskforce_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools). Existing `~/.enderai_mcp_token` files remain supported as a legacy fallback.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks/install.sh | bash
+curl -fsSL https://enderai-backend.onrender.com/api/v1/v2/taskforce/install.sh | bash
 ```
 
 Or from a clone:

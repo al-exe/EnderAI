@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy import desc
 from sqlmodel import col, select
 
@@ -23,6 +23,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.core.metrics.ledger import ledger_session_detail, ledger_sessions
 from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.discover import discover as run_discover
+from app.core.taskforce.installer import build_hook_installer
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
@@ -56,6 +57,20 @@ router = APIRouter(prefix="/v2/taskforce", tags=["taskforce"])
 REFERENCED_BY_ANCHOR_ID = "referenced-by"
 MAX_REFERENCE_ROWS = 200
 PROMPT_PREVIEW_CHARS = 120
+
+
+@router.get("/install.sh", include_in_schema=False)
+def install_taskforce_hooks() -> Response:
+    """Serve the public, self-contained Claude Code hook installer."""
+
+    return Response(
+        content=build_hook_installer(),
+        media_type="text/x-shellscript",
+        headers={
+            "Cache-Control": "public, max-age=300",
+            "Content-Disposition": 'inline; filename="taskforce-install.sh"',
+        },
+    )
 
 
 def _format_reference_timestamp(value: datetime) -> str:
