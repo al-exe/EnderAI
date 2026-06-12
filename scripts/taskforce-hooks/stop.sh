@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Claude Code Stop hook → Taskforce observe (TF-178 / Phase 4).
 #
-# Wired into ~/.claude/settings.json as a Stop hook. Fires once when the
-# user's Claude Code session ends. Reads the session transcript, redacts
-# obvious secrets, ships a digest to /v2/taskforce/observe with
-# `kind: "final"`. The backend runs materiality → summarizer → PATCH the
-# active document (or creates a new one).
+# Wired into ~/.claude/settings.json as a Stop hook. Fires every time the
+# agent finishes a turn and goes idle — NOT just when the session truly
+# ends (see session-end.sh for that, TF-228). Reads the session transcript,
+# redacts obvious secrets, ships a digest to /v2/taskforce/observe with
+# `kind: "checkpoint"`. The backend runs materiality → summarizer → PATCH
+# the active document (or creates a new one).
 #
 # - Never blocks the session (all failures exit 0).
 # - Defaults to shadow mode server-side (TASKFORCE_OBSERVE_SHADOW=1 on the
@@ -75,7 +76,7 @@ commands_run="[]"
 harness_payload="null"
 
 if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
-    # Last ~200 turns is plenty for a "final" summary.
+    # Last ~200 turns is plenty for a checkpoint summary.
     transcript_array="$(
         tail -n 200 "$transcript_path" 2>/dev/null \
             | jq -sc '[.[] | select(.type == "assistant" or .type == "user" or .type == "tool_result") | {
@@ -170,7 +171,7 @@ body="$(jq -cn \
     --argjson active "$active_doc_id" \
     --argjson duration_ms "${duration_ms:-0}" \
     '{
-        kind: "final",
+        kind: "checkpoint",
         prompt: $prompt,
         transcript: $transcript,
         active_document_id: $active,
@@ -202,8 +203,3 @@ http_status="$(
 )" || { log "skip: curl failed"; exit 0; }
 
 log "POST /v2/taskforce/observe → ${http_status}"
-
-# Clear the active-doc pointer once the final observe fires.
-if [[ -n "$session_id" ]]; then
-    rm -f "${STATE_DIR}/${session_id}.active" "${STATE_DIR}/${session_id}.counter"
-fi

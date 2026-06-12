@@ -83,7 +83,9 @@ def upsert_session_archive_from_observe(
     archive.branch = request.branch or archive.branch
     archive.title = _title_from_request(request) or archive.title
     archive.started_at = _earliest(archive.started_at, started_at)
-    archive.ended_at = now if request.kind == "final" else archive.ended_at
+    archive.ended_at = (
+        now if request.kind in ("final", "session_end") else archive.ended_at
+    )
     archive.last_seen_at = now
     archive.active_document_id = (
         document_id or request.active_document_id or archive.active_document_id
@@ -229,7 +231,7 @@ def _normalized_events(
             }
         )
 
-    if request.kind == "final":
+    if request.kind in ("final", "session_end"):
         note = "Session ended"
         if request.outcome:
             note = f"{note} · {request.outcome}"

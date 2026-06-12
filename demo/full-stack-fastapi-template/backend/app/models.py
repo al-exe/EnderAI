@@ -1948,19 +1948,26 @@ class TaskforceObserveRequest(SQLModel):
     """Request body for POST /v2/taskforce/observe.
 
     Fired by:
-      * Tier 1 hooks (TF-176/178) — Stop ``kind: "final"`` or PostToolUse
-        ``kind: "checkpoint"`` with a redacted ``transcript`` blob.
+      * Tier 1 hooks (TF-176/178) — Stop ``kind: "checkpoint"`` (fires on
+        every agent-idle turn) or PostToolUse ``kind: "checkpoint"`` with a
+        redacted ``transcript`` blob.
+      * The SessionEnd hook (TF-228) — ``kind: "session_end"``, fired once
+        when the Claude Code session truly terminates. This is what marks
+        the session archive's ``ended_at`` and removes it from the active
+        Fleet roster.
       * Tier 2 MCP tools (TF-181) — ``taskforce_session_observe`` with
         structured fields (``summary_points`` / ``details_sections`` /
         ``decisions`` / ``outcome``) so the backend can skip the haiku
-        summarizer entirely.
+        summarizer entirely. These clients may still send ``kind: "final"``
+        to mean "this is the last observe for this session", which also
+        marks ``ended_at``.
 
     When ``transcript`` is empty AND any structured field is non-empty,
     the orchestrator builds the patch directly from the structured fields
     and ``summarizer_usd_cost`` stays at 0.
     """
 
-    kind: Literal["checkpoint", "final"]
+    kind: Literal["checkpoint", "final", "session_end"]
     prompt: str = Field(min_length=0, max_length=8000)
     transcript: list[TaskforceTranscriptTurn] = Field(default_factory=list)
     active_document_id: uuid.UUID | None = None

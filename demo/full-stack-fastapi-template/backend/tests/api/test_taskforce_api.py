@@ -1284,6 +1284,107 @@ def test_discover_active_sessions_excludes_ended_sessions(
     assert other.json()["active_sessions"] == []
 
 
+def test_observe_checkpoint_does_not_end_session(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "idle between turns",
+            "session_id": "tf228-checkpoint",
+            "min_score": 0.0,
+        },
+    )
+
+    # The Stop hook fires on every agent-idle turn with kind: "checkpoint" —
+    # this must not mark the session as ended.
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "still thinking",
+            "session_id": "tf228-checkpoint",
+            "duration_ms": 1000,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == "tf228-checkpoint"
+        )
+    ).one()
+    assert archive.ended_at is None
+
+    other = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "another session",
+            "session_id": "tf228-checkpoint-other",
+            "min_score": 0.0,
+        },
+    )
+    assert other.status_code == 200, other.text
+    assert [s["session_id"] for s in other.json()["active_sessions"]] == [
+        "tf228-checkpoint"
+    ]
+
+
+def test_observe_session_end_marks_session_ended(
+    client: TestClient, db: Session, monkeypatch
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "starting up",
+            "session_id": "tf228-session-end",
+            "min_score": 0.0,
+        },
+    )
+
+    # The SessionEnd hook fires once, when the Claude Code session truly
+    # terminates, with a minimal kind: "session_end" payload.
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "session_end",
+            "prompt": "",
+            "session_id": "tf228-session-end",
+        },
+    )
+    assert observe.status_code == 202, observe.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == "tf228-session-end"
+        )
+    ).one()
+    assert archive.ended_at is not None
+
+    other = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "another session",
+            "session_id": "tf228-session-end-other",
+            "min_score": 0.0,
+        },
+    )
+    assert other.status_code == 200, other.text
+    assert other.json()["active_sessions"] == []
+
+
 def test_discover_active_sessions_includes_document_summary(
     client: TestClient, monkeypatch
 ) -> None:
