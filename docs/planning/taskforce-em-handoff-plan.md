@@ -1,6 +1,11 @@
 # Taskforce — Engineering Manager Handoff Plan
 
-_Status: draft for Alex's review · 2026-06-11_
+_Status: in progress · 2026-06-11_
+
+> **Execution status (2026-06-11)**
+> - **Part A — done.** A1 (`TASKFORCE_OBSERVE_SHADOW=0`) and A2 (`ANTHROPIC_API_KEY`) set on the backend by Alex. A3 (checkpoint after **every** tool call) merged in al-exe/EnderAI **#122**. A4 verified by code inspection (owner-scoping via `list_v2_documents_for_actor`); live two-machine run still to do against the EM's backend. A5 (org) intentionally skipped.
+> - **Part B — ticketed for Codex** under epic **TF-219**: **TF-220** (B1 token path), **TF-221** (B2 hook installer in UI), **TF-222** (B3 reframe + taskforce-only naming), **TF-223** (B4 first-run nudge).
+> - **Part C — Alex owns separately.**
 
 ## 1. The ask
 
