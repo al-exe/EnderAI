@@ -26,7 +26,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 readonly FRONTEND_HOST="${TASKFORCE_FRONTEND_HOST:-https://www.taskforce.tools}"
 # When TASKFORCE_DEMO=1, opt the session/start request into demo-flagged
@@ -63,9 +64,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$prompt" ]] && emit_error "missing_prompt" "--prompt is required"
-[[ -r "$TOKEN_FILE" ]] || emit_error "no_token" "$TOKEN_FILE not readable"
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+[[ -r "$token_file" ]] || emit_error "no_token" "$TOKEN_FILE not readable"
 
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && emit_error "no_token" "token file empty"
 
 # Build files JSON array from CSV.

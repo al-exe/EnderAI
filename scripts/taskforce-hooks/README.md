@@ -23,7 +23,7 @@ When the session ends (Stop hook) or after each tool call (PostToolUse hook), th
 
 ## Install
 
-Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.enderai_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools).
+Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.taskforce_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools). Existing `~/.enderai_mcp_token` files remain supported as a legacy fallback.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-hooks/install.sh | bash
@@ -46,7 +46,7 @@ Restart your Claude Code session for the hook to take effect.
 jq '.hooks.UserPromptSubmit' ~/.claude/settings.json
 
 # Token is reachable:
-test -r ~/.enderai_mcp_token && echo "token ok" || echo "token missing"
+test -r ~/.taskforce_mcp_token && echo "token ok" || echo "token missing"
 
 # Recent activity:
 tail -f ~/.claude/taskforce-discover.log
@@ -74,7 +74,7 @@ After a prompt that triggers a match you should see the banner in your Claude Co
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| No banner ever appears | Token missing or library empty | `cat ~/.enderai_mcp_token`; check the log; run a workflow that creates a doc first |
+| No banner ever appears | Token missing or library empty | `cat ~/.taskforce_mcp_token`; check the log; run a workflow that creates a doc first |
 | Banner appears but prompt feels unchanged | Claude Code version doesn't yet inject UserPromptSubmit stdout into the prompt | Upgrade Claude Code |
 | `[Taskforce] hook schema mismatch` (future) | Claude Code's UserPromptSubmit contract changed | Re-run the installer |
 

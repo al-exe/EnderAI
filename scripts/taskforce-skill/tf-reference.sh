@@ -17,7 +17,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 
 # When TASKFORCE_DEMO=1, scope the reference call to demo-flagged documents
@@ -54,9 +55,13 @@ done
 [[ -z "$session_id" ]]  && emit_error "missing_session_id"
 [[ -z "$doc_ids_csv" ]] && emit_error "missing_document_ids"
 [[ -z "$user_prompt" ]] && emit_error "missing_user_prompt"
-[[ -r "$TOKEN_FILE" ]]  || emit_error "no_token" "$TOKEN_FILE not readable"
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+[[ -r "$token_file" ]] || emit_error "no_token" "$TOKEN_FILE not readable"
 
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && emit_error "no_token" "token file empty"
 
 doc_ids_json="$(jq -cn --arg csv "$doc_ids_csv" '

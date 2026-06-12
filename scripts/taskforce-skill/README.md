@@ -12,7 +12,7 @@ A foreground, visible Taskforce flow for Claude Code. Where the [taskforce-hooks
 
 ## Install
 
-Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.enderai_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools).
+Requires: `bash`, `curl`, `jq`. Mac and Linux. Reads the Taskforce MCP token from `~/.taskforce_mcp_token` (created by the Connect Agent flow at https://www.taskforce.tools). Existing `~/.enderai_mcp_token` files remain supported as a legacy fallback.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/al-exe/EnderAI/main/scripts/taskforce-skill/install.sh | bash
@@ -48,7 +48,7 @@ ls ~/.claude/skills/tf
 # SKILL.md  tf-discover.sh  tf-reference.sh  tf-savings.sh
 
 # Token present:
-test -r ~/.enderai_mcp_token && echo "token ok" || echo "token missing"
+test -r ~/.taskforce_mcp_token && echo "token ok" || echo "token missing"
 
 # Recent activity:
 tail -f ~/.claude/taskforce-skill.log

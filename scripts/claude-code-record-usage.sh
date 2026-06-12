@@ -13,7 +13,7 @@
 # for debugging.
 #
 # Required:
-#   - ~/.enderai_mcp_token       (created by the Connect Agent flow)
+#   - ~/.taskforce_mcp_token     (created by the Connect Agent flow)
 # Optional:
 #   - ENDERAI_BACKEND_URL        (defaults to https://enderai-backend.onrender.com)
 #   - ENDERAI_USAGE_SOURCE       (defaults to "hook" — written to metrics_event.payload.source)
@@ -22,7 +22,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/enderai-record-usage.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly SOURCE_LABEL="${ENDERAI_USAGE_SOURCE:-hook}"
 
@@ -37,11 +38,15 @@ log() {
 # Always exit 0; a broken hook must never block the user's session.
 trap 'exit 0' EXIT
 
-if [[ ! -r "$TOKEN_FILE" ]]; then
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+if [[ ! -r "$token_file" ]]; then
     log "skip: token file not readable at $TOKEN_FILE"
     exit 0
 fi
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 if [[ -z "$token" ]]; then
     log "skip: token file empty"
     exit 0

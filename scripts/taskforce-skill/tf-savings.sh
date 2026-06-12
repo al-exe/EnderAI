@@ -20,7 +20,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/taskforce-skill.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly BACKEND_URL="${TASKFORCE_BACKEND_URL:-${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}}"
 readonly FRONTEND_HOST="${TASKFORCE_FRONTEND_HOST:-https://www.taskforce.tools}"
 readonly PRICING_MODEL_ID="${CLAUDE_MODEL:-claude-opus-4-7}"
@@ -55,9 +56,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$session_id" ]]  && emit_error "missing_session_id"
-[[ -r "$TOKEN_FILE" ]]  || emit_error "no_token" "$TOKEN_FILE not readable"
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+[[ -r "$token_file" ]] || emit_error "no_token" "$TOKEN_FILE not readable"
 
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && emit_error "no_token" "token file empty"
 
 tmp_resp="$(mktemp)"; trap 'rm -f "$tmp_resp"' EXIT

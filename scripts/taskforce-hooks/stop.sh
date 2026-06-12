@@ -12,7 +12,7 @@
 #   backend env until manual review confirms it's safe to flip).
 #
 # Required:
-#   ~/.enderai_mcp_token    (Connect Agent flow)
+#   ~/.taskforce_mcp_token  (Connect Agent flow)
 # Optional:
 #   ENDERAI_BACKEND_URL     (default https://enderai-backend.onrender.com)
 #   TASKFORCE_HOOK_DEBUG    (set to 1 to mirror logs to stderr)
@@ -23,7 +23,8 @@
 set -uo pipefail
 
 readonly LOG_FILE="${HOME}/.claude/taskforce-observe.log"
-readonly TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 
@@ -47,11 +48,15 @@ if [[ "${TASKFORCE_HOOKS_DISABLED:-0}" == "1" ]]; then
     exit 0
 fi
 
-if [[ ! -r "$TOKEN_FILE" ]]; then
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+if [[ ! -r "$token_file" ]]; then
     log "skip: no token at $TOKEN_FILE"
     exit 0
 fi
-token="$(tr -d '\r\n' < "$TOKEN_FILE")"
+token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && { log "skip: token empty"; exit 0; }
 
 payload="$(cat || true)"
