@@ -9,6 +9,7 @@ plan §11 Q5 demands strict isolation between live and demo data.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -64,11 +65,17 @@ def resolve_window(name: WindowName, now: datetime | None = None) -> MetricWindo
 def _apply_scope(
     statement: Any,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
 ) -> Any:
-    statement = statement.where(MetricsEvent.user_id == user_id)
+    if user_ids is not None:
+        statement = statement.where(col(MetricsEvent.user_id).in_(user_ids))
+    elif user_id is not None:
+        statement = statement.where(MetricsEvent.user_id == user_id)
+    else:
+        raise ValueError("A metrics user scope is required")
     statement = statement.where(MetricsEvent.is_demo == is_demo)
     if window.start is not None:
         statement = statement.where(col(MetricsEvent.occurred_at) >= window.start)
@@ -79,7 +86,8 @@ def _apply_scope(
 def sum_metric_total(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
     definition: MetricDefinition,
@@ -101,7 +109,13 @@ def sum_metric_total(
     statement = select(func.coalesce(func.sum(column), 0)).where(
         col(MetricsEvent.kind).in_(definition.kinds)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     result = session.exec(statement).first()
     if result is None:
         return Decimal(0)
@@ -111,7 +125,8 @@ def sum_metric_total(
 def _distinct_documents_for_kinds(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
     kinds: tuple[str, ...],
@@ -127,7 +142,13 @@ def _distinct_documents_for_kinds(
     statement = select(func.count(func.distinct(MetricsEvent.document_id))).where(
         col(MetricsEvent.kind).in_(kinds)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     statement = statement.where(col(MetricsEvent.document_id).is_not(None))
     result = session.exec(statement).first()
     return int(result or 0)
@@ -136,7 +157,8 @@ def _distinct_documents_for_kinds(
 def documents_touched_count(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
 ) -> int:
@@ -145,6 +167,7 @@ def documents_touched_count(
     return _distinct_documents_for_kinds(
         session,
         user_id=user_id,
+        user_ids=user_ids,
         is_demo=is_demo,
         window=window,
         kinds=REGISTRY["documents_touched"].kinds,
@@ -154,7 +177,8 @@ def documents_touched_count(
 def documents_consulted_count(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
 ) -> int:
@@ -166,6 +190,7 @@ def documents_consulted_count(
     return _distinct_documents_for_kinds(
         session,
         user_id=user_id,
+        user_ids=user_ids,
         is_demo=is_demo,
         window=window,
         kinds=REGISTRY["documents_consulted"].kinds,
@@ -175,7 +200,8 @@ def documents_consulted_count(
 def reuse_rate(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
 ) -> Decimal:
@@ -185,7 +211,13 @@ def reuse_rate(
     statement = select(MetricsEvent.kind, func.count()).where(
         col(MetricsEvent.kind).in_(REUSE_RATE_DEN_KINDS)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     statement = statement.group_by(MetricsEvent.kind)
     counts: dict[str, int] = {row[0]: row[1] for row in session.exec(statement)}
     reused = sum(counts.get(k, 0) for k in REUSE_RATE_NUM_KINDS)
@@ -209,7 +241,8 @@ class SavingsBreakdown:
 def savings_breakdown(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
     field: Literal["input_tokens", "usd_amount"] = "input_tokens",
@@ -220,7 +253,13 @@ def savings_breakdown(
     statement = select(MetricsEvent.kind, func.coalesce(func.sum(column), 0)).where(
         col(MetricsEvent.kind).in_(TOKENS_SAVED_KINDS)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     statement = statement.group_by(MetricsEvent.kind)
     sums: dict[str, Decimal] = {}
     for kind, total in session.exec(statement):
@@ -271,7 +310,8 @@ def _cross_boundary_event_expr() -> Any:
 def cross_boundary_reuse_totals(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
 ) -> CrossBoundaryReuseTotals:
@@ -300,7 +340,13 @@ def cross_boundary_reuse_totals(
         )
         .where(MetricsEvent.kind == METRICS_EVENT_DOCUMENT_CONSULTED)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     (
         total_consults,
         cross_boundary_consults,
@@ -415,7 +461,8 @@ class ModelTotals:
 def top_models(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
     limit: int = 5,
@@ -438,7 +485,13 @@ def top_models(
     statement = select(MetricsEvent.model_id, tokens_col, usd_col).where(
         MetricsEvent.kind == METRICS_EVENT_TOKENS_CONSUMED
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     statement = statement.where(col(MetricsEvent.model_id).is_not(None))
     statement = statement.group_by(MetricsEvent.model_id)
     statement = statement.order_by(tokens_col.desc())
@@ -466,7 +519,8 @@ class DayValue:
 def daily_series(
     session: Session,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    user_ids: Collection[uuid.UUID] | None = None,
     is_demo: bool,
     window: MetricWindow,
     definition: MetricDefinition,
@@ -486,7 +540,13 @@ def daily_series(
     statement = select(day_expr, func.coalesce(func.sum(column), 0)).where(
         col(MetricsEvent.kind).in_(definition.kinds)
     )
-    statement = _apply_scope(statement, user_id=user_id, is_demo=is_demo, window=window)
+    statement = _apply_scope(
+        statement,
+        user_id=user_id,
+        user_ids=user_ids,
+        is_demo=is_demo,
+        window=window,
+    )
     statement = statement.group_by(day_expr).order_by(day_expr)
     by_day: dict[date, Decimal] = {}
     for day_value, total in session.exec(statement):
