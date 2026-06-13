@@ -38,6 +38,7 @@ from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     LedgerDocRefPublic,
+    LedgerRawTranscriptPublic,
     LedgerResponse,
     LedgerSessionDetailPublic,
     LedgerSessionRowPublic,
@@ -787,4 +788,37 @@ def ledger_detail_route(
         ],
         raw_transcript_available=detail.raw_transcript_available,
         source_metadata=detail.source_metadata,
+    )
+
+
+@router.get(
+    "/ledger/{session_id}/raw-transcript",
+    response_model=LedgerRawTranscriptPublic,
+)
+def ledger_raw_transcript_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Return one org-scoped raw Ledger transcript archive."""
+
+    if current_user.organization_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="User does not belong to an organization",
+        )
+
+    archive = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.organization_id == current_user.organization_id)
+        .where(TaskforceSessionArchive.is_demo == demo)
+        .where(TaskforceSessionArchive.session_id == session_id)
+    ).first()
+    if archive is None or not archive.raw_transcript:
+        raise HTTPException(status_code=404, detail="Raw transcript not found")
+
+    return LedgerRawTranscriptPublic(
+        session_id=archive.session_id,
+        events=list(archive.raw_transcript),
     )

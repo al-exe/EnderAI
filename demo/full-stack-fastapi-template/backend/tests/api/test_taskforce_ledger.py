@@ -181,6 +181,8 @@ def test_ledger_requires_organization(client: TestClient, db: Session) -> None:
 
     resp = client.get(_LEDGER, headers=headers)
     assert resp.status_code == 422, resp.text
+    raw = client.get(f"{_LEDGER}/missing/raw-transcript", headers=headers)
+    assert raw.status_code == 422, raw.text
 
 
 def test_ledger_pagination(client: TestClient, db: Session) -> None:
@@ -216,7 +218,12 @@ def test_ledger_archive_fields_and_detail_endpoint(
             "client": "codex",
             "cwd": "/Users/alexlee/dev/EnderAI",
             "summary_points": ["Archive-backed Ledger sessions render detail."],
-            "commands_run": [{"cmd": "pytest backend/tests/api/test_taskforce_ledger.py", "exit_code": 0}],
+            "commands_run": [
+                {
+                    "cmd": "pytest backend/tests/api/test_taskforce_ledger.py",
+                    "exit_code": 0,
+                }
+            ],
             "files_touched": ["backend/app/core/taskforce/archive.py"],
             "diff_summary": "Added TaskforceSessionArchive ingestion.",
             "duration_ms": 1234,
@@ -268,11 +275,32 @@ def test_ledger_archive_fields_and_detail_endpoint(
     assert body["source_metadata"]["kind"] == "final"
     kinds = [event["kind"] for event in body["transcript_events"]]
     assert {"prompt", "reply", "command", "edit", "note"}.issubset(kinds)
-    command = next(event for event in body["transcript_events"] if event["kind"] == "command")
+    command = next(
+        event for event in body["transcript_events"] if event["kind"] == "command"
+    )
     assert command["cmd"].startswith("pytest backend/tests")
     assert command["exit_code"] == 0
     edit = next(event for event in body["transcript_events"] if event["kind"] == "edit")
     assert edit["file"] == "backend/app/core/taskforce/archive.py"
+
+    raw = client.get(
+        f"{_LEDGER}/ledger-archive-detail-test/raw-transcript",
+        headers=headers,
+    )
+    assert raw.status_code == 200, raw.text
+    raw_body = raw.json()
+    assert raw_body["session_id"] == "ledger-archive-detail-test"
+    assert raw_body["events"] == [
+        {"role": "user", "content": "Implement archive-backed ledger"},
+        {"role": "assistant", "content": "Added the read model"},
+    ]
+
+    _, outsider_headers = _signup(client)
+    forbidden = client.get(
+        f"{_LEDGER}/ledger-archive-detail-test/raw-transcript",
+        headers=outsider_headers,
+    )
+    assert forbidden.status_code == 404, forbidden.text
 
 
 def test_ledger_detail_falls_back_for_metrics_only_session(
@@ -291,3 +319,9 @@ def test_ledger_detail_falls_back_for_metrics_only_session(
     assert body["session_id"] == row["session_id"]
     assert body["transcript_events"] == []
     assert body["raw_transcript_available"] is False
+
+    raw = client.get(
+        f"{_LEDGER}/{row['session_id']}/raw-transcript",
+        headers=bob_headers,
+    )
+    assert raw.status_code == 404, raw.text
