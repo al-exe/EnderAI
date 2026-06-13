@@ -10,10 +10,12 @@ Plan §7. Two endpoints:
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlmodel import select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.metrics import (
@@ -41,6 +43,7 @@ from app.models import (
     MetricsResponse,
     MetricValuePublic,
     TaskforceUsagePayload,
+    User,
 )
 
 router = APIRouter(prefix="/v2/metrics", tags=["v2-metrics"])
@@ -87,7 +90,7 @@ def _delta_abs(current: Decimal, previous: Decimal) -> Decimal:
 def _compute_metric_value(
     session: Any,
     *,
-    user_id: Any,
+    user_ids: Collection[Any],
     is_demo: bool,
     window: Any,
     defn: MetricDefinition,
@@ -100,12 +103,17 @@ def _compute_metric_value(
             else documents_consulted_count
         )
         total = Decimal(
-            counter(session, user_id=user_id, is_demo=is_demo, window=window)
+            counter(session, user_ids=user_ids, is_demo=is_demo, window=window)
         )
         prev_window = window.previous()
         prev_total = (
             Decimal(
-                counter(session, user_id=user_id, is_demo=is_demo, window=prev_window)
+                counter(
+                    session,
+                    user_ids=user_ids,
+                    is_demo=is_demo,
+                    window=prev_window,
+                )
             )
             if prev_window is not None
             else None
@@ -118,11 +126,13 @@ def _compute_metric_value(
         )
 
     if defn.name == "reuse_rate":
-        total = reuse_rate(session, user_id=user_id, is_demo=is_demo, window=window)
+        total = reuse_rate(
+            session, user_ids=user_ids, is_demo=is_demo, window=window
+        )
         prev_window = window.previous()
         if prev_window is not None:
             prev = reuse_rate(
-                session, user_id=user_id, is_demo=is_demo, window=prev_window
+                session, user_ids=user_ids, is_demo=is_demo, window=prev_window
             )
             return MetricValuePublic(
                 total=total,
@@ -133,7 +143,7 @@ def _compute_metric_value(
     if defn.name in {"cross_boundary_reuse_rate", "cross_boundary_tokens_saved"}:
         totals = cross_boundary_reuse_totals(
             session,
-            user_id=user_id,
+            user_ids=user_ids,
             is_demo=is_demo,
             window=window,
         )
@@ -159,7 +169,7 @@ def _compute_metric_value(
 
     total = sum_metric_total(
         session,
-        user_id=user_id,
+        user_ids=user_ids,
         is_demo=is_demo,
         window=window,
         definition=defn,
@@ -169,7 +179,7 @@ def _compute_metric_value(
     if prev_window is not None:
         prev = sum_metric_total(
             session,
-            user_id=user_id,
+            user_ids=user_ids,
             is_demo=is_demo,
             window=prev_window,
             definition=defn,
@@ -179,7 +189,7 @@ def _compute_metric_value(
     series_points: list[MetricSeriesPoint] = []
     for point in daily_series(
         session,
-        user_id=user_id,
+        user_ids=user_ids,
         is_demo=is_demo,
         window=window,
         definition=defn,
@@ -195,7 +205,7 @@ def _compute_metric_value(
     if include_breakdowns and defn.name == "tokens_saved":
         breakdown = savings_breakdown(
             session,
-            user_id=user_id,
+            user_ids=user_ids,
             is_demo=is_demo,
             window=window,
             field="input_tokens",
@@ -221,7 +231,9 @@ def _compute_metric_value(
             ),
         ]
     if include_breakdowns and defn.name == "tokens_consumed":
-        rows = top_models(session, user_id=user_id, is_demo=is_demo, window=window)
+        rows = top_models(
+            session, user_ids=user_ids, is_demo=is_demo, window=window
+        )
         value.top_models = [
             MetricBreakdownEntry(
                 key=row.model_id,
@@ -269,6 +281,15 @@ def read_metrics(
                 status_code=403,
                 detail="Only organization admins can view org-scope metrics",
             )
+        metric_user_ids = tuple(
+            session.exec(
+                select(User.id).where(
+                    User.organization_id == current_user.organization_id
+                )
+            ).all()
+        )
+    else:
+        metric_user_ids = (current_user.id,)
 
     resolved = resolve_window(window)
     response = MetricsResponse(
@@ -280,16 +301,12 @@ def read_metrics(
     )
     response.from_ = resolved.start
 
-    # Phase 4 ships personal scope only. The org scope path requires
-    # a fan-out over members which we'll add in a follow-up; for now
-    # the admin gate above prevents accidental personal-only data leaks
-    # under an org=true URL.
     for name in requested_names:
         defn = REGISTRY[name]
         include_breakdowns = name in ("tokens_saved", "tokens_consumed")
         response.metrics[name] = _compute_metric_value(
             session,
-            user_id=current_user.id,
+            user_ids=metric_user_ids,
             is_demo=demo,
             window=resolved,
             defn=defn,
