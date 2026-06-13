@@ -176,6 +176,7 @@ def test_get_agent_returns_detail_with_linked_knowledge_and_invocations(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["slug"] == specialist.slug
+    assert body["status"] == "active"
     assert body["linked_knowledge"][0]["href"] == (
         f"/v2/library/{document.id}#decision-wal-table"
     )
@@ -232,6 +233,7 @@ def test_create_agent_persists_and_is_listed(
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["slug"] == "billing-specialist"
+    assert body["status"] == "active"
     assert body["name"] == "Billing Specialist"
     assert body["role"] == "Stripe billing & webhooks"
     assert body["domain_tags"] == ["billing", "payments"]
@@ -248,11 +250,11 @@ def test_create_agent_persists_and_is_listed(
     assert any(item["slug"] == "billing-specialist" for item in listed.json()["items"])
 
 
-def test_create_agent_generates_unique_slug(
-    client: TestClient, db: Session
-) -> None:
+def test_create_agent_generates_unique_slug(client: TestClient) -> None:
     _, headers = _signup(client)
-    payload = {"name": "Billing Specialist", "role": "Stripe"}
+    name = f"Billing Specialist {random_lower_string()}"
+    payload = {"name": name, "role": "Stripe"}
+    expected_slug = "-".join(name.lower().split())
 
     first = client.post(
         f"{settings.API_V1_STR}/v2/agents", headers=headers, json=payload
@@ -263,8 +265,8 @@ def test_create_agent_generates_unique_slug(
 
     assert first.status_code == 201, first.text
     assert second.status_code == 201, second.text
-    assert first.json()["slug"] == "billing-specialist"
-    assert second.json()["slug"] == "billing-specialist-2"
+    assert first.json()["slug"] == expected_slug
+    assert second.json()["slug"] == f"{expected_slug}-2"
 
 
 def test_create_agent_requires_name_and_role(client: TestClient) -> None:
@@ -333,6 +335,56 @@ def test_update_agent_partial_leaves_other_fields(
     assert body["domain_tags"] == ["Stripe", "Billing"]
 
 
+def test_update_agent_status_lifecycle_and_list_visibility(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    for status in ("draft", "archived", "active"):
+        response = client.patch(
+            f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+            headers=headers,
+            json={"status": status},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == status
+
+        listed = client.get(f"{settings.API_V1_STR}/v2/agents", headers=headers)
+        assert listed.status_code == 200, listed.text
+        listed_agent = next(
+            item
+            for item in listed.json()["items"]
+            if item["slug"] == specialist.slug
+        )
+        assert listed_agent["status"] == status
+
+        detail = client.get(
+            f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+            headers=headers,
+        )
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["status"] == status
+
+
+def test_update_agent_rejects_invalid_status(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=headers,
+        json={"status": "paused"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_update_agent_rejects_blank_name(client: TestClient, db: Session) -> None:
     email, headers = _signup(client)
     user = _user_by_email(db, email)
@@ -357,6 +409,23 @@ def test_update_agent_403_for_non_owner(client: TestClient, db: Session) -> None
         f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
         headers=outsider_headers,
         json={"name": "Hijacked"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_update_agent_status_403_for_non_owner(
+    client: TestClient, db: Session
+) -> None:
+    email, _ = _signup(client)
+    owner = _user_by_email(db, email)
+    specialist = _agent(db, owner, slug=f"private-{random_lower_string()}")
+    _, outsider_headers = _signup(client)
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=outsider_headers,
+        json={"status": "archived"},
     )
 
     assert response.status_code == 403

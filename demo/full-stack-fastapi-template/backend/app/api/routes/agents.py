@@ -254,9 +254,9 @@ def _summary_for(
         slug=specialist.slug,
         name=specialist.name,
         role=specialist.role,
+        status=specialist.status,
         short_description=specialist.short_description,
         domain_tags=list(specialist.domain_tags or []),
-        status=specialist.status,
         created_from=specialist.created_from,
         linked_docs_count=linked_docs_count,
         invocations_count=stats.invocations_count,
@@ -295,6 +295,7 @@ def _detail_for(
         slug=specialist.slug,
         name=specialist.name,
         role=specialist.role,
+        status=specialist.status,
         short_description=specialist.short_description,
         description=specialist.description,
         created_from=specialist.created_from,
@@ -353,7 +354,6 @@ def list_agents(
     specialists = session.exec(
         select(AgentSpecialist)
         .where(build_agent_specialist_acl_filter(current_user, demo=demo))
-        .where(AgentSpecialist.status == "active")
     ).all()
     items = [
         _summary_for(
@@ -410,6 +410,7 @@ def create_agent(
         slug=specialist.slug,
         name=specialist.name,
         role=specialist.role,
+        status=specialist.status,
         short_description=specialist.short_description,
         description=specialist.description,
         created_from=specialist.created_from,
@@ -485,6 +486,8 @@ def update_agent(
         specialist.domain_tags = [
             tag.strip() for tag in payload.domain_tags if tag.strip()
         ]
+    if payload.status is not None:
+        specialist.status = payload.status
 
     specialist.updated_at = datetime.now(timezone.utc)
     session.add(specialist)
