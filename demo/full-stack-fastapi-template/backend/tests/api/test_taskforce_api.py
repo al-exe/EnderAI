@@ -800,6 +800,23 @@ def test_session_start_routes_to_seeded_specialist(
         assert event.payload.get("prompt") == prompt, event.payload
         assert event.payload.get("consumed_by_client") == "claude-code", event.payload
 
+    specialist.status = "archived"
+    db.add(specialist)
+    db.commit()
+
+    archived_response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/start",
+        headers=headers,
+        json={
+            "prompt": prompt,
+            "files": ["app/api/routes/billing.py"],
+            "client": "claude-code",
+            "min_score": 0.0,
+        },
+    )
+    assert archived_response.status_code == 201, archived_response.text
+    assert archived_response.json()["matched_specialist"] is None
+
 
 def test_session_start_specialist_routing_uses_org_visible_linked_docs(
     client: TestClient, db: Session

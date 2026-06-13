@@ -1233,6 +1233,7 @@ class AgentSpecialistUpdate(SQLModel):
     role: str | None = Field(default=None, min_length=1, max_length=160)
     short_description: str | None = Field(default=None, max_length=240)
     domain_tags: list[str] | None = None
+    status: Literal["active", "draft", "archived"] | None = None
 
 
 class AgentSpecialistLinkedDoc(SQLModel):
@@ -1268,6 +1269,7 @@ class AgentSpecialistDetail(SQLModel):
     slug: str
     name: str
     role: str
+    status: Literal["active", "draft", "archived"]
     short_description: str = ""
     description: str
     created_from: str = "seeded"
