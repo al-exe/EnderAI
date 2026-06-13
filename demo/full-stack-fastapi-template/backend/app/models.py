@@ -1895,6 +1895,13 @@ class LedgerSessionDetailPublic(LedgerSessionRowPublic):
     source_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class LedgerRawTranscriptPublic(SQLModel):
+    """Authorized raw archive payload for one Ledger session."""
+
+    session_id: str
+    events: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class LedgerResponse(SQLModel):
     """Paginated org-scoped session ledger (TF-208 / pipeline-surfaces P1)."""
 
