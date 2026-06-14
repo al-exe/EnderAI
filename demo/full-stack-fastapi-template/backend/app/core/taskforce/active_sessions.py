@@ -28,6 +28,7 @@ from sqlmodel import Session, col, select
 from app.core.taskforce.archive import _now, _repo_from_cwd
 from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
 from app.models import (
+    AgentSpecialist,
     TaskforceActiveSession,
     TaskforceDiscoverRequest,
     TaskforceFleetAgentPublic,
@@ -43,6 +44,10 @@ MAX_AGE = timedelta(hours=8)
 
 # Bounds the roster size regardless of how many sessions a user accumulates.
 ROSTER_LIMIT = 5
+
+# Fleet reports a server-derived state so clients do not duplicate freshness
+# heuristics. Waiting and paused remain reserved until ingestion captures them.
+FLEET_RUNNING_WINDOW = timedelta(minutes=5)
 
 
 def touch_session_heartbeat(
@@ -223,6 +228,14 @@ def _minutes_ago(now: datetime, value: datetime) -> int:
     )
 
 
+def _fleet_status(minutes_ago: int) -> str:
+    return (
+        "running"
+        if minutes_ago < int(FLEET_RUNNING_WINDOW.total_seconds() // 60)
+        else "idle"
+    )
+
+
 def active_sessions_for_actor(
     session: Session,
     *,
@@ -265,6 +278,21 @@ def active_sessions_for_actor(
         ).all()
         documents_by_id = {document.id: document for document in documents}
 
+    specialist_slugs = {
+        archive.specialist_slug for archive in archives if archive.specialist_slug
+    }
+    specialist_rule_counts: dict[str, int] = {}
+    if specialist_slugs:
+        specialists = session.exec(
+            select(AgentSpecialist).where(
+                col(AgentSpecialist.slug).in_(specialist_slugs)
+            )
+        ).all()
+        specialist_rule_counts = {
+            specialist.slug: len(specialist.instructions or [])
+            for specialist in specialists
+        }
+
     result: list[TaskforceFleetAgentPublic] = []
     for archive in archives:
         referenced = referenced_by_session[archive.session_id]
@@ -286,6 +314,7 @@ def active_sessions_for_actor(
         last_seen_at = archive.last_seen_at
         if last_seen_at is None:
             continue
+        minutes_ago = _minutes_ago(now_utc, last_seen_at)
 
         result.append(
             TaskforceFleetAgentPublic(
@@ -311,8 +340,15 @@ def active_sessions_for_actor(
                     else (archive.title or "")
                 ),
                 last_seen_at=last_seen_at,
-                minutes_ago=_minutes_ago(now_utc, last_seen_at),
+                minutes_ago=minutes_ago,
+                status=_fleet_status(minutes_ago),
+                started_at=archive.started_at,
                 specialist_slug=archive.specialist_slug,
+                specialist_rule_count=(
+                    specialist_rule_counts.get(archive.specialist_slug)
+                    if archive.specialist_slug
+                    else None
+                ),
                 model_id=archive.model_id,
             )
         )
