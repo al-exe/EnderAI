@@ -9,7 +9,13 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.models import TaskforceFleetSession, TaskforceSessionArchive, User, V2Document
+from app.models import (
+    AgentSpecialist,
+    TaskforceFleetSession,
+    TaskforceSessionArchive,
+    User,
+    V2Document,
+)
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -43,6 +49,7 @@ def _create_archive(
     fleet_session_id: uuid.UUID | None = None,
     referenced_document_ids: list[str] | None = None,
     model_id: str | None = "claude-opus-4-8",
+    started_at: datetime | None = None,
 ) -> TaskforceSessionArchive:
     archive = TaskforceSessionArchive(
         session_id=session_id,
@@ -54,6 +61,7 @@ def _create_archive(
         title=f"Archive {session_id}",
         specialist_slug="backend",
         model_id=model_id,
+        started_at=started_at,
         imported_at=imported_at,
         last_seen_at=imported_at,
         ended_at=ended_at,
@@ -139,16 +147,35 @@ def test_fleet_groups_top_five_recent_active_sessions(
     db.add(document)
     db.commit()
     db.refresh(document)
+    specialist = AgentSpecialist(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        slug=f"backend-{random_lower_string()}",
+        name="Backend",
+        role="Backend implementation",
+        short_description="Backend implementation conventions",
+        instructions=[
+            "Keep actor-scoped queries explicit.",
+            "Cover public response contracts with integration tests.",
+        ],
+    )
+    db.add(specialist)
+    db.commit()
+    db.refresh(specialist)
 
     for index in range(6):
-        _create_archive(
+        archive = _create_archive(
             db,
             user=user,
             session_id=f"recent-{index}",
-            imported_at=now - timedelta(minutes=index),
+            imported_at=now - timedelta(minutes=index * 2),
+            started_at=now - timedelta(hours=1, minutes=index),
             fleet_session_id=fleet_id,
             referenced_document_ids=[str(document.id)] if index == 0 else None,
         )
+        archive.specialist_slug = specialist.slug
+        db.add(archive)
+    db.commit()
     _create_archive(
         db,
         user=user,
@@ -189,6 +216,13 @@ def test_fleet_groups_top_five_recent_active_sessions(
     assert grouped["agents"][0]["title"] == "Fleet document"
     assert "implemented the Fleet backend" in grouped["agents"][0]["summary_markdown"]
     assert grouped["agents"][0]["model_id"] == "claude-opus-4-8"
+    assert grouped["agents"][0]["status"] == "running"
+    assert datetime.fromisoformat(
+        grouped["agents"][0]["started_at"].replace("Z", "+00:00")
+    ) == now - timedelta(hours=1)
+    assert grouped["agents"][0]["specialist_rule_count"] == 2
+    assert grouped["agents"][2]["status"] == "running"
+    assert grouped["agents"][3]["status"] == "idle"
 
 
 def test_reassign_and_delete_move_agent_without_ending_session(
