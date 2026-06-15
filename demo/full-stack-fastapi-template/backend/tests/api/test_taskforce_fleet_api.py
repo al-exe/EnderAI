@@ -343,7 +343,8 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
     )
     agent = default_fleet["agents"][0]
     assert agent["session_id"] == "default-session-agent"
-    assert agent["summary_markdown"] == "Implement the fleet session defaults"
+    assert agent["display_name"] == "Implementing the fleet session defaults"
+    assert agent["summary_markdown"] == ""
 
 
 def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
@@ -391,7 +392,44 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
         item for item in agents if item["session_id"] == "codex-startup-session"
     )
     assert agent["model_id"] == "gpt-5.4"
+    assert agent["display_name"] == "GPT 5.4"
     assert agent["summary_markdown"] == ""
+
+
+def test_fleet_agent_display_name_can_be_renamed(
+    client: TestClient,
+    db: Session,
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Implement the fleet session defaults",
+            "session_id": "renameable-session",
+            "min_score": 0.0,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+
+    renamed = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/session/renameable-session",
+        headers=headers,
+        json={"display_name": "Fleet defaults rollout"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["display_name"] == "Fleet defaults rollout"
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == "renameable-session",
+        )
+    ).one()
+    assert archive.display_name == "Fleet defaults rollout"
+    assert archive.conversation_summary == "Implementing the fleet session defaults"
 
 
 def test_new_fleet_sessions_are_auto_named(

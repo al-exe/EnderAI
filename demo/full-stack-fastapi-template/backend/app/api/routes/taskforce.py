@@ -660,19 +660,12 @@ def assign_fleet_session_route(
     session_id: str,
     body: TaskforceFleetSessionAssignment,
 ) -> Any:
-    """Move one actor-owned active agent into another session."""
+    """Move an agent between fleets and/or rename its Fleet session label."""
 
-    agent = next(
-        (
-            item
-            for item in active_sessions_for_actor(session, actor=current_user)
-            if item.session_id == session_id
-        ),
-        None,
-    )
-    if agent is None:
+    if body.fleet_session_id is None and body.display_name is None:
         raise HTTPException(
-            status_code=404, detail="Active Taskforce session not found"
+            status_code=422,
+            detail="Provide fleet_session_id and/or display_name",
         )
 
     archive = session.exec(
@@ -682,25 +675,67 @@ def assign_fleet_session_route(
     ).first()
     if archive is None:
         raise HTTPException(status_code=404, detail="Taskforce session not found")
-    _fleet_session_for_actor(
-        session,
-        actor_id=current_user.id,
-        fleet_session_id=body.fleet_session_id,
-    )
-    destination = session.get(TaskforceFleetSession, body.fleet_session_id)
-    assert destination is not None
-    if destination.is_history:
-        raise HTTPException(
-            status_code=422,
-            detail="Agents move to History automatically when inactive",
-        )
 
-    archive.fleet_session_id = body.fleet_session_id
-    archive.updated_at = get_datetime_utc()
-    session.add(archive)
+    if body.display_name is not None:
+        archive.display_name = body.display_name.strip()
+        archive.updated_at = get_datetime_utc()
+        session.add(archive)
+
+    if body.fleet_session_id is not None:
+        agent = next(
+            (
+                item
+                for item in active_sessions_for_actor(session, actor=current_user)
+                if item.session_id == session_id
+            ),
+            None,
+        )
+        if agent is None:
+            raise HTTPException(
+                status_code=404, detail="Active Taskforce session not found"
+            )
+
+        _fleet_session_for_actor(
+            session,
+            actor_id=current_user.id,
+            fleet_session_id=body.fleet_session_id,
+        )
+        destination = session.get(TaskforceFleetSession, body.fleet_session_id)
+        assert destination is not None
+        if destination.is_history:
+            raise HTTPException(
+                status_code=422,
+                detail="Agents move to History automatically when inactive",
+            )
+
+        archive.fleet_session_id = body.fleet_session_id
+        archive.updated_at = get_datetime_utc()
+        session.add(archive)
+        session.commit()
+        agent.fleet_session_id = body.fleet_session_id
+        if body.display_name is not None:
+            agent.display_name = archive.display_name or agent.display_name
+        return agent
+
     session.commit()
-    agent.fleet_session_id = body.fleet_session_id
-    return agent
+    agents = active_sessions_for_actor(session, actor=current_user)
+    agent = next((item for item in agents if item.session_id == session_id), None)
+    if agent is not None:
+        if body.display_name is not None:
+            agent.display_name = archive.display_name or agent.display_name
+        return agent
+
+    history_agents = history_agents_for_actor(session, actor=current_user)
+    history_agent = next(
+        (item for item in history_agents if item.session_id == session_id),
+        None,
+    )
+    if history_agent is not None:
+        if body.display_name is not None:
+            history_agent.display_name = archive.display_name or history_agent.display_name
+        return history_agent
+
+    raise HTTPException(status_code=404, detail="Taskforce session not found in Fleet")
 
 
 def _ledger_response_from_page(
