@@ -58,6 +58,9 @@ from app.models import (
     TaskforceObserveResponse,
     TaskforceReferenceRequest,
     TaskforceReferenceResponse,
+    TaskforceSessionActivity,
+    TaskforceSessionActivityEntryPublic,
+    TaskforceSessionActivityResponse,
     TaskforceSessionArchive,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
@@ -347,6 +350,59 @@ def session_log_route(
         )
 
     return TaskforceSessionLogResponse(session_id=session_id, entries=entries)
+
+
+@router.get(
+    "/session-activity", response_model=TaskforceSessionActivityResponse
+)
+def session_activity_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str = Query(..., min_length=1, max_length=128),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> Any:
+    """Return one session's per-turn activity timeline, newest-first (TF-247).
+
+    Backs the Fleet agent-session detail "Activity" section: each row is a user
+    prompt plus a summary of the agent's response for that turn. Owner-scoped.
+    ``ledger_href`` deep-links to the Ledger session that backs the turn, and is
+    null when the viewer has no organization (the Ledger is org-only).
+    """
+
+    rows = session.exec(
+        select(TaskforceSessionActivity)
+        .where(TaskforceSessionActivity.session_id == session_id)
+        .where(TaskforceSessionActivity.actor_id == current_user.id)
+        .order_by(desc(col(TaskforceSessionActivity.occurred_at)))
+        .limit(limit)
+    ).all()
+
+    ledger_available = current_user.organization_id is not None
+    entries = [
+        TaskforceSessionActivityEntryPublic(
+            id=row.id,
+            occurred_at=row.occurred_at,
+            prompt=row.prompt,
+            response_summary=row.response_summary,
+            ledger_href=_activity_ledger_href(row) if ledger_available else None,
+        )
+        for row in rows
+    ]
+    return TaskforceSessionActivityResponse(session_id=session_id, entries=entries)
+
+
+def _activity_ledger_href(row: TaskforceSessionActivity) -> str:
+    """Deep-link to the Ledger session, anchored at this turn's timestamp.
+
+    Ledger transcript lines have no stable id, so the frontend highlights the
+    nearest line by ``at``. Mirrors the server-built-href pattern used by
+    ``LedgerDocRefPublic.href``.
+    """
+
+    return (
+        f"/v2/ledger?session_id={row.session_id}"
+        f"&at={row.occurred_at.isoformat()}"
+    )
 
 
 @router.get("/session-savings", response_model=TaskforceSessionSavingsResponse)

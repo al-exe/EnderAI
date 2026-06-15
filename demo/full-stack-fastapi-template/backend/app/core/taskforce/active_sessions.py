@@ -27,6 +27,7 @@ from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
 from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
+from app.core.taskforce.session_activity import record_activity_prompt
 from app.models import (
     AgentSpecialist,
     TaskforceActiveSession,
@@ -105,6 +106,18 @@ def touch_session_heartbeat(
     archive.last_seen_at = now
     archive.updated_at = now
     session.add(archive)
+
+    # Append the prompt to the durable per-turn activity timeline (TF-247).
+    # Deduped against this session's most recent row inside the helper.
+    record_activity_prompt(
+        session,
+        actor=actor,
+        session_id=request.session_id,
+        prompt=request.prompt,
+        demo=demo,
+        fleet_session_id=archive.fleet_session_id,
+        now=now,
+    )
     return archive
 
 
