@@ -42,6 +42,7 @@ from app.core.taskforce.installer import (
 )
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
+from app.core.taskforce.session_activity import session_events_for_actor
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
@@ -66,15 +67,14 @@ from app.models import (
     TaskforceObserveResponse,
     TaskforceReferenceRequest,
     TaskforceReferenceResponse,
-    TaskforceSessionActivity,
-    TaskforceSessionActivityEntryPublic,
     TaskforceSessionActivityResponse,
     TaskforceSessionArchive,
+    TaskforceSessionEvent,
+    TaskforceSessionEventPublic,
     TaskforceSessionHeartbeatRequest,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     TaskforceSessionSavingsResponse,
-    TaskforceSessionHeartbeatRequest,
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
     V2Document,
@@ -407,29 +407,32 @@ def session_activity_route(
     session_id: str = Query(..., min_length=1, max_length=128),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> Any:
-    """Return one session's per-turn activity timeline, newest-first (TF-247).
+    """Return the canonical full session timeline, newest-first and owner-scoped."""
 
-    Backs the Fleet agent-session detail "Activity" section: each row is a user
-    prompt plus a summary of the agent's response for that turn. Owner-scoped.
-    ``ledger_href`` deep-links to the Ledger session that backs the turn, and is
-    null when the viewer has no organization (the Ledger is org-only).
-    """
-
-    rows = session.exec(
-        select(TaskforceSessionActivity)
-        .where(TaskforceSessionActivity.session_id == session_id)
-        .where(TaskforceSessionActivity.actor_id == current_user.id)
-        .order_by(desc(col(TaskforceSessionActivity.occurred_at)))
-        .limit(limit)
-    ).all()
+    rows = session_events_for_actor(
+        session,
+        actor=current_user,
+        session_id=session_id,
+        limit=limit,
+    )
 
     ledger_available = current_user.organization_id is not None
     entries = [
-        TaskforceSessionActivityEntryPublic(
+        TaskforceSessionEventPublic(
             id=row.id,
+            kind=row.kind,  # type: ignore[arg-type]
             occurred_at=row.occurred_at,
-            prompt=row.prompt,
-            response_summary=row.response_summary,
+            role=row.role,
+            who=row.who,
+            text=row.text,
+            cmd=row.cmd,
+            exit_code=row.exit_code,
+            output=row.output,
+            file=row.file,
+            added=row.added,
+            removed=row.removed,
+            note=row.note,
+            repo=row.repo,
             ledger_href=_activity_ledger_href(row) if ledger_available else None,
         )
         for row in rows
@@ -437,17 +440,12 @@ def session_activity_route(
     return TaskforceSessionActivityResponse(session_id=session_id, entries=entries)
 
 
-def _activity_ledger_href(row: TaskforceSessionActivity) -> str:
-    """Deep-link to the Ledger session, anchored at this turn's timestamp.
-
-    Ledger transcript lines have no stable id, so the frontend highlights the
-    nearest line by ``at``. Mirrors the server-built-href pattern used by
-    ``LedgerDocRefPublic.href``.
-    """
+def _activity_ledger_href(row: TaskforceSessionEvent) -> str:
+    """Deep-link to this exact canonical event in the Ledger."""
 
     return (
         f"/v2/ledger?session_id={row.session_id}"
-        f"&at={row.occurred_at.isoformat()}"
+        f"&event_id={row.id}"
     )
 
 
@@ -936,6 +934,7 @@ def ledger_detail_route(
         **row.model_dump(),
         transcript_events=[
             LedgerTranscriptEventPublic(
+                id=event.id,
                 kind=event.kind,  # type: ignore[arg-type]
                 occurred_at=event.occurred_at,
                 role=event.role,
@@ -967,7 +966,7 @@ def ledger_raw_transcript_route(
     session_id: str,
     demo: bool = Query(default=False),
 ) -> Any:
-    """Return one org-scoped raw Ledger transcript archive."""
+    """Return conversational turns derived from the canonical event stream."""
 
     if current_user.organization_id is None:
         raise HTTPException(
@@ -975,16 +974,31 @@ def ledger_raw_transcript_route(
             detail="User does not belong to an organization",
         )
 
-    archive = session.exec(
-        select(TaskforceSessionArchive)
-        .where(TaskforceSessionArchive.organization_id == current_user.organization_id)
-        .where(TaskforceSessionArchive.is_demo == demo)
-        .where(TaskforceSessionArchive.session_id == session_id)
-    ).first()
-    if archive is None or not archive.raw_transcript:
-        raise HTTPException(status_code=404, detail="Raw transcript not found")
+    events = session.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.organization_id == current_user.organization_id)
+        .where(TaskforceSessionEvent.is_demo == demo)
+        .where(TaskforceSessionEvent.session_id == session_id)
+        .where(col(TaskforceSessionEvent.kind).in_(["prompt", "reply"]))
+        .order_by(
+            TaskforceSessionEvent.occurred_at,
+            TaskforceSessionEvent.source_order,
+            TaskforceSessionEvent.created_at,
+        )
+    ).all()
+    if not events:
+        raise HTTPException(status_code=404, detail="Transcript not found")
 
     return LedgerRawTranscriptPublic(
-        session_id=archive.session_id,
-        events=list(archive.raw_transcript),
+        session_id=session_id,
+        events=[
+            {
+                "id": str(event.id),
+                "role": event.role
+                or ("user" if event.kind == "prompt" else "assistant"),
+                "content": event.text or "",
+                "occurred_at": event.occurred_at.isoformat(),
+            }
+            for event in events
+        ],
     )

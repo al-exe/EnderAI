@@ -24,6 +24,7 @@ from app.models import (
     MetricsEvent,
     ModelPricing,
     TaskforceSessionArchive,
+    TaskforceSessionEvent,
     User,
     V2Document,
 )
@@ -1122,18 +1123,16 @@ def test_observe_archive_persisted_before_summarizer_failure(
 
     session_id = "observe-early-archive-commit"
 
-    async def slow_then_fail(**kwargs: object):
+    async def slow_then_fail(**_kwargs: object):
         await asyncio.sleep(0)
         with Session(engine) as check:
-            archive = check.exec(
-                select(TaskforceSessionArchive).where(
-                    TaskforceSessionArchive.session_id == session_id
+            events = check.exec(
+                select(TaskforceSessionEvent).where(
+                    TaskforceSessionEvent.session_id == session_id
                 )
-            ).one()
-            assert archive.transcript_events
-            assert any(
-                event.get("kind") == "command" for event in archive.transcript_events
-            )
+            ).all()
+            assert events
+            assert any(event.kind == "command" for event in events)
         raise TimeoutError("simulated Stop hook client disconnect")
 
     monkeypatch.setattr(observe_mod.settings, "ANTHROPIC_API_KEY", "sk-test")
@@ -1173,12 +1172,16 @@ def test_observe_archive_persisted_before_summarizer_failure(
         )
 
     with Session(engine) as db:
-        archive = db.exec(
-            select(TaskforceSessionArchive).where(
-                TaskforceSessionArchive.session_id == session_id
+        events = db.exec(
+            select(TaskforceSessionEvent)
+            .where(TaskforceSessionEvent.session_id == session_id)
+            .order_by(
+                TaskforceSessionEvent.occurred_at,
+                TaskforceSessionEvent.source_order,
+                TaskforceSessionEvent.created_at,
             )
-        ).one()
-        kinds = [event["kind"] for event in archive.transcript_events]
+        ).all()
+        kinds = [event.kind for event in events]
         first_reply = kinds.index("reply")
         last_reply = len(kinds) - 1 - kinds[::-1].index("reply")
         command_idx = kinds.index("command")

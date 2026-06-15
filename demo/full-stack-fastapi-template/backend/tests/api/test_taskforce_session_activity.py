@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.models import Organization, TaskforceSessionActivity, User
+from app.models import Organization, TaskforceSessionEvent, User
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -50,7 +50,7 @@ def _activity(client: TestClient, headers: dict[str, str], session_id: str):
     return response.json()
 
 
-def test_discover_appends_activity_rows_newest_first_and_dedupes(
+def test_discover_appends_prompt_events_and_dedupes(
     client: TestClient,
 ) -> None:
     _, headers = _signup(client)
@@ -62,16 +62,16 @@ def test_discover_appends_activity_rows_newest_first_and_dedupes(
     assert _discover(client, headers, "Now add the ledger deep link", session_id).status_code == 200
 
     body = _activity(client, headers, session_id)
-    prompts = [entry["prompt"] for entry in body["entries"]]
+    prompts = [
+        entry["text"] for entry in body["entries"] if entry["kind"] == "prompt"
+    ]
     assert prompts == [
         "Now add the ledger deep link",
         "Wire the fleet activity timeline",
     ]
-    # No agent response captured yet for these turns.
-    assert all(entry["response_summary"] is None for entry in body["entries"])
 
 
-def test_observe_backfills_response_summary_on_latest_turn(
+def test_observe_appends_actual_events_and_dedupes_repeated_snapshots(
     client: TestClient,
 ) -> None:
     _, headers = _signup(client)
@@ -79,31 +79,57 @@ def test_observe_backfills_response_summary_on_latest_turn(
 
     assert _discover(client, headers, "Investigate the cache TTL", session_id).status_code == 200
 
-    observe = client.post(
-        f"{settings.API_V1_STR}/v2/taskforce/observe",
-        headers=headers,
-        json={
-            "kind": "final",
-            "prompt": "Investigate the cache TTL",
-            "client": "activity-test",
-            "session_id": session_id,
-            "summary_points": ["Set the widget cache TTL to 900 seconds."],
-            "details_sections": [
-                {"anchor_id": "decision", "markdown": "TTL = 900s."}
-            ],
-            "decisions": ["Widget cache TTL = 900s"],
-            "outcome": "shipped",
-            "files_touched": ["config/widget_cache.yaml"],
-            "duration_ms": 1000,
-        },
-    )
-    assert observe.status_code == 202, observe.text
+    payload = {
+        "kind": "checkpoint",
+        "prompt": "Investigate the cache TTL",
+        "client": "activity-test",
+        "session_id": session_id,
+        "transcript": [
+            {
+                "role": "user",
+                "content": "Investigate the cache TTL",
+                "source_id": "turn-user-1",
+                "occurred_at": "2026-06-15T18:00:00Z",
+            },
+            {
+                "role": "assistant",
+                "content": "Set the widget cache TTL to 900 seconds.",
+                "source_id": "turn-agent-1",
+                "occurred_at": "2026-06-15T18:01:00Z",
+            },
+        ],
+        "commands_run": [
+            {
+                "cmd": "pytest tests/test_cache.py",
+                "exit_code": 0,
+                "output": "1 passed",
+                "source_id": "tool-1",
+                "occurred_at": "2026-06-15T18:00:30Z",
+            }
+        ],
+        "files_touched": ["config/widget_cache.yaml"],
+        "checkpoint_index": 1,
+        "summary_points": ["Set the widget cache TTL to 900 seconds."],
+        "duration_ms": 1000,
+    }
+    for _ in range(2):
+        observe = client.post(
+            f"{settings.API_V1_STR}/v2/taskforce/observe",
+            headers=headers,
+            json=payload,
+        )
+        assert observe.status_code == 202, observe.text
 
     body = _activity(client, headers, session_id)
-    assert len(body["entries"]) == 1
-    assert body["entries"][0]["response_summary"] == (
-        "Set the widget cache TTL to 900 seconds."
-    )
+    assert [entry["kind"] for entry in body["entries"]].count("prompt") == 1
+    assert [entry["kind"] for entry in body["entries"]].count("reply") == 1
+    assert [entry["kind"] for entry in body["entries"]].count("command") == 1
+    assert [entry["kind"] for entry in body["entries"]].count("edit") == 1
+    reply = next(entry for entry in body["entries"] if entry["kind"] == "reply")
+    assert reply["text"] == "Set the widget cache TTL to 900 seconds."
+    assert reply["occurred_at"] == "2026-06-15T18:01:00Z"
+    command = next(entry for entry in body["entries"] if entry["kind"] == "command")
+    assert command["output"] == "1 passed"
 
 
 def test_ledger_href_gated_on_organization(
@@ -138,7 +164,7 @@ def test_ledger_href_gated_on_organization(
     href = org_body["entries"][0]["ledger_href"]
     assert href is not None
     assert f"session_id={org_session}" in href
-    assert "at=" in href
+    assert "event_id=" in href
 
 
 def test_session_activity_is_owner_scoped(
@@ -157,8 +183,8 @@ def test_session_activity_is_owner_scoped(
 
     # And the row really exists for the owner.
     rows = db.exec(
-        select(TaskforceSessionActivity).where(
-            TaskforceSessionActivity.session_id == session_id
+        select(TaskforceSessionEvent).where(
+            TaskforceSessionEvent.session_id == session_id
         )
     ).all()
     assert len(rows) == 1

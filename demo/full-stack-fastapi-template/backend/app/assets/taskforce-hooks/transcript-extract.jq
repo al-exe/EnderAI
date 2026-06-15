@@ -5,7 +5,9 @@
   if .type == "assistant" then
     {
       role: "assistant",
-      content: ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
+      content: ([.message.content[]? | select(.type == "text") | .text] | join("\n")),
+      source_id: (.uuid // .message.id // null),
+      occurred_at: (.timestamp // null)
     }
   elif .type == "user" then
     (
@@ -15,7 +17,14 @@
         (.message.content // "" | tostring)
       end
     ) as $text |
-    if $text != "" then {role: "user", content: $text} else empty end
+    if $text != "" then
+      {
+        role: "user",
+        content: $text,
+        source_id: (.uuid // .message.id // null),
+        occurred_at: (.timestamp // null)
+      }
+    else empty end
   else
     empty
   end

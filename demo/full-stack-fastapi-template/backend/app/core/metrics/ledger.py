@@ -19,7 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import String, and_, cast, func, or_
+from sqlalchemy import String, and_, cast, exists, func, or_
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlmodel import Session, col, select
 
@@ -27,6 +27,7 @@ from app.models import (
     AgentSpecialist,
     MetricsEvent,
     TaskforceSessionArchive,
+    TaskforceSessionEvent,
     User,
     V2Document,
 )
@@ -127,6 +128,7 @@ class LedgerSessionRow:
 
 @dataclass(frozen=True)
 class LedgerTranscriptEvent:
+    id: uuid.UUID
     kind: str
     occurred_at: datetime | None = None
     role: str | None = None
@@ -189,6 +191,11 @@ def ledger_sessions(
     offset = max(0, offset)
     sid = _session_id_expr()
     xb = _cross_boundary_event_expr()
+    transcript_exists = exists().where(
+        TaskforceSessionEvent.session_id == sid,
+        TaskforceSessionEvent.organization_id == organization_id,
+        TaskforceSessionEvent.is_demo == is_demo,
+    )
 
     # ---- query 1: page of session groups + aggregates ----------------------
     # Left-join the document so the cross-boundary expression + title search can
@@ -253,13 +260,7 @@ def ledger_sessions(
             func.coalesce(
                 func.max(TaskforceSessionArchive.cache_write_tokens), 0
             ).label("cache_write_tokens"),
-            func.coalesce(
-                func.bool_or(
-                    func.jsonb_array_length(TaskforceSessionArchive.transcript_events)
-                    > 0
-                ),
-                False,
-            ).label("transcript_available"),
+            func.bool_or(transcript_exists).label("transcript_available"),
         )
         .join(
             TaskforceSessionArchive,
@@ -305,6 +306,18 @@ def ledger_sessions(
         grouped = grouped.where(col(MetricsEvent.occurred_at) < until)
     if query:
         like = f"%{query}%"
+        matching_event_exists = exists().where(
+            TaskforceSessionEvent.session_id == sid,
+            TaskforceSessionEvent.organization_id == organization_id,
+            TaskforceSessionEvent.is_demo == is_demo,
+            or_(
+                col(TaskforceSessionEvent.text).ilike(like),
+                col(TaskforceSessionEvent.cmd).ilike(like),
+                col(TaskforceSessionEvent.output).ilike(like),
+                col(TaskforceSessionEvent.file).ilike(like),
+                col(TaskforceSessionEvent.note).ilike(like),
+            ),
+        )
         grouped = grouped.where(
             or_(
                 _prompt_expr().ilike(like),
@@ -313,7 +326,7 @@ def ledger_sessions(
                 col(TaskforceSessionArchive.repo).ilike(like),
                 col(TaskforceSessionArchive.branch).ilike(like),
                 col(TaskforceSessionArchive.cwd).ilike(like),
-                cast(TaskforceSessionArchive.transcript_events, String).ilike(like),
+                matching_event_exists,
             )
         )
 
@@ -477,45 +490,52 @@ def ledger_session_detail(
         .where(TaskforceSessionArchive.is_demo == is_demo)
         .where(TaskforceSessionArchive.session_id == session_id)
     ).first()
+    events = session.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.organization_id == organization_id)
+        .where(TaskforceSessionEvent.is_demo == is_demo)
+        .where(TaskforceSessionEvent.session_id == session_id)
+        .order_by(
+            TaskforceSessionEvent.occurred_at,
+            TaskforceSessionEvent.source_order,
+            TaskforceSessionEvent.created_at,
+        )
+    ).all()
 
     return LedgerSessionDetail(
         row=page.rows[0],
-        transcript_events=_transcript_events_from_archive(archive),
-        raw_transcript_available=bool(archive and archive.raw_transcript),
+        transcript_events=_transcript_events(events),
+        raw_transcript_available=any(
+            event.kind in {"prompt", "reply"} for event in events
+        ),
         source_metadata=dict(archive.source_metadata or {}) if archive else {},
     )
 
 
-def _transcript_events_from_archive(
-    archive: TaskforceSessionArchive | None,
+def _transcript_events(
+    rows: list[TaskforceSessionEvent],
 ) -> list[LedgerTranscriptEvent]:
-    if archive is None:
-        return []
-
     events: list[LedgerTranscriptEvent] = []
-    for raw in archive.transcript_events or []:
-        if not isinstance(raw, dict):
-            continue
-        kind = str(raw.get("kind") or "")
+    for row in rows:
+        kind = row.kind
         if kind not in {"prompt", "reply", "command", "edit", "note"}:
             continue
         events.append(
             LedgerTranscriptEvent(
+                id=row.id,
                 kind=kind,
-                occurred_at=_parse_event_time(raw.get("occurred_at")),
-                role=_str_or_none(raw.get("role")),
-                who=_str_or_none(raw.get("who")),
-                text=_str_or_none(raw.get("text")),
-                cmd=_str_or_none(raw.get("cmd")),
-                exit_code=(
-                    int(raw["exit_code"]) if raw.get("exit_code") is not None else None
-                ),
-                output=_str_or_none(raw.get("output")),
-                file=_str_or_none(raw.get("file")),
-                added=_int_or_none(raw.get("added")),
-                removed=_int_or_none(raw.get("removed")),
-                note=_str_or_none(raw.get("note")),
-                repo=_str_or_none(raw.get("repo")),
+                occurred_at=row.occurred_at,
+                role=row.role,
+                who=row.who,
+                text=row.text,
+                cmd=row.cmd,
+                exit_code=row.exit_code,
+                output=row.output,
+                file=row.file,
+                added=row.added,
+                removed=row.removed,
+                note=row.note,
+                repo=row.repo,
             )
         )
     return events
@@ -548,25 +568,3 @@ def _archive_document_ids(archive: TaskforceSessionArchive) -> set[uuid.UUID]:
         except ValueError:
             continue
     return doc_ids
-
-
-def _parse_event_time(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def _str_or_none(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _int_or_none(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None

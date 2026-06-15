@@ -1,52 +1,183 @@
-"""Per-turn activity timeline capture (TF-247).
-
-Maintains the append-only ``taskforce_session_activity`` log that backs the
-Fleet agent-session detail timeline. One row is created per user prompt on
-``/discover`` (the "working on" line as it arrives); the following ``/observe``
-backfills ``response_summary`` so each row reads as a single turn.
-
-This is deliberately separate from ``TaskforceSessionArchive``, whose ``title``
-and ``transcript_events`` are overwritten every request — that overwrite is
-exactly why the timeline could previously only show "now".
-"""
+"""Canonical append-only event capture shared by Fleet and Ledger."""
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import desc
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
-from app.models import TaskforceSessionActivity, User
+from app.models import (
+    TaskforceCommandRun,
+    TaskforceObserveRequest,
+    TaskforceSessionEvent,
+    User,
+)
 
-_MAX_PROMPT = 255
-_MAX_SUMMARY = 2000
+_MAX_EVENT_TEXT = 4000
+_EVENT_KINDS = {"prompt", "reply", "command", "edit", "note"}
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _normalize(text: str | None, limit: int) -> str:
+def _normalize(text: str | None, limit: int = _MAX_EVENT_TEXT) -> str:
     return " ".join((text or "").split())[:limit]
 
 
-def _latest_row(
-    session: Session,
+def _fallback_source_id(kind: str, values: list[str], occurrence: int) -> str:
+    digest = hashlib.sha256("\0".join([kind, *values]).encode()).hexdigest()[:24]
+    return f"observe:{kind}:{digest}:{occurrence}"
+
+
+def _source_id(prefix: str, value: str | None, fallback: str) -> str:
+    normalized = (value or "").strip()
+    return f"{prefix}:{normalized}"[:255] if normalized else fallback
+
+
+def _command_event(
+    command: TaskforceCommandRun,
     *,
-    actor: User,
-    session_id: str,
-    demo: bool,
-) -> TaskforceSessionActivity | None:
-    return session.exec(
-        select(TaskforceSessionActivity)
-        .where(TaskforceSessionActivity.session_id == session_id)
-        .where(TaskforceSessionActivity.actor_id == actor.id)
-        .where(TaskforceSessionActivity.is_demo == demo)
-        .order_by(desc(TaskforceSessionActivity.occurred_at))
-        .limit(1)
-    ).first()
+    now: datetime,
+    cwd: str | None,
+    occurrence: int,
+) -> dict[str, Any]:
+    cmd = command.cmd[:2000]
+    fallback = _fallback_source_id(
+        "command",
+        [cmd, command.output or "", str(command.exit_code)],
+        occurrence,
+    )
+    return {
+        "source_event_id": _source_id("command", command.source_id, fallback),
+        "kind": "command",
+        "occurred_at": command.occurred_at or now,
+        "cmd": cmd,
+        "exit_code": command.exit_code,
+        "output": command.output[:_MAX_EVENT_TEXT] if command.output else None,
+        "repo": _repo_from_cwd(cwd),
+    }
+
+
+def normalized_session_events(
+    request: TaskforceObserveRequest,
+    *,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    """Normalize one observe snapshot into stable, typed session events."""
+
+    events: list[dict[str, Any]] = []
+    pending_commands = list(request.commands_run)
+    occurrences: Counter[tuple[str, ...]] = Counter()
+
+    def next_occurrence(kind: str, *values: str) -> int:
+        signature = (kind, *values)
+        value = occurrences[signature]
+        occurrences[signature] += 1
+        return value
+
+    def flush_commands() -> None:
+        while pending_commands:
+            command = pending_commands.pop(0)
+            occurrence = next_occurrence(
+                "command",
+                command.cmd,
+                command.output or "",
+                str(command.exit_code),
+            )
+            events.append(
+                _command_event(
+                    command,
+                    now=now,
+                    cwd=request.cwd,
+                    occurrence=occurrence,
+                )
+            )
+
+    for turn in request.transcript:
+        role = (turn.role or "").lower()
+        if role in {"tool", "tool_result"}:
+            continue
+        content = (turn.content or "").strip()
+        if not content:
+            continue
+        kind = "prompt" if role in {"user", "human"} else "reply"
+        if kind == "reply" and events and events[-1]["kind"] == "reply":
+            flush_commands()
+        occurrence = next_occurrence(kind, role, content)
+        fallback = _fallback_source_id(kind, [role, content], occurrence)
+        events.append(
+            {
+                "source_event_id": _source_id(
+                    "transcript",
+                    turn.source_id,
+                    fallback,
+                ),
+                "kind": kind,
+                "occurred_at": turn.occurred_at or now,
+                "role": turn.role,
+                "who": "@user" if kind == "prompt" else "@agent",
+                "text": content[:_MAX_EVENT_TEXT],
+            }
+        )
+
+    if request.prompt and not any(event["kind"] == "prompt" for event in events):
+        content = request.prompt[:_MAX_EVENT_TEXT]
+        occurrence = next_occurrence("prompt", "user", content)
+        events.insert(
+            0,
+            {
+                "source_event_id": _fallback_source_id(
+                    "prompt",
+                    ["user", content],
+                    occurrence,
+                ),
+                "kind": "prompt",
+                "occurred_at": now,
+                "role": "user",
+                "who": "@user",
+                "text": content,
+            },
+        )
+
+    flush_commands()
+
+    for file_name in request.files_touched:
+        file_name = file_name[:1024]
+        checkpoint = str(request.checkpoint_index or "snapshot")
+        events.append(
+            {
+                "source_event_id": _fallback_source_id(
+                    "edit",
+                    [checkpoint, file_name, request.diff_summary or ""],
+                    next_occurrence("edit", checkpoint, file_name),
+                ),
+                "kind": "edit",
+                "occurred_at": now,
+                "file": file_name,
+                "note": (request.diff_summary or "")[:_MAX_EVENT_TEXT] or None,
+            }
+        )
+
+    if request.kind in ("final", "session_end"):
+        note = "Session ended"
+        if request.outcome:
+            note = f"{note} · {request.outcome}"
+        events.append(
+            {
+                "source_event_id": f"lifecycle:{request.kind}",
+                "kind": "note",
+                "occurred_at": now,
+                "text": note,
+            }
+        )
+
+    return events[:500]
 
 
 def record_activity_prompt(
@@ -58,30 +189,40 @@ def record_activity_prompt(
     demo: bool,
     fleet_session_id: uuid.UUID | None,
     now: datetime | None = None,
-) -> TaskforceSessionActivity | None:
-    """Append one activity row for a new user prompt.
+) -> TaskforceSessionEvent | None:
+    """Record a prompt immediately when `/discover` receives it."""
 
-    No-ops when the prompt is empty or identical to this session's most recent
-    row, so a ``/discover`` that re-fires without a fresh prompt doesn't create
-    a duplicate timeline line.
-    """
-
-    text = _normalize(prompt, _MAX_PROMPT)
+    text = _normalize(prompt)
     if not session_id or not text:
         return None
 
-    latest = _latest_row(session, actor=actor, session_id=session_id, demo=demo)
-    if latest is not None and latest.prompt == text and latest.response_summary is None:
+    latest = session.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.session_id == session_id)
+        .where(TaskforceSessionEvent.actor_id == actor.id)
+        .where(TaskforceSessionEvent.is_demo == demo)
+        .order_by(
+            desc(TaskforceSessionEvent.occurred_at),
+            desc(TaskforceSessionEvent.created_at),
+        )
+        .limit(1)
+    ).first()
+    if latest is not None and latest.kind == "prompt" and latest.text == text:
         return None
 
     now = now or _now()
-    row = TaskforceSessionActivity(
+    row = TaskforceSessionEvent(
         session_id=session_id,
         actor_id=actor.id,
         organization_id=actor.organization_id,
         fleet_session_id=fleet_session_id,
         is_demo=demo,
-        prompt=text,
+        source_event_id=f"discover:{uuid.uuid4()}",
+        source_order=0,
+        kind="prompt",
+        role="user",
+        who="@user",
+        text=text,
         occurred_at=now,
         created_at=now,
     )
@@ -89,28 +230,117 @@ def record_activity_prompt(
     return row
 
 
-def attach_response_summary(
+def ingest_observe_events(
+    session: Session,
+    *,
+    actor: User,
+    request: TaskforceObserveRequest,
+    demo: bool,
+    fleet_session_id: uuid.UUID | None,
+    now: datetime | None = None,
+) -> list[TaskforceSessionEvent]:
+    """Append unseen observe events and reconcile prompts captured by discover."""
+
+    if not request.session_id:
+        return []
+
+    now = now or _now()
+    existing = session.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.session_id == request.session_id)
+        .where(TaskforceSessionEvent.actor_id == actor.id)
+        .where(TaskforceSessionEvent.is_demo == demo)
+        .order_by(
+            TaskforceSessionEvent.occurred_at,
+            TaskforceSessionEvent.created_at,
+        )
+    ).all()
+    existing_sources = {event.source_event_id for event in existing}
+    discovered_prompts = [
+        event
+        for event in existing
+        if event.kind == "prompt"
+        and event.source_event_id.startswith("discover:")
+        and event.text
+    ]
+    matched_discover_ids: set[uuid.UUID] = set()
+    inserted: list[TaskforceSessionEvent] = []
+
+    for source_order, payload in enumerate(normalized_session_events(request, now=now)):
+        source_event_id = str(payload["source_event_id"])
+        kind = str(payload["kind"])
+        if kind not in _EVENT_KINDS or source_event_id in existing_sources:
+            continue
+
+        if kind == "prompt":
+            text = _normalize(payload.get("text"))
+            match = next(
+                (
+                    event
+                    for event in discovered_prompts
+                    if event.id not in matched_discover_ids
+                    and _normalize(event.text) == text
+                ),
+                None,
+            )
+            if match is not None:
+                matched_discover_ids.add(match.id)
+                existing_sources.add(source_event_id)
+                continue
+
+        row = TaskforceSessionEvent(
+            session_id=request.session_id,
+            actor_id=actor.id,
+            organization_id=actor.organization_id,
+            fleet_session_id=fleet_session_id,
+            is_demo=demo,
+            source_event_id=source_event_id,
+            source_order=source_order,
+            kind=kind,
+            role=payload.get("role"),
+            who=payload.get("who"),
+            text=payload.get("text"),
+            cmd=payload.get("cmd"),
+            exit_code=payload.get("exit_code"),
+            output=payload.get("output"),
+            file=payload.get("file"),
+            added=payload.get("added"),
+            removed=payload.get("removed"),
+            note=payload.get("note"),
+            repo=payload.get("repo"),
+            occurred_at=payload.get("occurred_at") or now,
+            created_at=now,
+        )
+        session.add(row)
+        inserted.append(row)
+        existing_sources.add(source_event_id)
+
+    return inserted
+
+
+def session_events_for_actor(
     session: Session,
     *,
     actor: User,
     session_id: str,
-    summary: str,
-    demo: bool,
-) -> TaskforceSessionActivity | None:
-    """Backfill ``response_summary`` on this session's most recent row.
+    limit: int,
+) -> list[TaskforceSessionEvent]:
+    return list(
+        session.exec(
+            select(TaskforceSessionEvent)
+            .where(TaskforceSessionEvent.session_id == session_id)
+            .where(TaskforceSessionEvent.actor_id == actor.id)
+            .order_by(
+                desc(col(TaskforceSessionEvent.occurred_at)),
+                desc(col(TaskforceSessionEvent.source_order)),
+                desc(col(TaskforceSessionEvent.created_at)),
+            )
+            .limit(limit)
+        ).all()
+    )
 
-    The ``/observe`` that follows a turn carries the agent's work summary; we
-    attach it to the latest prompt row so the turn reads ask → response. If
-    several observes land in one turn the latest summary wins (overwrite).
-    """
 
-    text = _normalize(summary, _MAX_SUMMARY)
-    if not session_id or not text:
+def _repo_from_cwd(cwd: str | None) -> str | None:
+    if not cwd:
         return None
-
-    latest = _latest_row(session, actor=actor, session_id=session_id, demo=demo)
-    if latest is None:
-        return None
-    latest.response_summary = text
-    session.add(latest)
-    return latest
+    return cwd.rstrip("/").rsplit("/", 1)[-1][:255] or None
