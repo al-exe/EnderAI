@@ -61,6 +61,12 @@ services:
         sync: false
       - key: SEARCH_EMBEDDING_MODEL
         sync: false
+      - key: SEARCH_EMBEDDING_MAX_CONCURRENCY
+        sync: false
+      - key: SEARCH_EMBEDDING_TIMEOUT_SECONDS
+        sync: false
+      - key: SEARCH_EMBEDDING_CIRCUIT_BREAKER_SECONDS
+        sync: false
       - key: SEARCH_ANSWER_MODEL
         sync: false
       - key: SEARCH_INDEX_SWEEP_INTERVAL_SECONDS
