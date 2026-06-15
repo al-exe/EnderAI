@@ -17,6 +17,7 @@ from app.core.taskforce.fleet_sessions import (
 )
 from app.models import (
     MetricsEvent,
+    TaskforceCommandRun,
     TaskforceObserveRequest,
     TaskforceSessionArchive,
     User,
@@ -189,12 +190,38 @@ def _referenced_document_ids(
     return deduped[:50]
 
 
+def _command_event(
+    command: TaskforceCommandRun,
+    *,
+    now: datetime,
+    cwd: str | None,
+) -> dict[str, Any]:
+    return {
+        "kind": "command",
+        "occurred_at": now.isoformat(),
+        "cmd": command.cmd[:2000],
+        "exit_code": command.exit_code,
+        "output": (
+            command.output[:_MAX_EVENT_TEXT] if command.output else None
+        ),
+        "repo": _repo_from_cwd(cwd),
+    }
+
+
 def _normalized_events(
     request: TaskforceObserveRequest,
     *,
     now: datetime,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
+    pending_commands = list(request.commands_run)
+
+    def flush_commands() -> None:
+        while pending_commands:
+            events.append(
+                _command_event(pending_commands.pop(0), now=now, cwd=request.cwd)
+            )
+
     for turn in request.transcript:
         role = (turn.role or "").lower()
         if role in {"tool", "tool_result"}:
@@ -203,6 +230,10 @@ def _normalized_events(
         if not content:
             continue
         kind = "prompt" if role in {"user", "human"} else "reply"
+        if kind == "reply" and events and events[-1]["kind"] == "reply":
+            # Bash runs between back-to-back assistant text turns: acknowledgement,
+            # then tool execution, then follow-up ("Sure!" → echo → "Worked.").
+            flush_commands()
         events.append(
             {
                 "kind": kind,
@@ -225,21 +256,7 @@ def _normalized_events(
             },
         )
 
-    for command in request.commands_run:
-        events.append(
-            {
-                "kind": "command",
-                "occurred_at": now.isoformat(),
-                "cmd": command.cmd[:2000],
-                "exit_code": command.exit_code,
-                "output": (
-                    command.output[:_MAX_EVENT_TEXT]
-                    if command.output
-                    else None
-                ),
-                "repo": _repo_from_cwd(request.cwd),
-            }
-        )
+    flush_commands()
 
     for file_name in request.files_touched:
         events.append(

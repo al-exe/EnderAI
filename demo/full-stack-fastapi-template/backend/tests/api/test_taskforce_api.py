@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -1107,6 +1108,81 @@ def test_session_observe_without_structured_fields_uses_summarizer_path(
         "shadow_mode",
         "empty_summary_no_active_doc",
     }
+
+
+def test_observe_archive_persisted_before_summarizer_failure(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Archive transcript must survive hook timeouts that abort /observe mid-flight."""
+    import asyncio
+
+    from app.core.db import engine
+    from app.core.taskforce import observe as observe_mod
+
+    session_id = "observe-early-archive-commit"
+
+    async def slow_then_fail(**kwargs: object):
+        await asyncio.sleep(0)
+        with Session(engine) as check:
+            archive = check.exec(
+                select(TaskforceSessionArchive).where(
+                    TaskforceSessionArchive.session_id == session_id
+                )
+            ).one()
+            assert archive.transcript_events
+            assert any(
+                event.get("kind") == "command" for event in archive.transcript_events
+            )
+        raise TimeoutError("simulated Stop hook client disconnect")
+
+    monkeypatch.setattr(observe_mod.settings, "ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(observe_mod, "summarize", slow_then_fail)
+
+    _, headers = _signup(client)
+    with pytest.raises(TimeoutError, match="simulated Stop hook"):
+        client.post(
+            f"{settings.API_V1_STR}/v2/taskforce/observe",
+            headers=headers,
+            json={
+                "kind": "final",
+                "prompt": "try 1 more echo",
+                "transcript": [
+                    {"role": "user", "content": "can you run an echo?"},
+                    {"role": "assistant", "content": "Sure!"},
+                    {
+                        "role": "assistant",
+                        "content": "Worked. Want me to echo something else?",
+                    },
+                ],
+                "commands_run": [
+                    {
+                        "cmd": 'echo "one"',
+                        "exit_code": 0,
+                        "output": "one",
+                    },
+                    {
+                        "cmd": 'echo "two"',
+                        "exit_code": 0,
+                        "output": "two",
+                    },
+                ],
+                "session_id": session_id,
+                "duration_ms": 5000,
+            },
+        )
+
+    with Session(engine) as db:
+        archive = db.exec(
+            select(TaskforceSessionArchive).where(
+                TaskforceSessionArchive.session_id == session_id
+            )
+        ).one()
+        kinds = [event["kind"] for event in archive.transcript_events]
+        first_reply = kinds.index("reply")
+        last_reply = len(kinds) - 1 - kinds[::-1].index("reply")
+        command_idx = kinds.index("command")
+        assert first_reply < command_idx < last_reply
 
 
 def test_avoided_rediscovery_metric_accumulates_from_consults(
