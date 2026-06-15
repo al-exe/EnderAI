@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from app.core.taskforce.installer import CODEX_HOOKS, HOOKS
+from app.core.taskforce.installer import CODEX_HOOKS, HOOKS, JQ_FILES
 from app.main import app
 
 INSTALLER_URL = f"{settings.API_V1_STR}/v2/taskforce/install.sh"
@@ -43,6 +43,13 @@ def test_packaged_hook_matches_canonical_source(source_name: str) -> None:
     ).read_bytes()
 
 
+@pytest.mark.parametrize("source_name", [jq[0] for jq in JQ_FILES])
+def test_packaged_jq_matches_canonical_source(source_name: str) -> None:
+    assert (PACKAGED_HOOK_DIR / source_name).read_bytes() == (
+        CANONICAL_HOOK_DIR / source_name
+    ).read_bytes()
+
+
 @pytest.mark.parametrize("source_name", [hook[0] for hook in CODEX_HOOKS])
 def test_packaged_codex_hook_matches_canonical_source(source_name: str) -> None:
     assert (PACKAGED_CODEX_HOOK_DIR / source_name).read_bytes() == (
@@ -72,6 +79,9 @@ def test_installer_is_public_and_has_no_private_repo_dependency() -> None:
         assert f"$HOOK_DIR/{target_name}" in response.text
         assert f"merge_hook {hook_name}" in response.text
         assert str(timeout) in response.text
+    for source_name, target_name, _ in JQ_FILES:
+        assert f"scripts/taskforce-hooks/{source_name}" in response.text
+        assert f"$HOOK_DIR/{target_name}" in response.text
 
 
 def test_codex_installer_is_public_and_self_contained() -> None:
@@ -347,6 +357,13 @@ def test_installer_is_idempotent_and_preserves_existing_stop_hook(
             }
         ]
 
+    for source_name, target_name, _ in JQ_FILES:
+        installed_path = claude_dir / "hooks" / target_name
+        assert (
+            installed_path.read_bytes()
+            == (CANONICAL_HOOK_DIR / source_name).read_bytes()
+        )
+
     stop_commands = [
         hook["command"] for matcher in hooks["Stop"] for hook in matcher["hooks"]
     ]
@@ -450,3 +467,124 @@ printf '202'
     assert body["harness"]["model_id"] == "claude-opus-4-8"
     if include_prompt:
         assert len(body["prompt"]) <= 8000
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+@pytest.mark.parametrize("hook_name", ["post-tool-use.sh", "stop.sh"])
+def test_observe_hooks_extract_user_text_and_command_output(
+    tmp_path: Path,
+    hook_name: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "merge"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "id": "toolu_test",
+                                    "name": "Bash",
+                                    "input": {"command": "echo hi"},
+                                }
+                            ]
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "toolu_test",
+                                    "content": "Error: No tests found.",
+                                }
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "Harness issue, not code."}
+                            ]
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    capture_file = tmp_path / "payload.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+while (($#)); do
+    if [[ "$1" == "--data" ]]; then
+        shift
+        printf '%s' "$1" > "$CAPTURE_FILE"
+    fi
+    shift
+done
+printf '202'
+"""
+    )
+    curl.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE_FILE": str(capture_file),
+        "TASKFORCE_CHECKPOINT_EVERY": "1",
+    }
+    subprocess.run(
+        ["bash", str(CANONICAL_HOOK_DIR / hook_name)],
+        input=json.dumps(
+            {
+                "session_id": f"hook-transcript-{hook_name}",
+                "transcript_path": str(transcript),
+                "cwd": str(tmp_path),
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    body = json.loads(capture_file.read_text())
+    assert body["transcript"] == [
+        {"role": "user", "content": "merge"},
+        {"role": "assistant", "content": "Harness issue, not code."},
+    ]
+    assert body["commands_run"] == [
+        {
+            "cmd": "echo hi",
+            "exit_code": None,
+            "output": "Error: No tests found.",
+        }
+    ]

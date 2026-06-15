@@ -22,6 +22,9 @@ readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly CHECKPOINT_EVERY="${TASKFORCE_CHECKPOINT_EVERY:-1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TRANSCRIPT_JQ="${SCRIPT_DIR}/transcript-extract.jq"
+readonly COMMANDS_JQ="${SCRIPT_DIR}/commands-extract.jq"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
@@ -84,19 +87,7 @@ fi
 # Recent 80 turns is enough for a mid-session delta.
 transcript_array="$(
     tail -n 80 "$transcript_path" 2>/dev/null \
-        | jq -sc '[.[] | select(.type == "assistant" or .type == "user" or .type == "tool_result") | {
-            role: (if .type == "user" then "user" elif .type == "assistant" then "assistant" else "tool" end),
-            content: (
-                if .type == "assistant" then ([.message.content[]? | select(.type == "text") | .text] | join("\n"))
-                elif .type == "user" then (
-                    if (.message.content | type) == "array"
-                    then ([.message.content[]? | if .type == "tool_result" then (.content | (if type == "array" then ([.[] | (.text // tostring)] | join("\n")) else tostring end)) else (.text // "") end] | join("\n"))
-                    else (.message.content // "")
-                    end
-                )
-                else (.content // "" | tostring) end
-            )
-        }]' 2>/dev/null
+        | jq -sf "$TRANSCRIPT_JQ" 2>/dev/null
 )"
 [[ -z "$transcript_array" || "$transcript_array" == "null" ]] && transcript_array="[]"
 
@@ -113,17 +104,7 @@ files_touched="$(
 
 commands_run="$(
     tail -n 200 "$transcript_path" 2>/dev/null \
-        | jq -sc '[
-            .[] | select(.message?.content?[]? | (.type == "tool_use" and .name == "Bash"))
-            | .message.content[] | select(.type == "tool_use" and .name == "Bash")
-            | {
-                cmd: (
-                    (.input.command // "")
-                    | if length > 2000 then .[:1997] + "..." else . end
-                ),
-                exit_code: null
-              }
-        ] | map(select(.cmd != ""))' 2>/dev/null
+        | jq -sf "$COMMANDS_JQ" 2>/dev/null
 )"
 [[ -z "$commands_run" || "$commands_run" == "null" ]] && commands_run="[]"
 

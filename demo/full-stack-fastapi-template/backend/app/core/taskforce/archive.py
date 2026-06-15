@@ -197,6 +197,11 @@ def _normalized_events(
     events: list[dict[str, Any]] = []
     for turn in request.transcript:
         role = (turn.role or "").lower()
+        if role in {"tool", "tool_result"}:
+            continue
+        content = (turn.content or "").strip()
+        if not content:
+            continue
         kind = "prompt" if role in {"user", "human"} else "reply"
         events.append(
             {
@@ -204,7 +209,7 @@ def _normalized_events(
                 "occurred_at": now.isoformat(),
                 "role": turn.role,
                 "who": "@user" if kind == "prompt" else "@agent",
-                "text": turn.content[:_MAX_EVENT_TEXT],
+                "text": content[:_MAX_EVENT_TEXT],
             }
         )
 
@@ -227,6 +232,11 @@ def _normalized_events(
                 "occurred_at": now.isoformat(),
                 "cmd": command.cmd[:2000],
                 "exit_code": command.exit_code,
+                "output": (
+                    command.output[:_MAX_EVENT_TEXT]
+                    if command.output
+                    else None
+                ),
                 "repo": _repo_from_cwd(request.cwd),
             }
         )

@@ -64,6 +64,11 @@ CODEX_HOOKS = (
     ),
 )
 
+JQ_FILES = (
+    ("transcript-extract.jq", "transcript-extract.jq", "TASKFORCE_TRANSCRIPT_JQ_EOF"),
+    ("commands-extract.jq", "commands-extract.jq", "TASKFORCE_COMMANDS_JQ_EOF"),
+)
+
 
 def build_hook_installer() -> str:
     """Return an installer that writes and registers all Taskforce hooks."""
@@ -96,6 +101,18 @@ def build_hook_installer() -> str:
                 script,
                 delimiter,
                 f'chmod 0755 "$HOOK_DIR/{target_name}"',
+                "",
+            ]
+        )
+
+    for source_name, target_name, delimiter in JQ_FILES:
+        script = (HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
                 "",
             ]
         )
