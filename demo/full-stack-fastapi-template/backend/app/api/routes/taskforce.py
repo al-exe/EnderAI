@@ -25,12 +25,16 @@ from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.active_sessions import (
     active_sessions_for_actor,
     get_active_sessions,
+    history_agents_for_actor,
     register_session_heartbeat,
 )
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.fleet_sessions import (
+    archive_is_inactive,
     get_or_create_default_fleet_session,
+    get_or_create_history_fleet_session,
     next_fleet_session_name,
+    reconcile_inactive_fleet_membership,
 )
 from app.core.taskforce.installer import (
     build_codex_hook_installer,
@@ -70,6 +74,7 @@ from app.models import (
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     TaskforceSessionSavingsResponse,
+    TaskforceSessionHeartbeatRequest,
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
     V2Document,
@@ -500,18 +505,28 @@ def fleet_route(
 ) -> Any:
     """Group the current actor's active-session roster into Fleet sessions."""
 
+    reconcile_inactive_fleet_membership(session, current_user)
+    history = get_or_create_history_fleet_session(session, current_user)
+    session.commit()
+
     fleet_sessions = list(
         session.exec(
             select(TaskforceFleetSession)
             .where(TaskforceFleetSession.actor_id == current_user.id)
-            .order_by(col(TaskforceFleetSession.created_at))
+            .order_by(
+                col(TaskforceFleetSession.is_history),
+                col(TaskforceFleetSession.created_at),
+            )
         ).all()
     )
-    agents = active_sessions_for_actor(session, actor=current_user)
-    agents_by_fleet: dict[uuid.UUID, list[Any]] = {}
+    active_agents = active_sessions_for_actor(session, actor=current_user)
+    history_agents = history_agents_for_actor(session, actor=current_user)
+    agents_by_fleet: dict[uuid.UUID, list[Any]] = {history.id: history_agents}
     visible_fleet_ids = {fleet_session.id for fleet_session in fleet_sessions}
-    for agent in agents:
+    for agent in active_agents:
         if agent.fleet_session_id not in visible_fleet_ids:
+            continue
+        if agent.fleet_session_id == history.id:
             continue
         agents_by_fleet.setdefault(agent.fleet_session_id, []).append(agent)
 
@@ -520,6 +535,7 @@ def fleet_route(
             TaskforceFleetSessionPublic(
                 id=fleet_session.id,
                 name=fleet_session.name,
+                is_history=fleet_session.is_history,
                 created_at=fleet_session.created_at,
                 updated_at=fleet_session.updated_at,
                 agents=agents_by_fleet.get(fleet_session.id, []),
@@ -552,6 +568,7 @@ def create_fleet_session_route(
     return TaskforceFleetSessionPublic(
         id=fleet_session.id,
         name=fleet_session.name,
+        is_history=fleet_session.is_history,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=[],
@@ -572,6 +589,8 @@ def update_fleet_session_route(
         actor_id=current_user.id,
         fleet_session_id=fleet_session_id,
     )
+    if fleet_session.is_history:
+        raise HTTPException(status_code=422, detail="History cannot be renamed")
     if body.name is not None:
         fleet_session.name = _fleet_name(body.name)
     fleet_session.updated_at = get_datetime_utc()
@@ -586,6 +605,7 @@ def update_fleet_session_route(
     return TaskforceFleetSessionPublic(
         id=fleet_session.id,
         name=fleet_session.name,
+        is_history=fleet_session.is_history,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=agents,
@@ -605,6 +625,8 @@ def delete_fleet_session_route(
         actor_id=current_user.id,
         fleet_session_id=fleet_session_id,
     )
+    if fleet_session.is_history:
+        raise HTTPException(status_code=422, detail="History cannot be deleted")
     members = session.exec(
         select(TaskforceSessionArchive)
         .where(TaskforceSessionArchive.actor_id == current_user.id)
@@ -615,8 +637,13 @@ def delete_fleet_session_route(
         current_user,
         exclude_id=fleet_session.id,
     )
+    history = get_or_create_history_fleet_session(session, current_user)
+    now = get_datetime_utc()
     for member in members:
-        member.fleet_session_id = replacement.id
+        if archive_is_inactive(member, now=now):
+            member.fleet_session_id = history.id
+        else:
+            member.fleet_session_id = replacement.id
         session.add(member)
     session.delete(fleet_session)
     session.commit()
@@ -660,6 +687,13 @@ def assign_fleet_session_route(
         actor_id=current_user.id,
         fleet_session_id=body.fleet_session_id,
     )
+    destination = session.get(TaskforceFleetSession, body.fleet_session_id)
+    assert destination is not None
+    if destination.is_history:
+        raise HTTPException(
+            status_code=422,
+            detail="Agents move to History automatically when inactive",
+        )
 
     archive.fleet_session_id = body.fleet_session_id
     archive.updated_at = get_datetime_utc()

@@ -26,7 +26,11 @@ from sqlalchemy import desc
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
-from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
+from app.core.taskforce.fleet_sessions import (
+    get_or_create_default_fleet_session,
+    history_fleet_session_for_actor,
+    resurrect_archive_from_history,
+)
 from app.core.taskforce.session_activity import record_activity_prompt
 from app.models import (
     AgentSpecialist,
@@ -49,6 +53,9 @@ ROSTER_LIMIT = 5
 # Fleet reports a server-derived state so clients do not duplicate freshness
 # heuristics. Waiting and paused remain reserved until ingestion captures them.
 FLEET_RUNNING_WINDOW = timedelta(minutes=5)
+
+# History keeps more receipts than the live roster cap.
+HISTORY_ROSTER_LIMIT = 50
 
 
 def touch_session_heartbeat(
@@ -126,6 +133,7 @@ def register_session_heartbeat(
         archive.client = client or archive.client
         archive.harness_label = client or archive.harness_label
         archive.model_id = model_id or archive.model_id
+        resurrect_archive_from_history(session, archive, actor, now=now)
     if archive.fleet_session_id is None:
         archive.fleet_session_id = get_or_create_default_fleet_session(
             session, actor
@@ -303,7 +311,21 @@ def active_sessions_for_actor(
         limit=limit,
         now=now,
     )
+    return _fleet_agent_public_from_archive(
+        session,
+        actor=actor,
+        archives=archives,
+        now_utc=now_utc,
+    )
 
+
+def _fleet_agent_public_from_archive(
+    session: Session,
+    *,
+    actor: User,
+    archives: list[TaskforceSessionArchive],
+    now_utc: datetime,
+) -> list[TaskforceFleetAgentPublic]:
     referenced_by_session: dict[str, list[uuid.UUID]] = {}
     all_document_ids: set[uuid.UUID] = set()
     for archive in archives:
@@ -398,3 +420,34 @@ def active_sessions_for_actor(
         )
 
     return result
+
+
+def history_agents_for_actor(
+    session: Session,
+    *,
+    actor: User,
+    limit: int = HISTORY_ROSTER_LIMIT,
+    now: datetime | None = None,
+) -> list[TaskforceFleetAgentPublic]:
+    """Return inactive agent receipts stored in the actor's History session."""
+
+    history = history_fleet_session_for_actor(session, actor)
+    if history is None:
+        return []
+
+    now_utc = now or _now()
+    archives = list(
+        session.exec(
+            select(TaskforceSessionArchive)
+            .where(TaskforceSessionArchive.actor_id == actor.id)
+            .where(TaskforceSessionArchive.fleet_session_id == history.id)
+            .order_by(desc(TaskforceSessionArchive.last_seen_at))
+            .limit(limit)
+        ).all()
+    )
+    return _fleet_agent_public_from_archive(
+        session,
+        actor=actor,
+        archives=archives,
+        now_utc=now_utc,
+    )

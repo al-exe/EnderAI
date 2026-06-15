@@ -1568,6 +1568,7 @@ class TaskforceFleetSession(SQLModel, table=True):
         ondelete="SET NULL",
     )
     name: str = Field(min_length=1, max_length=120)
+    is_history: bool = Field(default=False, nullable=False, index=True)
     created_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -1859,6 +1860,7 @@ class TaskforceFleetSessionAssignment(SQLModel):
 class TaskforceFleetSessionPublic(SQLModel):
     id: uuid.UUID
     name: str
+    is_history: bool = False
     created_at: datetime
     updated_at: datetime
     agents: list[TaskforceFleetAgentPublic] = Field(default_factory=list)

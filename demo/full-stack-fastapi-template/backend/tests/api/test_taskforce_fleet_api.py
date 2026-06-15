@@ -206,10 +206,12 @@ def test_fleet_groups_top_five_recent_active_sessions(
         "recent-0",
         "recent-1",
         "recent-2",
-        "recent-3",
-        "recent-4",
     ]
-    assert "recent-5" not in grouped_ids
+    assert "recent-3" not in grouped_ids
+    assert "recent-4" not in grouped_ids
+    history = next(item for item in body["fleet_sessions"] if item["is_history"])
+    history_ids = {agent["session_id"] for agent in history["agents"]}
+    assert {"recent-3", "recent-4"}.issubset(history_ids)
     assert "too-old" not in grouped_ids
     assert "ended" not in grouped_ids
     assert grouped["agents"][0]["active_document_id"] == str(document.id)
@@ -221,8 +223,9 @@ def test_fleet_groups_top_five_recent_active_sessions(
         grouped["agents"][0]["started_at"].replace("Z", "+00:00")
     ) == now - timedelta(hours=1)
     assert grouped["agents"][0]["specialist_rule_count"] == 2
+    assert grouped["agents"][1]["status"] == "running"
     assert grouped["agents"][2]["status"] == "running"
-    assert grouped["agents"][3]["status"] == "idle"
+    assert "recent-5" not in grouped_ids
 
 
 def test_reassign_and_delete_move_agent_without_ending_session(
@@ -335,7 +338,10 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
     assert fleet.status_code == 200, fleet.text
     body = fleet.json()
     assert "unassigned" not in body
-    agent = body["fleet_sessions"][0]["agents"][0]
+    default_fleet = next(
+        item for item in body["fleet_sessions"] if not item["is_history"]
+    )
+    agent = default_fleet["agents"][0]
     assert agent["session_id"] == "default-session-agent"
     assert agent["summary_markdown"] == "Implement the fleet session defaults"
 
@@ -575,3 +581,199 @@ def test_observe_stamps_future_documents_without_moving_past_documents(
     assert updated.status_code == 202, updated.text
     db.refresh(legacy_global_doc)
     assert legacy_global_doc.fleet_session_id is None
+
+
+def test_fleet_creates_history_session_and_moves_inactive_agents(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Active sprint")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    active = _create_archive(
+        db,
+        user=user,
+        session_id="still-running",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+    )
+    idle = _create_archive(
+        db,
+        user=user,
+        session_id="went-idle",
+        imported_at=now - timedelta(minutes=12),
+        fleet_session_id=fleet_id,
+    )
+    ended = _create_archive(
+        db,
+        user=user,
+        session_id="was-ended",
+        imported_at=now - timedelta(minutes=2),
+        ended_at=now - timedelta(minutes=2),
+        fleet_session_id=fleet_id,
+    )
+    db.add_all([active, idle, ended])
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    history = next(item for item in body["fleet_sessions"] if item["is_history"])
+    active_fleet = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
+    )
+
+    assert history["name"] == "History"
+    assert {agent["session_id"] for agent in history["agents"]} == {
+        "went-idle",
+        "was-ended",
+    }
+    assert [agent["session_id"] for agent in active_fleet["agents"]] == [
+        "still-running"
+    ]
+
+    db.refresh(idle)
+    db.refresh(ended)
+    assert idle.fleet_session_id == uuid.UUID(history["id"])
+    assert ended.fleet_session_id == uuid.UUID(history["id"])
+
+
+def test_ended_session_moves_to_history_on_observe(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = "history-on-end"
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "Wrap up the fleet history work", "session_id": session_id},
+    )
+    assert discover.status_code == 200, discover.text
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "session_end",
+            "prompt": "",
+            "session_id": session_id,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    history = db.exec(
+        select(TaskforceFleetSession)
+        .where(TaskforceFleetSession.actor_id == user.id)
+        .where(TaskforceFleetSession.is_history.is_(True))
+    ).one()
+    assert archive.ended_at is not None
+    assert archive.fleet_session_id == history.id
+
+
+def test_discover_resurrects_agent_from_history(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = "history-resurrect"
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "Initial work", "session_id": session_id},
+    )
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={"kind": "session_end", "prompt": "", "session_id": session_id},
+    )
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    history_id = archive.fleet_session_id
+
+    revived = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "Back for more work", "session_id": session_id},
+    )
+    assert revived.status_code == 200, revived.text
+
+    db.refresh(archive)
+    default = db.exec(
+        select(TaskforceFleetSession)
+        .where(TaskforceFleetSession.actor_id == user.id)
+        .where(TaskforceFleetSession.is_history.is_(False))
+        .where(TaskforceFleetSession.name == "Session 1")
+    ).one()
+    assert archive.ended_at is None
+    assert archive.fleet_session_id == default.id
+    assert archive.fleet_session_id != history_id
+
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet.status_code == 200, fleet.text
+    body = fleet.json()
+    history = next(item for item in body["fleet_sessions"] if item["is_history"])
+    default_fleet = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(default.id)
+    )
+    assert all(agent["session_id"] != session_id for agent in history["agents"])
+    assert [agent["session_id"] for agent in default_fleet["agents"]] == [
+        session_id
+    ]
+
+
+def test_history_session_cannot_be_renamed_or_deleted(
+    client: TestClient,
+    db: Session,
+) -> None:
+    _, headers = _signup(client)
+
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet.status_code == 200, fleet.text
+    history = next(item for item in fleet.json()["fleet_sessions"] if item["is_history"])
+
+    renamed = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{history['id']}",
+        headers=headers,
+        json={"name": "Old stuff"},
+    )
+    assert renamed.status_code == 422, renamed.text
+
+    deleted = client.delete(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{history['id']}",
+        headers=headers,
+    )
+    assert deleted.status_code == 422, deleted.text
