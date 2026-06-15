@@ -6,10 +6,11 @@ set -uo pipefail
 readonly LOG_FILE="${HOME}/.codex/taskforce.log"
 readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
 readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
 
-mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
 log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"
@@ -84,6 +85,11 @@ http_status="$(
 if [[ "$http_status" != "200" ]]; then
     log "skip: discover returned ${http_status}"
     exit 0
+fi
+
+session_active_doc="$(jq -r '.session_active_document_id // empty' "$response_file" 2>/dev/null || true)"
+if [[ -n "$session_active_doc" ]]; then
+    printf '%s' "$session_active_doc" > "${STATE_DIR}/${session_id}.active"
 fi
 
 match_count="$(jq '.matches | length' "$response_file" 2>/dev/null || echo 0)"

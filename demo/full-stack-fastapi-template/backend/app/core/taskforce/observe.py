@@ -51,6 +51,7 @@ from app.models import (
     MetricsEvent,
     TaskforceObserveRequest,
     TaskforceObserveResponse,
+    TaskforceSessionArchive,
     User,
     V2Document,
     V2DocumentDetailsSection,
@@ -231,7 +232,7 @@ async def observe(
     )
 
     document = _resolve_active_document(
-        session, actor=actor, request=request, demo=demo
+        session, actor=actor, request=request, demo=demo, archive=archive
     )
 
     if document is None and not summary.summary_points and not summary.details_sections:
@@ -346,12 +347,22 @@ def _resolve_active_document(
     actor: User,
     request: TaskforceObserveRequest,
     demo: bool,
+    archive: TaskforceSessionArchive | None = None,
 ) -> V2Document | None:
-    if request.active_document_id is None:
+    """Resolve the document this observe call should patch.
+
+    Hooks often omit ``active_document_id`` on checkpoint turns — the local
+    ``~/.taskforce/<session_id>.active`` pointer may not exist yet. Fall back
+    to the session archive's pinned doc so one agent session keeps one Library
+    document across prompts/checkpoints.
+    """
+
+    document_id = request.active_document_id
+    if document_id is None and archive is not None:
+        document_id = archive.active_document_id
+    if document_id is None:
         return None
-    return get_v2_document_for_actor(
-        session, actor, request.active_document_id, demo=demo
-    )
+    return get_v2_document_for_actor(session, actor, document_id, demo=demo)
 
 
 def _create_document_from_summary(

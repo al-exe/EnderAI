@@ -1772,6 +1772,7 @@ class TaskforceDiscoverResponse(SQLModel):
     query_id: uuid.UUID
     matches: list[TaskforceDiscoverMatch]
     active_sessions: list[TaskforceActiveSession] = Field(default_factory=list)
+    session_active_document_id: uuid.UUID | None = None
 
 
 class TaskforceActiveSessionsResponse(SQLModel):

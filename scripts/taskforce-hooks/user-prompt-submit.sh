@@ -27,10 +27,11 @@ set -uo pipefail
 readonly LOG_FILE="${HOME}/.claude/taskforce-discover.log"
 readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
 readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
 
-mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
 log() {
     local msg="[$(date -u +%FT%TZ)] $*"
@@ -119,6 +120,13 @@ fi
 
 response="$(cat /tmp/.taskforce-discover-response.json 2>/dev/null || true)"
 [[ -z "$response" ]] && { log "skip: empty discover response"; exit 0; }
+
+if [[ -n "$session_id" ]]; then
+    session_active_doc="$(jq -r '.session_active_document_id // empty' <<<"$response" 2>/dev/null || true)"
+    if [[ -n "$session_active_doc" ]]; then
+        printf '%s' "$session_active_doc" > "${STATE_DIR}/${session_id}.active"
+    fi
+fi
 
 match_count="$(jq '.matches | length' <<<"$response" 2>/dev/null || echo 0)"
 if [[ "$match_count" == "0" ]]; then
