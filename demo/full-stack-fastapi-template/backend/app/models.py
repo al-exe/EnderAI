@@ -1578,6 +1578,57 @@ class TaskforceFleetSession(SQLModel, table=True):
     )
 
 
+class TaskforceSessionActivity(SQLModel, table=True):
+    """Append-only per-turn activity log for the Fleet timeline (TF-247).
+
+    One row per user prompt as it arrives on ``/discover`` ("working on" as it
+    came in). ``response_summary`` is filled in by the following ``/observe`` so
+    each row reads as a single turn — the ask, then a summary of what the agent
+    did. The Fleet agent-session detail renders these newest-first; each row
+    deep-links to the Ledger line that backs it.
+
+    Unlike ``TaskforceSessionArchive.title`` / ``transcript_events`` (both
+    overwritten every request), this table is never mutated in place beyond the
+    one-shot ``response_summary`` backfill, so it is the durable history the
+    timeline needs.
+    """
+
+    __tablename__ = "taskforce_session_activity"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: str = Field(min_length=1, max_length=128, index=True)
+    actor_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    fleet_session_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="taskforce_fleet_session.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    is_demo: bool = Field(default=False, nullable=False, index=True)
+    prompt: str = Field(max_length=255)
+    response_summary: str | None = Field(default=None, max_length=2000)
+    occurred_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
 # Event kinds emitted into metrics_event.kind. Kept as module-level constants
 # rather than a StrEnum so the values are stable in jsonb payloads and easy
 # to grep.
@@ -1747,6 +1798,29 @@ class TaskforceSessionLogResponse(SQLModel):
 
     session_id: str
     entries: list[TaskforceSessionLogEntry]
+
+
+class TaskforceSessionActivityEntryPublic(SQLModel):
+    """One turn in the Fleet activity timeline (TF-247).
+
+    ``prompt`` is the user's "working on" line for the turn; ``response_summary``
+    is a short summary of what the agent did (null until the turn's ``/observe``
+    lands). ``ledger_href`` deep-links to the Ledger session that backs this turn,
+    and is null when the Ledger is unavailable (the viewer has no organization).
+    """
+
+    id: uuid.UUID
+    occurred_at: datetime
+    prompt: str
+    response_summary: str | None = None
+    ledger_href: str | None = None
+
+
+class TaskforceSessionActivityResponse(SQLModel):
+    """Response from GET /v2/taskforce/session-activity?session_id=…"""
+
+    session_id: str
+    entries: list[TaskforceSessionActivityEntryPublic] = Field(default_factory=list)
 
 
 class TaskforceFleetAgentPublic(SQLModel):
