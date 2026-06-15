@@ -2036,6 +2036,7 @@ class TaskforceHarnessUsage(SQLModel):
 class TaskforceCommandRun(SQLModel):
     cmd: str = Field(min_length=1, max_length=2000)
     exit_code: int | None = None
+    output: str | None = Field(default=None, max_length=4000)
 
 
 class TaskforceDetailsSectionInput(SQLModel):

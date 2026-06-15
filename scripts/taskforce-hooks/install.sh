@@ -40,6 +40,8 @@ install_hook "stop.sh"                "$STOP_HOOK"
 install_hook "post-tool-use.sh"       "$POST_TOOL_HOOK"
 install_hook "session-end.sh"         "$SESSION_END_HOOK"
 install_hook "record-usage.sh"        "$RECORD_USAGE_HOOK"
+install_hook "transcript-extract.jq"  "${HOOK_DIR}/transcript-extract.jq"
+install_hook "commands-extract.jq"    "${HOOK_DIR}/commands-extract.jq"
 
 # Merge the hooks block into ~/.claude/settings.json. Uses jq so any
 # existing entries (e.g. the Stop hook from the EnderAI Connect Agent
