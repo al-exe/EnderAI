@@ -3,6 +3,9 @@
 from pathlib import Path
 
 HOOK_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "taskforce-hooks"
+CODEX_HOOK_ASSET_DIR = (
+    Path(__file__).resolve().parents[2] / "assets" / "taskforce-codex-hooks"
+)
 
 HOOKS = (
     (
@@ -39,6 +42,25 @@ HOOKS = (
         "Stop",
         10,
         "TASKFORCE_RECORD_USAGE_EOF",
+    ),
+)
+
+CODEX_HOOKS = (
+    (
+        "session-start.sh",
+        "taskforce-session-start.sh",
+        "SessionStart",
+        "startup|resume|clear",
+        10,
+        "TASKFORCE_CODEX_SESSION_START_EOF",
+    ),
+    (
+        "user-prompt-submit.sh",
+        "taskforce-user-prompt-submit.sh",
+        "UserPromptSubmit",
+        "*",
+        5,
+        "TASKFORCE_CODEX_USER_PROMPT_SUBMIT_EOF",
     ),
 )
 
@@ -129,6 +151,98 @@ def build_hook_installer() -> str:
             "",
             'echo "✓ Taskforce hooks installed (discovery, capture, metrics) '
             '— restart Claude Code to activate."',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_codex_hook_installer() -> str:
+    """Return an installer for Taskforce's Codex lifecycle hooks."""
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Public Taskforce Codex hook installer.",
+        "# Hook sources mirror scripts/taskforce-codex-hooks/ in the EnderAI repository.",
+        "",
+        "set -euo pipefail",
+        "",
+        'HOOK_DIR="${HOME}/.codex/hooks"',
+        'SETTINGS_FILE="${HOME}/.codex/hooks.json"',
+        "",
+        "if ! command -v jq >/dev/null 2>&1; then",
+        '    echo "ERROR: jq is required to install Taskforce hooks." >&2',
+        "    exit 1",
+        "fi",
+        "",
+        'mkdir -p "$HOOK_DIR" "${HOME}/.taskforce"',
+        "",
+    ]
+
+    for source_name, target_name, _, _, _, delimiter in CODEX_HOOKS:
+        script = (CODEX_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-codex-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                f'chmod 0755 "$HOOK_DIR/{target_name}"',
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            'mkdir -p "$(dirname "$SETTINGS_FILE")"',
+            'if [[ ! -f "$SETTINGS_FILE" ]]; then',
+            '    echo \'{"hooks": {}}\' > "$SETTINGS_FILE"',
+            "fi",
+            "",
+            "merge_hook() {",
+            '    local hook_name="$1" matcher="$2" command="$3" timeout="$4"',
+            "    local tmp_file",
+            '    tmp_file="$(mktemp)"',
+            '    jq --arg hook_name "$hook_name" --arg matcher "$matcher" '
+            '--arg cmd "$command" --argjson timeout "$timeout" \'',
+            "        .hooks = (.hooks // {})",
+            "        | .hooks[$hook_name] = (.hooks[$hook_name] // [])",
+            "        | .hooks[$hook_name] |= (",
+            "            if (any(.[]; .hooks[]?.command == $cmd)) then",
+            "                .",
+            '            elif (any(.[]; (.matcher // "*") == $matcher)) then',
+            "                map(",
+            '                    if (.matcher // "*") == $matcher then',
+            "                        .hooks = ((.hooks // []) + [",
+            '                            {type: "command", command: $cmd, '
+            "timeout: $timeout}",
+            "                        ])",
+            "                    else . end",
+            "                )",
+            "            else",
+            "                . + [{matcher: $matcher, hooks: [",
+            '                    {type: "command", command: $cmd, timeout: $timeout}',
+            "                ]}]",
+            "            end",
+            "        )",
+            '    \' "$SETTINGS_FILE" > "$tmp_file"',
+            '    mv "$tmp_file" "$SETTINGS_FILE"',
+            "}",
+            "",
+        ]
+    )
+
+    for _, target_name, hook_name, matcher, timeout, _ in CODEX_HOOKS:
+        lines.append(
+            f'merge_hook {hook_name} "{matcher}" "$HOOK_DIR/{target_name}" {timeout}'
+        )
+
+    lines.extend(
+        [
+            "",
+            'echo "Taskforce Codex hooks installed."',
+            'echo "Restart Codex, run /hooks, and trust the Taskforce hooks."',
+            'echo "Start one more Codex session after trusting them to activate Fleet registration."',
             "",
         ]
     )

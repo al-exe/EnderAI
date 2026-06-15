@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Codex UserPromptSubmit hook -> Taskforce discovery.
+
+set -uo pipefail
+
+readonly LOG_FILE="${HOME}/.codex/taskforce.log"
+readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
+readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
+readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
+readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"
+}
+
+response_file=""
+cleanup() {
+    [[ -n "$response_file" ]] && rm -f "$response_file"
+}
+trap 'cleanup; exit 0' EXIT
+
+command -v jq >/dev/null 2>&1 || { log "skip: jq missing"; exit 0; }
+command -v curl >/dev/null 2>&1 || { log "skip: curl missing"; exit 0; }
+
+if [[ "${TASKFORCE_HOOKS_DISABLED:-0}" == "1" ]]; then
+    log "skip: TASKFORCE_HOOKS_DISABLED=1"
+    exit 0
+fi
+
+token_file="$TOKEN_FILE"
+if [[ ! -r "$token_file" && -r "$LEGACY_TOKEN_FILE" ]]; then
+    token_file="$LEGACY_TOKEN_FILE"
+fi
+if [[ ! -r "$token_file" ]]; then
+    log "skip: no token at $TOKEN_FILE"
+    exit 0
+fi
+token="$(tr -d '\r\n' < "$token_file")"
+[[ -z "$token" ]] && { log "skip: token empty"; exit 0; }
+
+payload="$(cat || true)"
+[[ -z "$payload" ]] && { log "skip: empty stdin"; exit 0; }
+
+prompt="$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null)"
+session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
+cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
+[[ -z "$prompt" ]] && { log "skip: no prompt"; exit 0; }
+[[ -z "$session_id" ]] && { log "skip: no session_id"; exit 0; }
+
+git_branch=""
+if [[ -n "$cwd" && -d "$cwd" ]] && command -v git >/dev/null 2>&1; then
+    git_branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+
+body="$(jq -cn \
+    --arg prompt "$prompt" \
+    --arg cwd "$cwd" \
+    --arg session_id "$session_id" \
+    --arg git_branch "$git_branch" \
+    '{
+        prompt: $prompt,
+        cwd: (if $cwd == "" then null else $cwd end),
+        session_id: $session_id,
+        git_branch: (if $git_branch == "" then null else $git_branch end),
+        client: "codex",
+        min_score: 0.2
+    }')"
+
+response_file="$(mktemp)"
+http_status="$(
+    curl -sS \
+        -o "$response_file" \
+        -w '%{http_code}' \
+        --max-time 4 \
+        -X POST \
+        -H "Authorization: Bearer ${token}" \
+        -H "Content-Type: application/json" \
+        --data "$body" \
+        "${BACKEND_URL}/api/v1/v2/taskforce/discover" 2>>"$LOG_FILE"
+)" || { log "skip: curl failed"; exit 0; }
+
+if [[ "$http_status" != "200" ]]; then
+    log "skip: discover returned ${http_status}"
+    exit 0
+fi
+
+match_count="$(jq '.matches | length' "$response_file" 2>/dev/null || echo 0)"
+if [[ "$match_count" == "0" ]]; then
+    log "no matches"
+    exit 0
+fi
+
+preamble_text="$(jq -r --argjson budget_chars "$((TOKEN_BUDGET * 4))" '
+    .matches as $matches
+    | reduce range(0; ($matches | length)) as $i ([0, ""];
+        .[1] as $acc
+        | .[0] as $used
+        | $matches[$i] as $m
+        | ($m.title + " - score " + ($m.score | tostring) + " - " + ($m.summary_markdown // "")) as $entry
+        | ($used + ($entry | length)) as $next
+        | if $next > $budget_chars then .
+          else [$next, $acc + "\n[" + $m.title + "] (" + $m.confidence_band + ", " + ($m.score | tostring) + ")\n" + ($m.summary_markdown // "(no summary)") + (if $m.outcome then "\nOutcome: " + $m.outcome else "" end) + "\n"]
+          end
+      )
+    | .[1]
+' "$response_file" 2>/dev/null)"
+
+[[ -z "$preamble_text" ]] && { log "skip: preamble empty after budget"; exit 0; }
+
+cat <<EOF
+Related prior work from Taskforce:
+${preamble_text}
+Use this as prior context when it is relevant to the user's request.
+EOF
+
+log "ok: ${match_count} matches injected"

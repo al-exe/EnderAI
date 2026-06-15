@@ -69,39 +69,69 @@ def touch_session_heartbeat(
     if not request.session_id:
         return None
 
+    return register_session_heartbeat(
+        session,
+        actor=actor,
+        session_id=request.session_id,
+        demo=demo,
+        client=request.client,
+        cwd=request.cwd,
+        branch=request.git_branch,
+        prompt=request.prompt,
+    )
+
+
+def register_session_heartbeat(
+    session: Session,
+    *,
+    actor: User,
+    session_id: str,
+    demo: bool,
+    client: str | None = None,
+    cwd: str | None = None,
+    branch: str | None = None,
+    prompt: str = "",
+    model_id: str | None = None,
+) -> TaskforceSessionArchive:
+    """Create or refresh the archive row used by active sessions and Fleet."""
+
     now = _now()
     archive = session.exec(
         select(TaskforceSessionArchive)
         .where(TaskforceSessionArchive.organization_id == actor.organization_id)
         .where(TaskforceSessionArchive.is_demo == demo)
-        .where(TaskforceSessionArchive.session_id == request.session_id)
+        .where(TaskforceSessionArchive.session_id == session_id)
     ).first()
 
     if archive is None:
         archive = TaskforceSessionArchive(
-            session_id=request.session_id,
+            session_id=session_id,
             actor_id=actor.id,
             organization_id=actor.organization_id,
             is_demo=demo,
-            client=request.client,
-            cwd=request.cwd,
-            repo=_repo_from_cwd(request.cwd),
-            branch=request.git_branch,
+            client=client,
+            harness_label=client,
+            model_id=model_id,
+            cwd=cwd,
+            repo=_repo_from_cwd(cwd),
+            branch=branch,
             started_at=now,
             imported_at=now,
             created_at=now,
         )
     else:
-        archive.cwd = archive.cwd or request.cwd
-        archive.repo = archive.repo or _repo_from_cwd(request.cwd)
-        archive.branch = archive.branch or request.git_branch
-        archive.client = archive.client or request.client
+        archive.cwd = cwd or archive.cwd
+        archive.repo = _repo_from_cwd(cwd) or archive.repo
+        archive.branch = branch or archive.branch
+        archive.client = client or archive.client
+        archive.harness_label = client or archive.harness_label
+        archive.model_id = model_id or archive.model_id
     if archive.fleet_session_id is None:
         archive.fleet_session_id = get_or_create_default_fleet_session(
             session, actor
         ).id
-    if request.prompt.strip():
-        archive.title = " ".join(request.prompt.split())[:255]
+    if prompt.strip():
+        archive.title = " ".join(prompt.split())[:255]
 
     archive.last_seen_at = now
     archive.updated_at = now
@@ -109,15 +139,16 @@ def touch_session_heartbeat(
 
     # Append the prompt to the durable per-turn activity timeline (TF-247).
     # Deduped against this session's most recent row inside the helper.
-    record_activity_prompt(
-        session,
-        actor=actor,
-        session_id=request.session_id,
-        prompt=request.prompt,
-        demo=demo,
-        fleet_session_id=archive.fleet_session_id,
-        now=now,
-    )
+    if prompt.strip():
+        record_activity_prompt(
+            session,
+            actor=actor,
+            session_id=session_id,
+            prompt=prompt,
+            demo=demo,
+            fleet_session_id=archive.fleet_session_id,
+            now=now,
+        )
     return archive
 
 

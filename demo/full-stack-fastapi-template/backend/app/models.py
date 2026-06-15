@@ -2120,6 +2120,18 @@ class TaskforceObserveResponse(SQLModel):
 # ----- TF-181 / Phase 7 — session start (Tier 2 entry point) -------------
 
 
+class TaskforceSessionHeartbeatRequest(SQLModel):
+    """Register or refresh a hook-driven agent session."""
+
+    session_id: str = Field(min_length=1, max_length=128)
+    cwd: str | None = None
+    git_branch: str | None = None
+    client: str | None = Field(default=None, max_length=32)
+    model_id: str | None = Field(default=None, max_length=128)
+    source: str | None = Field(default=None, max_length=32)
+    demo: bool = False
+
+
 class TaskforceSessionStartRequest(SQLModel):
     """Request body for POST /v2/taskforce/session/start.
 

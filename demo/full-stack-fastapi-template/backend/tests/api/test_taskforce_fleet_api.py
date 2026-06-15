@@ -340,6 +340,54 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
     assert agent["summary_markdown"] == "Implement the fleet session defaults"
 
 
+def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
+    client: TestClient,
+    db: Session,
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/heartbeat",
+        headers=headers,
+        json={
+            "session_id": "codex-startup-session",
+            "cwd": "/workspace/EnderAI",
+            "git_branch": "feature/codex-fleet",
+            "client": "codex",
+            "model_id": "gpt-5.4",
+            "source": "startup",
+        },
+    )
+    assert response.status_code == 204, response.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == "codex-startup-session",
+        )
+    ).one()
+    assert archive.client == "codex"
+    assert archive.model_id == "gpt-5.4"
+    assert archive.repo == "EnderAI"
+    assert archive.title is None
+    assert archive.fleet_session_id is not None
+
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet.status_code == 200, fleet.text
+    agents = [
+        agent for item in fleet.json()["fleet_sessions"] for agent in item["agents"]
+    ]
+    agent = next(
+        item for item in agents if item["session_id"] == "codex-startup-session"
+    )
+    assert agent["model_id"] == "gpt-5.4"
+    assert agent["summary_markdown"] == ""
+
+
 def test_new_fleet_sessions_are_auto_named(
     client: TestClient,
 ) -> None:

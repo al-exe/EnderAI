@@ -25,13 +25,17 @@ from app.core.metrics.queries import taskforce_session_savings
 from app.core.taskforce.active_sessions import (
     active_sessions_for_actor,
     get_active_sessions,
+    register_session_heartbeat,
 )
 from app.core.taskforce.discover import discover as run_discover
 from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     next_fleet_session_name,
 )
-from app.core.taskforce.installer import build_hook_installer
+from app.core.taskforce.installer import (
+    build_codex_hook_installer,
+    build_hook_installer,
+)
 from app.core.taskforce.observe import observe as run_observe
 from app.core.taskforce.session import session_start as run_session_start
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
@@ -62,6 +66,7 @@ from app.models import (
     TaskforceSessionActivityEntryPublic,
     TaskforceSessionActivityResponse,
     TaskforceSessionArchive,
+    TaskforceSessionHeartbeatRequest,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     TaskforceSessionSavingsResponse,
@@ -90,6 +95,20 @@ def install_taskforce_hooks() -> Response:
         headers={
             "Cache-Control": "public, max-age=300",
             "Content-Disposition": 'inline; filename="taskforce-install.sh"',
+        },
+    )
+
+
+@router.get("/install-codex.sh", include_in_schema=False)
+def install_taskforce_codex_hooks() -> Response:
+    """Serve the public, self-contained Codex hook installer."""
+
+    return Response(
+        content=build_codex_hook_installer(),
+        media_type="text/x-shellscript",
+        headers={
+            "Cache-Control": "public, max-age=300",
+            "Content-Disposition": 'inline; filename="taskforce-codex-install.sh"',
         },
     )
 
@@ -236,6 +255,28 @@ def reference_route(
         updated_document_ids=updated_document_ids,
         skipped_document_ids=skipped_document_ids,
     )
+
+
+@router.post("/session/heartbeat", status_code=204)
+def session_heartbeat_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceSessionHeartbeatRequest,
+) -> Response:
+    """Register a hook-driven session before its first user prompt."""
+
+    register_session_heartbeat(
+        session,
+        actor=current_user,
+        session_id=body.session_id,
+        demo=body.demo,
+        client=body.client,
+        cwd=body.cwd,
+        branch=body.git_branch,
+        model_id=body.model_id,
+    )
+    session.commit()
+    return Response(status_code=204)
 
 
 @router.post(
