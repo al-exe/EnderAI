@@ -114,6 +114,17 @@ def _summary_from_structured(request: TaskforceObserveRequest) -> SummarizerResu
     )
 
 
+def persist_session_archive_capture(session: Session) -> None:
+    """Commit ledger capture before slow observe work.
+
+    Stop/PostToolUse hooks time out at 15–30s while the haiku summarizer can
+    run longer. The route commits again at the end, but if the client aborts
+    mid-request the open transaction rolls back and the archive upsert is lost.
+    """
+
+    session.commit()
+
+
 async def observe(
     session: Session,
     *,
@@ -130,6 +141,10 @@ async def observe(
         demo=demo,
         document_id=request.active_document_id,
     )
+    # Persist transcript before the slow summarizer path. Hooks time out at
+    # 15s (PostToolUse) / 30s (Stop); client disconnect rolls back the route
+    # transaction — without this commit the ledger freezes at the last observe.
+    persist_session_archive_capture(session)
 
     materiality = assess_materiality(request)
     if not materiality.material:

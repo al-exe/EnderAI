@@ -72,3 +72,39 @@ def test_normalized_events_attach_command_output() -> None:
     command = next(event for event in events if event["kind"] == "command")
     assert command["cmd"] == "npx playwright test tests/fleet.spec.ts"
     assert command["output"] == "7 passed (12.2s)"
+    assert [event["kind"] for event in events] == ["prompt", "reply", "command"]
+
+
+def test_normalized_events_interleave_command_between_assistant_replies() -> None:
+    now = datetime(2026, 6, 15, 7, 0, tzinfo=timezone.utc)
+    events = _normalized_events(
+        _request(
+            transcript=[
+                TaskforceTranscriptTurn(role="user", content="can you run an echo?"),
+                TaskforceTranscriptTurn(role="assistant", content="Sure!"),
+                TaskforceTranscriptTurn(
+                    role="assistant",
+                    content="Worked. Want me to echo something else?",
+                ),
+                TaskforceTranscriptTurn(role="user", content="nah that's good. thanks!"),
+            ],
+            commands_run=[
+                TaskforceCommandRun(
+                    cmd='echo "Hello from EnderAI! Echo test successful."',
+                    exit_code=0,
+                    output="Hello from EnderAI! Echo test successful.",
+                )
+            ],
+        ),
+        now=now,
+    )
+
+    assert [event["kind"] for event in events] == [
+        "prompt",
+        "reply",
+        "command",
+        "reply",
+        "prompt",
+    ]
+    assert events[2]["cmd"].startswith('echo "Hello from EnderAI!')
+    assert events[2]["output"] == "Hello from EnderAI! Echo test successful."
