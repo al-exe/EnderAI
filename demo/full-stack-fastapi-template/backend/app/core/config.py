@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     BYOK_ENCRYPTION_KEY: str | None = None
     SEARCH_EMBEDDING_MODEL: str = "text-embedding-3-small"
     SEARCH_ANSWER_MODEL: str = "claude-sonnet-4-6"
+    # Keep provider failures from consuming the web worker. OpenAI SDK retries are
+    # disabled in the embedding client; the circuit breaker handles recovery.
+    SEARCH_EMBEDDING_MAX_CONCURRENCY: int = 2
+    SEARCH_EMBEDDING_TIMEOUT_SECONDS: float = 10.0
+    SEARCH_EMBEDDING_CIRCUIT_BREAKER_SECONDS: float = 60.0
     # Cron-sweep cadence for the embedding indexer (seconds between sweeps).
     SEARCH_INDEX_SWEEP_INTERVAL_SECONDS: int = 30
     SEARCH_INDEX_BATCH_SIZE: int = 50

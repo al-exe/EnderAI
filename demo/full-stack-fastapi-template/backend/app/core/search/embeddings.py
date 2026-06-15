@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -27,15 +28,19 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_embedding_slots = asyncio.Semaphore(max(1, settings.SEARCH_EMBEDDING_MAX_CONCURRENCY))
+_circuit_open_until = 0.0
+_circuit_reason: str | None = None
+
 
 class EmbeddingsUnavailableError(RuntimeError):
-    """Raised when ``settings.OPENAI_API_KEY`` is missing.
+    """Raised when embedding generation cannot currently serve a request.
 
     Search endpoints catch this and return 503 with a clear message;
     indexer catches it and skips the sweep iteration."""
 
 
-def _client() -> "AsyncOpenAI":
+def _client() -> AsyncOpenAI:
     if not settings.OPENAI_API_KEY:
         raise EmbeddingsUnavailableError(
             "OPENAI_API_KEY is not configured; embedding generation is disabled."
@@ -43,7 +48,33 @@ def _client() -> "AsyncOpenAI":
     # Imported lazily — see TYPE_CHECKING block above for why.
     from openai import AsyncOpenAI as _AsyncOpenAI
 
-    return _AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return _AsyncOpenAI(
+        api_key=settings.OPENAI_API_KEY,
+        max_retries=0,
+        timeout=max(1.0, settings.SEARCH_EMBEDDING_TIMEOUT_SECONDS),
+    )
+
+
+def _circuit_error() -> EmbeddingsUnavailableError | None:
+    remaining = _circuit_open_until - time.monotonic()
+    if remaining <= 0:
+        return None
+    reason = f" after {_circuit_reason}" if _circuit_reason else ""
+    return EmbeddingsUnavailableError(
+        "Embedding provider is temporarily unavailable"
+        f"{reason}; retry in {max(1, int(remaining))} seconds."
+    )
+
+
+def _open_circuit(error: Exception) -> None:
+    global _circuit_open_until, _circuit_reason
+
+    cooldown = max(1.0, settings.SEARCH_EMBEDDING_CIRCUIT_BREAKER_SECONDS)
+    _circuit_open_until = time.monotonic() + cooldown
+    status_code = getattr(error, "status_code", None)
+    _circuit_reason = (
+        f"provider HTTP {status_code}" if status_code else "a provider error"
+    )
 
 
 async def embed_batch(texts: Iterable[str]) -> list[list[float]]:
@@ -54,16 +85,43 @@ async def embed_batch(texts: Iterable[str]) -> list[list[float]]:
     request so callers can batch up to ~100 chunks per call without
     rate-limit ping-pong."""
 
-    payload = [t for t in texts]
+    payload = list(texts)
     if not payload:
         return []
-    client = _client()
-    # The OpenAI Python SDK retries 429 / 5xx with exponential backoff
-    # by default — no extra wrapping needed for transient errors.
-    resp = await client.embeddings.create(
-        model=settings.SEARCH_EMBEDDING_MODEL,
-        input=payload,
-    )
+    circuit_error = _circuit_error()
+    if circuit_error is not None:
+        raise circuit_error
+
+    # Import only when embeddings are used so FastAPI startup stays lightweight.
+    from openai import APIError
+
+    async with _embedding_slots:
+        # Requests may have queued before another request opened the circuit.
+        circuit_error = _circuit_error()
+        if circuit_error is not None:
+            raise circuit_error
+
+        client = _client()
+        try:
+            # SDK retries are disabled in _client(). A quota failure must not park
+            # the web worker in exponential backoff while more calls queue behind it.
+            resp = await client.embeddings.create(
+                model=settings.SEARCH_EMBEDDING_MODEL,
+                input=payload,
+            )
+        except APIError as error:
+            _open_circuit(error)
+            log.warning(
+                "Embedding provider failed; circuit opened for %ss: %s",
+                max(1.0, settings.SEARCH_EMBEDDING_CIRCUIT_BREAKER_SECONDS),
+                error,
+            )
+            raise EmbeddingsUnavailableError(
+                "Embedding provider is temporarily unavailable."
+            ) from error
+        finally:
+            await client.close()
+
     return [item.embedding for item in resp.data]
 
 
