@@ -11,7 +11,10 @@ from typing import Any
 from sqlalchemy import String, func
 from sqlmodel import Session, col, select
 
-from app.core.taskforce.fleet_sessions import get_or_create_default_fleet_session
+from app.core.taskforce.fleet_sessions import (
+    get_or_create_default_fleet_session,
+    move_archive_to_history,
+)
 from app.models import (
     MetricsEvent,
     TaskforceObserveRequest,
@@ -91,6 +94,8 @@ def upsert_session_archive_from_observe(
     archive.ended_at = (
         now if request.kind in ("final", "session_end") else archive.ended_at
     )
+    if archive.ended_at is not None:
+        move_archive_to_history(session, archive, actor, now=now)
     archive.last_seen_at = now
     archive.active_document_id = (
         document_id or request.active_document_id or archive.active_document_id
