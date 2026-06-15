@@ -578,13 +578,25 @@ printf '202'
 
     body = json.loads(capture_file.read_text())
     assert body["transcript"] == [
-        {"role": "user", "content": "merge"},
-        {"role": "assistant", "content": "Harness issue, not code."},
+        {
+            "role": "user",
+            "content": "merge",
+            "source_id": None,
+            "occurred_at": None,
+        },
+        {
+            "role": "assistant",
+            "content": "Harness issue, not code.",
+            "source_id": None,
+            "occurred_at": None,
+        },
     ]
     assert body["commands_run"] == [
         {
             "cmd": "echo hi",
             "exit_code": None,
+            "source_id": "toolu_test",
+            "occurred_at": None,
             "output": "Error: No tests found.",
         }
     ]

@@ -16,6 +16,7 @@
 [
   $all[]
   | select(.message?.content?[]? | (.type == "tool_use" and .name == "Bash"))
+  | . as $turn
   | .message.content[]
   | select(.type == "tool_use" and .name == "Bash")
   | {
@@ -24,8 +25,10 @@
         | if length > 2000 then .[:1997] + "..." else . end
       ),
       exit_code: null,
+      source_id: (.id // null),
+      occurred_at: ($turn.timestamp // null),
       output: (
-        $results[.id] // null
+        (if (.id // "") == "" then null else $results[.id] end)
         | if . == null then null elif length > 4000 then .[:3997] + "..." else . end
       )
     }

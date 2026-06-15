@@ -15,15 +15,17 @@ from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     move_archive_to_history,
 )
+from app.core.taskforce.session_activity import (
+    ingest_observe_events,
+    normalized_session_events,
+)
 from app.models import (
     MetricsEvent,
-    TaskforceCommandRun,
     TaskforceObserveRequest,
     TaskforceSessionArchive,
     User,
 )
 
-_MAX_EVENT_TEXT = 4000
 _MAX_TITLE = 255
 
 
@@ -68,11 +70,6 @@ def upsert_session_archive_from_observe(
         ).id
 
     started_at = _started_at(now, request.duration_ms)
-    events = _normalized_events(request, now=now)
-    raw_transcript = [
-        {"role": turn.role, "content": turn.content[:_MAX_EVENT_TEXT]}
-        for turn in request.transcript
-    ]
     referenced_ids = _referenced_document_ids(
         existing=archive.referenced_document_ids,
         request=request,
@@ -113,10 +110,6 @@ def upsert_session_archive_from_observe(
         archive.output_tokens = request.harness.total_output_tokens
         archive.cache_read_tokens = request.harness.total_cache_read_tokens
         archive.cache_write_tokens = request.harness.total_cache_write_tokens
-    if events:
-        archive.transcript_events = events
-    if raw_transcript:
-        archive.raw_transcript = raw_transcript
     archive.referenced_document_ids = referenced_ids
     archive.source_metadata = {
         **(archive.source_metadata or {}),
@@ -135,6 +128,14 @@ def upsert_session_archive_from_observe(
     }
     archive.updated_at = now
     session.add(archive)
+    ingest_observe_events(
+        session,
+        actor=actor,
+        request=request,
+        demo=demo,
+        fleet_session_id=archive.fleet_session_id,
+        now=now,
+    )
     return archive
 
 
@@ -190,97 +191,22 @@ def _referenced_document_ids(
     return deduped[:50]
 
 
-def _command_event(
-    command: TaskforceCommandRun,
-    *,
-    now: datetime,
-    cwd: str | None,
-) -> dict[str, Any]:
-    return {
-        "kind": "command",
-        "occurred_at": now.isoformat(),
-        "cmd": command.cmd[:2000],
-        "exit_code": command.exit_code,
-        "output": (
-            command.output[:_MAX_EVENT_TEXT] if command.output else None
-        ),
-        "repo": _repo_from_cwd(cwd),
-    }
-
-
 def _normalized_events(
     request: TaskforceObserveRequest,
     *,
     now: datetime,
 ) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    pending_commands = list(request.commands_run)
+    """Compatibility helper for normalization unit tests and callers."""
 
-    def flush_commands() -> None:
-        while pending_commands:
-            events.append(
-                _command_event(pending_commands.pop(0), now=now, cwd=request.cwd)
-            )
-
-    for turn in request.transcript:
-        role = (turn.role or "").lower()
-        if role in {"tool", "tool_result"}:
-            continue
-        content = (turn.content or "").strip()
-        if not content:
-            continue
-        kind = "prompt" if role in {"user", "human"} else "reply"
-        if kind == "reply" and events and events[-1]["kind"] == "reply":
-            # Bash runs between back-to-back assistant text turns: acknowledgement,
-            # then tool execution, then follow-up ("Sure!" → echo → "Worked.").
-            flush_commands()
-        events.append(
-            {
-                "kind": kind,
-                "occurred_at": now.isoformat(),
-                "role": turn.role,
-                "who": "@user" if kind == "prompt" else "@agent",
-                "text": content[:_MAX_EVENT_TEXT],
-            }
-        )
-
-    if request.prompt and not any(event["kind"] == "prompt" for event in events):
-        events.insert(
-            0,
-            {
-                "kind": "prompt",
-                "occurred_at": now.isoformat(),
-                "role": "user",
-                "who": "@user",
-                "text": request.prompt[:_MAX_EVENT_TEXT],
-            },
-        )
-
-    flush_commands()
-
-    for file_name in request.files_touched:
-        events.append(
-            {
-                "kind": "edit",
-                "occurred_at": now.isoformat(),
-                "file": file_name[:1024],
-                "note": (request.diff_summary or "")[:_MAX_EVENT_TEXT] or None,
-            }
-        )
-
-    if request.kind in ("final", "session_end"):
-        note = "Session ended"
-        if request.outcome:
-            note = f"{note} · {request.outcome}"
-        events.append(
-            {
-                "kind": "note",
-                "occurred_at": now.isoformat(),
-                "text": note,
-            }
-        )
-
-    return events[:200]
+    events = normalized_session_events(request, now=now)
+    return [
+        {
+            key: value.isoformat() if isinstance(value, datetime) else value
+            for key, value in event.items()
+            if key != "source_event_id"
+        }
+        for event in events
+    ]
 
 
 # ---- backfill (TF-218) ----------------------------------------------------
@@ -289,9 +215,8 @@ def _normalized_events(
 # list (metrics-driven) and the detail endpoint falls back to an empty
 # transcript, but the list shows a null title/client because those come from
 # the archive. This backfill creates best-effort archive rows from the metrics
-# payload so old sessions get a readable title + provenance — without
-# fabricating a transcript (``raw_transcript`` stays empty, so detail honestly
-# reports ``raw_transcript_available = false``).
+# payload so old sessions get a readable title + provenance without fabricating
+# canonical session events.
 
 _SESSION_ID = MetricsEvent.payload["session_id"].astext
 _PROMPT = MetricsEvent.payload["prompt"].astext

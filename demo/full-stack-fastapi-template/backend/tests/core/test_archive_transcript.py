@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.core.taskforce.archive import _normalized_events
-from app.models import TaskforceCommandRun, TaskforceObserveRequest, TaskforceTranscriptTurn
+from app.models import (
+    TaskforceCommandRun,
+    TaskforceObserveRequest,
+    TaskforceTranscriptTurn,
+)
 
 
 def _request(

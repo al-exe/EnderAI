@@ -290,10 +290,14 @@ def test_ledger_archive_fields_and_detail_endpoint(
     assert raw.status_code == 200, raw.text
     raw_body = raw.json()
     assert raw_body["session_id"] == "ledger-archive-detail-test"
-    assert raw_body["events"] == [
-        {"role": "user", "content": "Implement archive-backed ledger"},
-        {"role": "assistant", "content": "Added the read model"},
+    assert [
+        (event["role"], event["content"]) for event in raw_body["events"]
+    ] == [
+        ("user", "Implement archive-backed ledger"),
+        ("assistant", "Added the read model"),
     ]
+    assert all(event["id"] for event in raw_body["events"])
+    assert all(event["occurred_at"] for event in raw_body["events"])
 
     _, outsider_headers = _signup(client)
     forbidden = client.get(
@@ -303,7 +307,7 @@ def test_ledger_archive_fields_and_detail_endpoint(
     assert forbidden.status_code == 404, forbidden.text
 
 
-def test_ledger_detail_falls_back_for_metrics_only_session(
+def test_ledger_detail_uses_discover_prompt_when_observe_is_missing(
     client: TestClient,
     db: Session,
 ) -> None:
@@ -317,11 +321,11 @@ def test_ledger_detail_falls_back_for_metrics_only_session(
     assert detail.status_code == 200, detail.text
     body = detail.json()
     assert body["session_id"] == row["session_id"]
-    assert body["transcript_events"] == []
-    assert body["raw_transcript_available"] is False
+    assert [event["kind"] for event in body["transcript_events"]] == ["prompt"]
+    assert body["raw_transcript_available"] is True
 
     raw = client.get(
         f"{_LEDGER}/{row['session_id']}/raw-transcript",
         headers=bob_headers,
     )
-    assert raw.status_code == 404, raw.text
+    assert raw.status_code == 200, raw.text

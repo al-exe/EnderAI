@@ -9,10 +9,10 @@ writes a readable title + provenance, stays org/demo scoped, and is idempotent.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.core.taskforce.archive import backfill_session_archives
-from app.models import TaskforceSessionArchive
+from app.models import TaskforceSessionArchive, TaskforceSessionEvent
 from tests.api.test_taskforce_ledger import _alice_doc_bob_reuse
 
 
@@ -26,11 +26,26 @@ def _archive_count(db: Session, org_id) -> int:
     )
 
 
+def _remove_session_read_models(db: Session, org_id) -> None:
+    db.exec(
+        delete(TaskforceSessionEvent).where(
+            TaskforceSessionEvent.organization_id == org_id
+        )
+    )
+    db.exec(
+        delete(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.organization_id == org_id
+        )
+    )
+    db.commit()
+
+
 def test_backfill_dry_run_writes_nothing(client: TestClient, db: Session) -> None:
     _, _, bob_email, _, _ = _alice_doc_bob_reuse(client, db)
     from tests.api.test_taskforce_api import _user_by_email
 
     org_id = _user_by_email(db, bob_email).organization_id
+    _remove_session_read_models(db, org_id)
     before = _archive_count(db, org_id)
 
     report = backfill_session_archives(db, organization_id=org_id, dry_run=True)
@@ -47,6 +62,7 @@ def test_backfill_creates_archive_with_title_and_provenance(
 
     _, _, bob_email, _, _ = _alice_doc_bob_reuse(client, db)
     org_id = _user_by_email(db, bob_email).organization_id
+    _remove_session_read_models(db, org_id)
 
     report = backfill_session_archives(db, organization_id=org_id, dry_run=False)
     db.commit()
@@ -63,9 +79,11 @@ def test_backfill_creates_archive_with_title_and_provenance(
     assert a.client == "claude-code"  # provenance carried from payload
     assert a.started_at is not None and a.ended_at is not None
     assert a.source_metadata.get("backfilled") is True
-    # backfill must NOT fabricate a transcript
-    assert a.raw_transcript == []
-    assert a.transcript_events == []
+    assert db.exec(
+        select(TaskforceSessionEvent).where(
+            TaskforceSessionEvent.session_id == a.session_id
+        )
+    ).all() == []
 
 
 def test_backfill_is_idempotent(client: TestClient, db: Session) -> None:
@@ -73,6 +91,7 @@ def test_backfill_is_idempotent(client: TestClient, db: Session) -> None:
 
     _, _, bob_email, _, _ = _alice_doc_bob_reuse(client, db)
     org_id = _user_by_email(db, bob_email).organization_id
+    _remove_session_read_models(db, org_id)
 
     first = backfill_session_archives(db, organization_id=org_id, dry_run=False)
     db.commit()
@@ -91,6 +110,7 @@ def test_backfill_scopes_to_org(client: TestClient, db: Session) -> None:
 
     _, _, bob_email, _, _ = _alice_doc_bob_reuse(client, db)
     org_id = _user_by_email(db, bob_email).organization_id
+    _remove_session_read_models(db, org_id)
 
     # An unrelated solo user with their own session in a different org.
     _outsider_email, outsider_headers = _signup(client)

@@ -1529,14 +1529,6 @@ class TaskforceSessionArchive(SQLModel, table=True):
         default_factory=list,
         sa_type=JSONB,  # type: ignore
     )
-    transcript_events: list[dict[str, Any]] = Field(
-        default_factory=list,
-        sa_type=JSONB,  # type: ignore
-    )
-    raw_transcript: list[dict[str, Any]] = Field(
-        default_factory=list,
-        sa_type=JSONB,  # type: ignore
-    )
     source_metadata: dict[str, Any] = Field(
         default_factory=dict,
         sa_type=JSONB,  # type: ignore
@@ -1581,22 +1573,19 @@ class TaskforceFleetSession(SQLModel, table=True):
     )
 
 
-class TaskforceSessionActivity(SQLModel, table=True):
-    """Append-only per-turn activity log for the Fleet timeline (TF-247).
+class TaskforceSessionEvent(SQLModel, table=True):
+    """Canonical append-only event stream shared by Fleet and Ledger."""
 
-    One row per user prompt as it arrives on ``/discover`` ("working on" as it
-    came in). ``response_summary`` is filled in by the following ``/observe`` so
-    each row reads as a single turn — the ask, then a summary of what the agent
-    did. The Fleet agent-session detail renders these newest-first; each row
-    deep-links to the Ledger line that backs it.
-
-    Unlike ``TaskforceSessionArchive.title`` / ``transcript_events`` (both
-    overwritten every request), this table is never mutated in place beyond the
-    one-shot ``response_summary`` backfill, so it is the durable history the
-    timeline needs.
-    """
-
-    __tablename__ = "taskforce_session_activity"
+    __tablename__ = "taskforce_session_event"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_id",
+            "is_demo",
+            "session_id",
+            "source_event_id",
+            name="uq_taskforce_session_event_source",
+        ),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     session_id: str = Field(min_length=1, max_length=128, index=True)
@@ -1619,8 +1608,20 @@ class TaskforceSessionActivity(SQLModel, table=True):
         ondelete="SET NULL",
     )
     is_demo: bool = Field(default=False, nullable=False, index=True)
-    prompt: str = Field(max_length=255)
-    response_summary: str | None = Field(default=None, max_length=2000)
+    source_event_id: str = Field(min_length=1, max_length=255)
+    source_order: int = Field(default=0)
+    kind: str = Field(min_length=1, max_length=16, index=True)
+    role: str | None = Field(default=None, max_length=32)
+    who: str | None = Field(default=None, max_length=120)
+    text: str | None = Field(default=None, max_length=4000)
+    cmd: str | None = Field(default=None, max_length=2000)
+    exit_code: int | None = None
+    output: str | None = Field(default=None, max_length=4000)
+    file: str | None = Field(default=None, max_length=1024)
+    added: int | None = None
+    removed: int | None = None
+    note: str | None = Field(default=None, max_length=4000)
+    repo: str | None = Field(default=None, max_length=255)
     occurred_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -1803,27 +1804,31 @@ class TaskforceSessionLogResponse(SQLModel):
     entries: list[TaskforceSessionLogEntry]
 
 
-class TaskforceSessionActivityEntryPublic(SQLModel):
-    """One turn in the Fleet activity timeline (TF-247).
-
-    ``prompt`` is the user's "working on" line for the turn; ``response_summary``
-    is a short summary of what the agent did (null until the turn's ``/observe``
-    lands). ``ledger_href`` deep-links to the Ledger session that backs this turn,
-    and is null when the Ledger is unavailable (the viewer has no organization).
-    """
+class TaskforceSessionEventPublic(SQLModel):
+    """One canonical session event rendered by the owner-scoped Fleet view."""
 
     id: uuid.UUID
-    occurred_at: datetime
-    prompt: str
-    response_summary: str | None = None
+    kind: Literal["prompt", "reply", "command", "edit", "note"]
+    occurred_at: datetime | None = None
+    role: str | None = None
+    who: str | None = None
+    text: str | None = None
+    cmd: str | None = None
+    exit_code: int | None = None
+    output: str | None = None
+    file: str | None = None
+    added: int | None = None
+    removed: int | None = None
+    note: str | None = None
+    repo: str | None = None
     ledger_href: str | None = None
 
 
 class TaskforceSessionActivityResponse(SQLModel):
-    """Response from GET /v2/taskforce/session-activity?session_id=…"""
+    """Compatibility response for the canonical owner-scoped event stream."""
 
     session_id: str
-    entries: list[TaskforceSessionActivityEntryPublic] = Field(default_factory=list)
+    entries: list[TaskforceSessionEventPublic] = Field(default_factory=list)
 
 
 class TaskforceFleetAgentPublic(SQLModel):
@@ -1909,6 +1914,7 @@ class LedgerDocRefPublic(SQLModel):
 class LedgerTranscriptEventPublic(SQLModel):
     """One normalized transcript event in a Ledger session detail."""
 
+    id: uuid.UUID
     kind: Literal["prompt", "reply", "command", "edit", "note"]
     occurred_at: datetime | None = None
     role: str | None = None
@@ -2018,6 +2024,8 @@ class TaskforceTranscriptTurn(SQLModel):
 
     role: str
     content: str
+    source_id: str | None = Field(default=None, max_length=255)
+    occurred_at: datetime | None = None
 
 
 class TaskforceHarnessUsage(SQLModel):
@@ -2041,6 +2049,8 @@ class TaskforceCommandRun(SQLModel):
     cmd: str = Field(min_length=1, max_length=2000)
     exit_code: int | None = None
     output: str | None = Field(default=None, max_length=4000)
+    source_id: str | None = Field(default=None, max_length=255)
+    occurred_at: datetime | None = None
 
 
 class TaskforceDetailsSectionInput(SQLModel):

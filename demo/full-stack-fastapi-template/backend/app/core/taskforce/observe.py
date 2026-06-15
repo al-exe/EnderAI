@@ -33,7 +33,6 @@ from app.core.config import settings
 from app.core.metrics.events import _build_event, _now
 from app.core.taskforce.archive import upsert_session_archive_from_observe
 from app.core.taskforce.materiality import assess_materiality
-from app.core.taskforce.session_activity import attach_response_summary
 from app.core.taskforce.summarizer import (
     PROMPT_VERSION,
     SUMMARIZER_MODEL,
@@ -215,21 +214,6 @@ async def observe(
             transcript=request.transcript,
             prompt=request.prompt,
             api_key=api_key,
-        )
-
-    # Backfill the agent's response summary onto the current turn's activity
-    # row (TF-247). Independent of shadow mode / doc patching — the timeline is
-    # its own surface. No-ops if no prompt row exists for this session yet.
-    activity_summary = " ".join(summary.summary_points).strip() or (
-        summary.outcome or ""
-    )
-    if activity_summary:
-        attach_response_summary(
-            session,
-            actor=actor,
-            session_id=request.session_id,
-            summary=activity_summary,
-            demo=demo,
         )
 
     summarizer_event = _record_summarizer_consumption(
