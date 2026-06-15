@@ -26,6 +26,7 @@ from sqlalchemy import desc
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
+from app.core.taskforce.conversation_summary import summarize_opening_prompt
 from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     history_fleet_session_for_actor,
@@ -140,6 +141,8 @@ def register_session_heartbeat(
         ).id
     if prompt.strip():
         archive.title = " ".join(prompt.split())[:255]
+        if archive.conversation_summary is None:
+            archive.conversation_summary = summarize_opening_prompt(prompt)
 
     archive.last_seen_at = now
     archive.updated_at = now
@@ -280,6 +283,31 @@ def _minutes_ago(now: datetime, value: datetime) -> int:
     )
 
 
+def _model_label(model_id: str | None) -> str | None:
+    if not model_id:
+        return None
+    family, *rest = model_id.removeprefix("claude-").split("-", 1)
+    if not family:
+        return None
+    name = "GPT" if family.lower() == "gpt" else family.capitalize()
+    version = rest[0].replace("-", ".") if rest else ""
+    return f"{name} {version}".strip()
+
+
+def _repo_label(archive: TaskforceSessionArchive) -> str:
+    cwd_parts = (archive.cwd or "").split("/")
+    cwd_parts = [part for part in cwd_parts if part]
+    return archive.repo or (cwd_parts[-1] if cwd_parts else "Unknown repo")
+
+
+def _fleet_display_name(archive: TaskforceSessionArchive) -> str:
+    if archive.display_name:
+        return archive.display_name
+    if archive.conversation_summary:
+        return archive.conversation_summary
+    return _model_label(archive.model_id) or _repo_label(archive)
+
+
 def _fleet_status(minutes_ago: int) -> str:
     return (
         "running"
@@ -391,11 +419,8 @@ def _fleet_agent_public_from_archive(
                 repo=archive.repo,
                 active_document_id=active_document_id,
                 referenced_document_ids=referenced,
-                title=(
-                    active_document.title
-                    if active_document is not None
-                    else archive.title
-                ),
+                display_name=_fleet_display_name(archive),
+                title=active_document.title if active_document is not None else None,
                 summary_markdown=(
                     (
                         active_document.ai_generated_summary
@@ -403,7 +428,7 @@ def _fleet_agent_public_from_archive(
                         or ""
                     )
                     if active_document is not None
-                    else (archive.title or "")
+                    else ""
                 ),
                 last_seen_at=last_seen_at,
                 minutes_ago=minutes_ago,

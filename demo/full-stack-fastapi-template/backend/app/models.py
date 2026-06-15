@@ -1489,6 +1489,8 @@ class TaskforceSessionArchive(SQLModel, table=True):
     branch: str | None = Field(default=None, max_length=255)
     cwd: str | None = Field(default=None, max_length=1024)
     title: str | None = Field(default=None, max_length=255)
+    conversation_summary: str | None = Field(default=None, max_length=120)
+    display_name: str | None = Field(default=None, max_length=120)
     started_at: datetime | None = Field(
         default=None,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -1834,6 +1836,7 @@ class TaskforceFleetAgentPublic(SQLModel):
     repo: str | None = None
     active_document_id: uuid.UUID | None = None
     referenced_document_ids: list[uuid.UUID] = Field(default_factory=list)
+    display_name: str
     title: str | None = None
     summary_markdown: str = ""
     last_seen_at: datetime
@@ -1854,7 +1857,8 @@ class TaskforceFleetSessionUpdate(SQLModel):
 
 
 class TaskforceFleetSessionAssignment(SQLModel):
-    fleet_session_id: uuid.UUID
+    fleet_session_id: uuid.UUID | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class TaskforceFleetSessionPublic(SQLModel):
