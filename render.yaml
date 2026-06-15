@@ -42,6 +42,16 @@ services:
     region: oregon
     healthCheckPath: /api/v1/utils/health-check/
     autoDeploy: true
+    # Run DB migrations BEFORE the new instance is rolled in, so heavy or
+    # lock-contended DDL doesn't run inside the web process while Render is
+    # port-scanning. A migration that outran the port-scan window used to
+    # time the deploy out ("No open ports detected"). entrypoint.sh still
+    # runs `alembic upgrade head` too, but by the time it does the DB is
+    # already at head, so that call is a fast no-op that doesn't delay the
+    # port bind. If the blueprint isn't synced, the entrypoint remains the
+    # sole migrator (no regression). Needs PYTHONPATH + cwd because
+    # alembic.ini's script_location is relative and env.py imports `app`.
+    preDeployCommand: "cd /app/backend && PYTHONPATH=/app/backend alembic upgrade head"
     envVars:
       # Runtime / deploy config — owned by the dashboard so the
       # taskforce.tools cutover can flip CORS + FRONTEND_HOST without
