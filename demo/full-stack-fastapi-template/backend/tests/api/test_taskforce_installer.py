@@ -8,14 +8,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from app.core.taskforce.installer import CODEX_HOOKS, HOOKS, JQ_FILES
+from app.core.taskforce.installer import CODEX_HOOKS, CURSOR_HOOKS, HOOKS, JQ_FILES
 from app.main import app
 
 INSTALLER_URL = f"{settings.API_V1_STR}/v2/taskforce/install.sh"
 CODEX_INSTALLER_URL = f"{settings.API_V1_STR}/v2/taskforce/install-codex.sh"
+CURSOR_INSTALLER_URL = f"{settings.API_V1_STR}/v2/taskforce/install-cursor.sh"
 REPO_ROOT = Path(__file__).resolve().parents[5]
 CANONICAL_HOOK_DIR = REPO_ROOT / "scripts" / "taskforce-hooks"
 CANONICAL_CODEX_HOOK_DIR = REPO_ROOT / "scripts" / "taskforce-codex-hooks"
+CANONICAL_CURSOR_HOOK_DIR = REPO_ROOT / "scripts" / "taskforce-cursor-hooks"
 PACKAGED_HOOK_DIR = (
     REPO_ROOT
     / "demo"
@@ -33,6 +35,15 @@ PACKAGED_CODEX_HOOK_DIR = (
     / "app"
     / "assets"
     / "taskforce-codex-hooks"
+)
+PACKAGED_CURSOR_HOOK_DIR = (
+    REPO_ROOT
+    / "demo"
+    / "full-stack-fastapi-template"
+    / "backend"
+    / "app"
+    / "assets"
+    / "taskforce-cursor-hooks"
 )
 
 
@@ -57,6 +68,20 @@ def test_packaged_codex_hook_matches_canonical_source(source_name: str) -> None:
     ).read_bytes()
 
 
+@pytest.mark.parametrize("source_name", [hook[0] for hook in CURSOR_HOOKS])
+def test_packaged_cursor_hook_matches_canonical_source(source_name: str) -> None:
+    assert (PACKAGED_CURSOR_HOOK_DIR / source_name).read_bytes() == (
+        CANONICAL_CURSOR_HOOK_DIR / source_name
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("source_name", [jq[0] for jq in JQ_FILES])
+def test_packaged_cursor_jq_matches_canonical_source(source_name: str) -> None:
+    assert (PACKAGED_CURSOR_HOOK_DIR / source_name).read_bytes() == (
+        CANONICAL_CURSOR_HOOK_DIR / source_name
+    ).read_bytes()
+
+
 def get_installer_response():
     with TestClient(app) as client:
         return client.get(INSTALLER_URL)
@@ -65,6 +90,11 @@ def get_installer_response():
 def get_codex_installer_response():
     with TestClient(app) as client:
         return client.get(CODEX_INSTALLER_URL)
+
+
+def get_cursor_installer_response():
+    with TestClient(app) as client:
+        return client.get(CURSOR_INSTALLER_URL)
 
 
 def test_installer_is_public_and_has_no_private_repo_dependency() -> None:
@@ -97,6 +127,172 @@ def test_codex_installer_is_public_and_self_contained() -> None:
         assert matcher in response.text
         assert str(timeout) in response.text
     assert "run /hooks" in response.text
+
+
+def test_cursor_installer_is_public_and_self_contained() -> None:
+    response = get_cursor_installer_response()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/x-shellscript")
+    assert "raw.githubusercontent.com" not in response.text
+    for source_name, target_name, hook_name, timeout, _ in CURSOR_HOOKS:
+        assert f"scripts/taskforce-cursor-hooks/{source_name}" in response.text
+        assert f"$HOOK_DIR/{target_name}" in response.text
+        assert f"merge_hook {hook_name}" in response.text
+        assert str(timeout) in response.text
+    for source_name, target_name, _ in JQ_FILES:
+        assert f"scripts/taskforce-cursor-hooks/{source_name}" in response.text
+        assert f"$HOOK_DIR/{target_name}" in response.text
+    assert "Settings -> Hooks" in response.text
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_cursor_installer_is_idempotent_and_preserves_existing_hooks(
+    tmp_path: Path,
+) -> None:
+    response = get_cursor_installer_response()
+    home = tmp_path / "home"
+    cursor_dir = home / ".cursor"
+    cursor_dir.mkdir(parents=True)
+    hooks_file = cursor_dir / "hooks.json"
+    external_command = "./hooks/existing-session-start.sh"
+    hooks_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "hooks": {
+                    "sessionStart": [
+                        {"command": external_command, "timeout": 3},
+                    ]
+                },
+            }
+        )
+    )
+
+    env = {**os.environ, "HOME": str(home)}
+    for _ in range(2):
+        subprocess.run(
+            ["bash"],
+            input=response.text,
+            text=True,
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+
+    hooks = json.loads(hooks_file.read_text())["hooks"]
+    assert hooks["sessionStart"][0]["command"] == external_command
+    for source_name, target_name, hook_name, timeout, _ in CURSOR_HOOKS:
+        installed_path = cursor_dir / "hooks" / target_name
+        assert (
+            installed_path.read_bytes()
+            == (CANONICAL_CURSOR_HOOK_DIR / source_name).read_bytes()
+        )
+        matching = [
+            hook
+            for hook in hooks[hook_name]
+            if hook["command"] == f"./hooks/{target_name}"
+        ]
+        assert matching == [{"command": f"./hooks/{target_name}", "timeout": timeout}]
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_cursor_hooks_register_session_and_discover(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    capture_file = tmp_path / "payload.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+output_file=""
+while (($#)); do
+    case "$1" in
+        --data)
+            shift
+            printf '%s' "$1" > "$CAPTURE_FILE"
+            ;;
+        -o)
+            shift
+            output_file="$1"
+            ;;
+    esac
+    shift
+done
+if [[ "$output_file" != "/dev/null" && "$output_file" != "" ]]; then
+    printf '%s' "$CURL_RESPONSE" > "$output_file"
+    printf '200'
+else
+    printf '204'
+fi
+"""
+    )
+    curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE_FILE": str(capture_file),
+        "CURL_RESPONSE": json.dumps(
+            {
+                "matches": [
+                    {
+                        "title": "Prior decision",
+                        "score": 0.91,
+                        "confidence_band": "high",
+                        "summary_markdown": "Use the existing session archive.",
+                        "outcome": None,
+                    }
+                ],
+                "suggested_pin": "11111111-1111-1111-1111-111111111111",
+            }
+        ),
+    }
+
+    subprocess.run(
+        ["bash", str(CANONICAL_CURSOR_HOOK_DIR / "session-start.sh")],
+        input=json.dumps(
+            {
+                "session_id": "cursor-session-1",
+                "cwd": str(tmp_path),
+                "model": "composer-2.5",
+                "composer_mode": "agent",
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    heartbeat = json.loads(capture_file.read_text())
+    assert heartbeat["session_id"] == "cursor-session-1"
+    assert heartbeat["client"] == "cursor"
+    assert heartbeat["model_id"] == "composer-2.5"
+
+    prompt_result = subprocess.run(
+        ["bash", str(CANONICAL_CURSOR_HOOK_DIR / "before-submit-prompt.sh")],
+        input=json.dumps(
+            {
+                "session_id": "cursor-session-1",
+                "cwd": str(tmp_path),
+                "prompt": "Copy the Fleet behavior",
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    discover = json.loads(capture_file.read_text())
+    assert discover["session_id"] == "cursor-session-1"
+    assert discover["client"] == "cursor"
+    assert discover["prompt"] == "Copy the Fleet behavior"
+    assert json.loads(prompt_result.stdout) == {"continue": True}
+    assert (
+        home / ".taskforce" / "cursor-session-1.active"
+    ).read_text() == "11111111-1111-1111-1111-111111111111"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")

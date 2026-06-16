@@ -38,6 +38,7 @@ from app.core.taskforce.fleet_sessions import (
 )
 from app.core.taskforce.installer import (
     build_codex_hook_installer,
+    build_cursor_hook_installer,
     build_hook_installer,
 )
 from app.core.taskforce.observe import observe as run_observe
@@ -114,6 +115,20 @@ def install_taskforce_codex_hooks() -> Response:
         headers={
             "Cache-Control": "public, max-age=300",
             "Content-Disposition": 'inline; filename="taskforce-codex-install.sh"',
+        },
+    )
+
+
+@router.get("/install-cursor.sh", include_in_schema=False)
+def install_taskforce_cursor_hooks() -> Response:
+    """Serve the public, self-contained Cursor hook installer."""
+
+    return Response(
+        content=build_cursor_hook_installer(),
+        media_type="text/x-shellscript",
+        headers={
+            "Cache-Control": "public, max-age=300",
+            "Content-Disposition": 'inline; filename="taskforce-cursor-install.sh"',
         },
     )
 
