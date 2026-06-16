@@ -6,6 +6,9 @@ HOOK_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "taskforce-hoo
 CODEX_HOOK_ASSET_DIR = (
     Path(__file__).resolve().parents[2] / "assets" / "taskforce-codex-hooks"
 )
+CURSOR_HOOK_ASSET_DIR = (
+    Path(__file__).resolve().parents[2] / "assets" / "taskforce-cursor-hooks"
+)
 
 HOOKS = (
     (
@@ -61,6 +64,44 @@ CODEX_HOOKS = (
         "*",
         5,
         "TASKFORCE_CODEX_USER_PROMPT_SUBMIT_EOF",
+    ),
+)
+
+CURSOR_HOOKS = (
+    (
+        "session-start.sh",
+        "taskforce-session-start.sh",
+        "sessionStart",
+        10,
+        "TASKFORCE_CURSOR_SESSION_START_EOF",
+    ),
+    (
+        "before-submit-prompt.sh",
+        "taskforce-before-submit-prompt.sh",
+        "beforeSubmitPrompt",
+        5,
+        "TASKFORCE_CURSOR_BEFORE_SUBMIT_PROMPT_EOF",
+    ),
+    (
+        "post-tool-use.sh",
+        "taskforce-post-tool-use.sh",
+        "postToolUse",
+        15,
+        "TASKFORCE_CURSOR_POST_TOOL_USE_EOF",
+    ),
+    (
+        "stop.sh",
+        "taskforce-stop.sh",
+        "stop",
+        30,
+        "TASKFORCE_CURSOR_STOP_EOF",
+    ),
+    (
+        "session-end.sh",
+        "taskforce-session-end.sh",
+        "sessionEnd",
+        15,
+        "TASKFORCE_CURSOR_SESSION_END_EOF",
     ),
 )
 
@@ -260,6 +301,101 @@ def build_codex_hook_installer() -> str:
             'echo "Taskforce Codex hooks installed."',
             'echo "Restart Codex, run /hooks, and trust the Taskforce hooks."',
             'echo "Start one more Codex session after trusting them to activate Fleet registration."',
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_cursor_hook_installer() -> str:
+    """Return an installer for Taskforce's Cursor lifecycle hooks."""
+
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Public Taskforce Cursor hook installer.",
+        "# Hook sources mirror scripts/taskforce-cursor-hooks/ in the EnderAI repository.",
+        "",
+        "set -euo pipefail",
+        "",
+        'CURSOR_DIR="${HOME}/.cursor"',
+        'HOOK_DIR="${CURSOR_DIR}/hooks"',
+        'SETTINGS_FILE="${CURSOR_DIR}/hooks.json"',
+        "",
+        "if ! command -v jq >/dev/null 2>&1; then",
+        '    echo "ERROR: jq is required to install Taskforce hooks." >&2',
+        "    exit 1",
+        "fi",
+        "",
+        'mkdir -p "$HOOK_DIR" "${HOME}/.taskforce"',
+        "",
+    ]
+
+    for source_name, target_name, _, _, delimiter in CURSOR_HOOKS:
+        script = (CURSOR_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-cursor-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                f'chmod 0755 "$HOOK_DIR/{target_name}"',
+                "",
+            ]
+        )
+
+    for source_name, target_name, delimiter in JQ_FILES:
+        script = (CURSOR_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-cursor-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            'mkdir -p "$CURSOR_DIR"',
+            'if [[ ! -f "$SETTINGS_FILE" ]]; then',
+            '    echo \'{"version": 1, "hooks": {}}\' > "$SETTINGS_FILE"',
+            "fi",
+            "",
+            "merge_hook() {",
+            '    local hook_name="$1" command="$2" timeout="$3"',
+            "    local tmp_file",
+            '    tmp_file="$(mktemp)"',
+            '    jq --arg hook_name "$hook_name" --arg cmd "$command" '
+            '--argjson timeout "$timeout" \'',
+            "        .version = (.version // 1)",
+            "        | .hooks = (.hooks // {})",
+            "        | .hooks[$hook_name] = (.hooks[$hook_name] // [])",
+            "        | .hooks[$hook_name] |= (",
+            "            if (any(.[]; .command == $cmd)) then",
+            "                .",
+            "            else",
+            "                . + [{command: $cmd, timeout: $timeout}]",
+            "            end",
+            "        )",
+            '    \' "$SETTINGS_FILE" > "$tmp_file"',
+            '    mv "$tmp_file" "$SETTINGS_FILE"',
+            "}",
+            "",
+        ]
+    )
+
+    for _, target_name, hook_name, timeout, _ in CURSOR_HOOKS:
+        lines.append(
+            f'merge_hook {hook_name} "./hooks/{target_name}" {timeout}'
+        )
+
+    lines.extend(
+        [
+            "",
+            'echo "Taskforce Cursor hooks installed."',
+            'echo "Restart Cursor (or reload hooks from Settings -> Hooks) to activate."',
+            'echo "New Agent sessions will appear in Fleet after sessionStart fires."',
             "",
         ]
     )
