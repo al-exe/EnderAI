@@ -7,13 +7,45 @@ description: Explicit, visible Taskforce flow — discover prior work, do the ta
 
 You were invoked because the user typed `/tf` followed by a task description. Your job is to run the Taskforce flow **visibly** — every step the user sees should make it obvious that Taskforce is in the loop, distinct from your own reasoning.
 
-There are three wrapper scripts at `~/.claude/skills/tf/`:
+There are three wrapper scripts in this skill's directory — `~/.claude/skills/tf/` (Claude Code), `~/.cursor/skills-cursor/tf/` (Cursor), or `~/.codex/skills/tf/` (Codex). The skill and scripts are byte-identical across harnesses; only the install location differs.
 
 1. `tf-discover.sh` — POSTs `/v2/taskforce/session/start`, returns matched specialist + matched documents (with 3-line previews and full anchor content).
 2. `tf-reference.sh` — POSTs `/v2/taskforce/reference`, appends a "Referenced by:" row to the consulted documents.
 3. `tf-savings.sh` — GETs `/v2/taskforce/session-savings`, returns the net tokens / USD this session saved.
 
 All three return a single JSON envelope on stdout. They always exit 0; check `.ok` and degrade gracefully.
+
+## Beyond the demo flow — the live Taskforce surface
+
+The `/tf` beats below cover the **foreground demo** (discover → work → reference → savings). Beyond it, Taskforce runs a **passive telemetry + fleet layer** driven by the shell hooks your harness installed (`taskforce-hooks` for Claude Code, `taskforce-codex-hooks` for Codex, `taskforce-cursor-hooks` for Cursor) — **not** by anything you invoke. Those hooks call home on every prompt/tool-use, so an agent never sees them fire except for the `─── Related prior work ───` preamble the discover hook injects.
+
+**This means a cold-start agent has no pointer to the rest of the surface. Use this section as that pointer.** All endpoints are under `${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}/api/v1/v2/taskforce/` and authenticate with `Authorization: Bearer $(cat ~/.taskforce_mcp_token)` (the token path is shared across all three harnesses).
+
+### Seeing the rest of your fleet (the common ask)
+
+When the user asks *"what is the other agent doing"* / *"get the fleet"* / *"pull the shared context,"* they do **not** mean `/discover` (that's topical retrieval of *your own* docs and will echo your own recent prompts back at you). They mean the **roster**:
+
+```bash
+tok="$(tr -d '\r\n' < ~/.taskforce_mcp_token)"
+curl -sS --max-time 20 -H "Authorization: Bearer ${tok}" \
+  "https://enderai-backend.onrender.com/api/v1/v2/taskforce/fleet"
+```
+
+`GET /fleet` returns `{ fleet_sessions: [{ name, agents: [...] }], unassigned: [...] }`, each agent carrying its live `title`, `repo`, `git_branch`, `summary`, `specialist_slug`, and `last_seen_at`. **This is the literal "what is every sibling agent doing right now" call.** Drill deeper with `GET /session-log?session_id=…` (discover→match history) and `GET /session-activity?session_id=…` (per-turn timeline).
+
+### Full endpoint map
+
+| Group | Endpoints | Purpose |
+|---|---|---|
+| **Discover / work** (this skill) | `POST /discover`, `POST /session/start`, `POST /reference`, `GET /session-savings` | The `/tf` demo flow below. |
+| **Telemetry** (hooks, auto) | `POST /session/heartbeat`, `POST /observe`, `GET /active-sessions` | Presence + tool-use capture → writes `V2Document`s. You never call these by hand. |
+| **Fleet roster** | `GET /fleet`, `POST /fleet`, `PATCH /fleet/{id}`, `DELETE /fleet/{id}`, `PATCH /session/{session_id}` | Group/rename/assign live sessions. `GET /fleet` is read-only and safe. |
+| **Inspect a session** | `GET /session-log`, `GET /session-activity` | What a given agent discovered/reused and its per-turn activity. |
+| **ROI ledger** | `GET /ledger`, `GET /ledger/{session_id}`, `GET /ledger/{session_id}/raw-transcript`, `GET /documents/{id}/sessions` | Per-session savings rollup + transcript. |
+
+### What is *not* wired yet (don't promise it)
+
+Cross-agent sharing today is **pull-based and topical**: agent A writes a doc, agent B only gets it if B's *own* `/discover` prompt semantically matches it. There is **no push channel** — nothing injects a sibling's context into a running agent, and `/fleet` membership does **not** change what `/discover` returns. The **fleet knowledge bus** and **directive channel** (`docs/planning/taskforce-fleet-mission-control.md` + `taskforce-fleet-knowledge-bus.md`) that would make "pull from another agent" real are **designed but unshipped**. If a user remembers context "automatically" arriving from a sibling, that was topical `/discover` overlap, not a live handoff.
 
 ## Required output sequence
 
