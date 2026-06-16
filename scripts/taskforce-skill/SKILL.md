@@ -21,9 +21,11 @@ The `/tf` beats below cover the **foreground demo** (discover → work → refer
 
 **This means a cold-start agent has no pointer to the rest of the surface. Use this section as that pointer.** All endpoints are under `${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}/api/v1/v2/taskforce/` and authenticate with `Authorization: Bearer $(cat ~/.taskforce_mcp_token)` (the token path is shared across all three harnesses).
 
-### Seeing the rest of your fleet (the common ask)
+### Seeing the rest of your fleet (the common ask — a standing reflex, not just a /tf step)
 
-When the user asks *"what is the other agent doing"* / *"get the fleet"* / *"pull the shared context,"* they do **not** mean `/discover` (that's topical retrieval of *your own* docs and will echo your own recent prompts back at you). They mean the **roster**:
+This is an **always-on reflex**, not something gated behind `/tf`. Whenever the user asks *"what is the other agent doing"* / *"what are the other agents working on"* / *"get/pull the fleet"* / *"pull the shared context"* / *"who else is running"* — in any session — pull the roster **yourself, immediately, without asking first**.
+
+They do **not** mean `/discover` (that's topical retrieval of *your own* docs and will echo your own recent prompts back at you). They mean the **roster**:
 
 ```bash
 tok="$(tr -d '\r\n' < ~/.taskforce_mcp_token)"
@@ -31,7 +33,7 @@ curl -sS --max-time 20 -H "Authorization: Bearer ${tok}" \
   "https://enderai-backend.onrender.com/api/v1/v2/taskforce/fleet"
 ```
 
-`GET /fleet` returns `{ fleet_sessions: [{ name, agents: [...] }], unassigned: [...] }`, each agent carrying its live `title`, `repo`, `git_branch`, `summary`, `specialist_slug`, and `last_seen_at`. **This is the literal "what is every sibling agent doing right now" call.** Drill deeper with `GET /session-log?session_id=…` (discover→match history) and `GET /session-activity?session_id=…` (per-turn timeline).
+`GET /fleet` returns `{ fleet_sessions: [{ name, agents: [...] }], unassigned: [...] }`, each agent carrying its live `title`, `repo`, `branch`, `summary_markdown`, `status`, `minutes_ago`/`last_seen_at`, `specialist_slug`, and `model_id`. **This is the literal "what is every sibling agent doing right now" call.** Report the live agents first — non-`History` session, `status: running`, low `minutes_ago` — and label `idle`/`History`-group entries as stale rather than presenting them as current. Drill deeper with `GET /session-log?session_id=…` (discover→match history) and `GET /session-activity?session_id=…` (per-turn timeline).
 
 ### Full endpoint map
 
