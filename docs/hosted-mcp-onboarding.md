@@ -112,6 +112,7 @@ If Taskforce V2 MCP tools are available:
 - Use `enderai_finish_document` when the work completes or pauses; it writes Outcome and clears the active document pointer.
 - Prefer Taskforce V2 document tools over the legacy V1 `enderai_begin_case` workflow and over raw `enderai_request` when both are available.
 - If Taskforce V2 document tools are unavailable, do not fabricate tool calls; tell the user they are unavailable and fall back only to tools the user explicitly approves.
+- Fleet awareness is a standing reflex: when the user asks what other agents are doing ("what is the other agent doing", "get/pull the fleet", "pull the shared context", "who else is running"), pull the live roster yourself immediately and without asking — do **not** answer this from `/discover` (that is topical retrieval of your own docs). The roster is `GET /api/v1/v2/taskforce/fleet` (Bearer the user MCP token), returning every fleet session and its agents with live `title`, `repo`, `branch`, `summary_markdown`, `status`, and `minutes_ago`; report `status: running` / low-`minutes_ago` agents first and label `idle`/History entries as stale. Drill into one with `GET /session-log?session_id=…` and `GET /session-activity?session_id=…`.
 ```
 
 For V1-only users, the legacy reminder still applies:
