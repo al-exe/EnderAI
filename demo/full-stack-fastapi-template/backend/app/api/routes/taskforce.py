@@ -26,6 +26,7 @@ from app.core.taskforce.active_sessions import (
     active_sessions_for_actor,
     get_active_sessions,
     history_agents_for_actor,
+    mark_session_turn_ended,
     register_session_heartbeat,
 )
 from app.core.taskforce.discover import discover as run_discover
@@ -78,6 +79,7 @@ from app.models import (
     TaskforceSessionSavingsResponse,
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
+    TaskforceSessionTurnEndedRequest,
     V2Document,
     V2DocumentDetailsSection,
     V2DocumentUpdate,
@@ -294,6 +296,28 @@ def session_heartbeat_route(
         cwd=body.cwd,
         branch=body.git_branch,
         model_id=body.model_id,
+    )
+    session.commit()
+    return Response(status_code=204)
+
+
+@router.post("/session/turn-ended", status_code=204)
+def session_turn_ended_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceSessionTurnEndedRequest,
+) -> Response:
+    """Mark a session's turn as finished so Fleet shows "awaiting prompt".
+
+    Driven by the Claude Code Stop hook. A no-op (still 204) when the session
+    has no archive row yet — the next prompt's heartbeat will create one.
+    """
+
+    mark_session_turn_ended(
+        session,
+        actor=current_user,
+        session_id=body.session_id,
+        demo=body.demo,
     )
     session.commit()
     return Response(status_code=204)
