@@ -163,6 +163,38 @@ def register_session_heartbeat(
     return archive
 
 
+def mark_session_turn_ended(
+    session: Session,
+    *,
+    actor: User,
+    session_id: str,
+    demo: bool,
+) -> TaskforceSessionArchive | None:
+    """Record that a session finished a turn and is awaiting the next prompt.
+
+    Driven by the Claude Code Stop hook. Advances both ``last_turn_ended_at``
+    and ``last_seen_at`` so the session stays in the live roster but reports
+    ``waiting`` (awaiting prompt) instead of ``running``. Returns ``None`` when
+    no archive row exists yet (a turn-end before the session's first prompt).
+    """
+
+    now = _now()
+    archive = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.organization_id == actor.organization_id)
+        .where(TaskforceSessionArchive.is_demo == demo)
+        .where(TaskforceSessionArchive.session_id == session_id)
+    ).first()
+    if archive is None:
+        return None
+
+    archive.last_turn_ended_at = now
+    archive.last_seen_at = now
+    archive.updated_at = now
+    session.add(archive)
+    return archive
+
+
 def _active_session_rows(
     session: Session,
     *,
@@ -308,12 +340,33 @@ def _fleet_display_name(archive: TaskforceSessionArchive) -> str:
     return _model_label(archive.model_id) or _repo_label(archive)
 
 
-def _fleet_status(minutes_ago: int) -> str:
-    return (
-        "running"
-        if minutes_ago < int(FLEET_RUNNING_WINDOW.total_seconds() // 60)
-        else "idle"
-    )
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _fleet_status(
+    minutes_ago: int,
+    *,
+    last_seen_at: datetime,
+    last_turn_ended_at: datetime | None,
+) -> str:
+    """Server-derived Fleet state.
+
+    Outside the live window the session is ``idle``. Within it, a turn-end at
+    or after the last heartbeat means the agent finished its turn and is
+    awaiting the next user prompt (``waiting``); otherwise a prompt arrived
+    after the last turn end and a turn is in progress (``running``).
+    """
+
+    if minutes_ago >= int(FLEET_RUNNING_WINDOW.total_seconds() // 60):
+        return "idle"
+    if last_turn_ended_at is not None and _as_utc(last_turn_ended_at) >= _as_utc(
+        last_seen_at
+    ):
+        return "waiting"
+    return "running"
 
 
 def active_sessions_for_actor(
@@ -432,7 +485,11 @@ def _fleet_agent_public_from_archive(
                 ),
                 last_seen_at=last_seen_at,
                 minutes_ago=minutes_ago,
-                status=_fleet_status(minutes_ago),
+                status=_fleet_status(
+                    minutes_ago,
+                    last_seen_at=last_seen_at,
+                    last_turn_ended_at=archive.last_turn_ended_at,
+                ),
                 started_at=archive.started_at,
                 specialist_slug=archive.specialist_slug,
                 specialist_rule_count=(

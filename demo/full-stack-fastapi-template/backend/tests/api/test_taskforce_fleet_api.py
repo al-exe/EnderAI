@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import settings
+from app.core.taskforce.active_sessions import _fleet_status
 from app.models import (
     AgentSpecialist,
     TaskforceFleetSession,
@@ -394,6 +395,98 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
     assert agent["model_id"] == "gpt-5.4"
     assert agent["display_name"] == "GPT 5.4"
     assert agent["summary_markdown"] == ""
+
+
+def _agent_in_fleet(
+    client: TestClient, headers: dict[str, str], session_id: str
+) -> dict[str, object]:
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet.status_code == 200, fleet.text
+    agents = [
+        agent for item in fleet.json()["fleet_sessions"] for agent in item["agents"]
+    ]
+    return next(item for item in agents if item["session_id"] == session_id)
+
+
+def test_fleet_status_distinguishes_running_waiting_idle() -> None:
+    now = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+
+    # A prompt arrived after the last turn end → a turn is in progress.
+    assert (
+        _fleet_status(
+            1,
+            last_seen_at=now,
+            last_turn_ended_at=now - timedelta(minutes=2),
+        )
+        == "running"
+    )
+    # The turn ended at/after the last prompt → awaiting the next user prompt.
+    assert (
+        _fleet_status(
+            1,
+            last_seen_at=now - timedelta(minutes=1),
+            last_turn_ended_at=now,
+        )
+        == "waiting"
+    )
+    # No turn-end recorded yet but fresh → running.
+    assert _fleet_status(1, last_seen_at=now, last_turn_ended_at=None) == "running"
+    # Stale beyond the live window → idle regardless of turn state.
+    assert _fleet_status(120, last_seen_at=now, last_turn_ended_at=now) == "idle"
+
+
+def test_session_turn_ended_marks_agent_awaiting_prompt(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+
+    # A fresh prompt registers the session as running.
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Wire up the fleet turn state",
+            "session_id": "turn-state-session",
+            "min_score": 0.0,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "running"
+
+    # The Stop hook fires: the agent finished its turn and awaits a prompt.
+    turn_ended = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/turn-ended",
+        headers=headers,
+        json={"session_id": "turn-state-session"},
+    )
+    assert turn_ended.status_code == 204, turn_ended.text
+    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "waiting"
+
+    # A new prompt flips it back to running.
+    discover_again = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Keep going",
+            "session_id": "turn-state-session",
+            "min_score": 0.0,
+        },
+    )
+    assert discover_again.status_code == 200, discover_again.text
+    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "running"
+
+
+def test_session_turn_ended_is_noop_without_archive(client: TestClient) -> None:
+    _, headers = _signup(client)
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/turn-ended",
+        headers=headers,
+        json={"session_id": "never-seen-session"},
+    )
+    assert response.status_code == 204, response.text
 
 
 def test_fleet_agent_display_name_can_be_renamed(
@@ -785,9 +878,7 @@ def test_discover_resurrects_agent_from_history(
         item for item in body["fleet_sessions"] if item["id"] == str(default.id)
     )
     assert all(agent["session_id"] != session_id for agent in history["agents"])
-    assert [agent["session_id"] for agent in default_fleet["agents"]] == [
-        session_id
-    ]
+    assert [agent["session_id"] for agent in default_fleet["agents"]] == [session_id]
 
 
 def test_history_session_cannot_be_renamed_or_deleted(
@@ -801,7 +892,9 @@ def test_history_session_cannot_be_renamed_or_deleted(
         headers=headers,
     )
     assert fleet.status_code == 200, fleet.text
-    history = next(item for item in fleet.json()["fleet_sessions"] if item["is_history"])
+    history = next(
+        item for item in fleet.json()["fleet_sessions"] if item["is_history"]
+    )
 
     renamed = client.patch(
         f"{settings.API_V1_STR}/v2/taskforce/fleet/{history['id']}",

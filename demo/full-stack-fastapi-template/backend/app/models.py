@@ -1506,6 +1506,15 @@ class TaskforceSessionArchive(SQLModel, table=True):
         sa_type=DateTime(timezone=True),  # type: ignore
         index=True,
     )
+    # Advanced by the Stop hook when a turn ends. When this is at or after
+    # ``last_seen_at`` (which advances on prompt submit), the session is idle
+    # awaiting the next user prompt; otherwise a turn is in progress. Drives the
+    # Fleet ``running`` vs ``waiting`` distinction in ``_fleet_status``.
+    last_turn_ended_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
     active_document_id: uuid.UUID | None = Field(
         default=None,
         foreign_key="v2_document.id",
@@ -2146,6 +2155,18 @@ class TaskforceSessionHeartbeatRequest(SQLModel):
     client: str | None = Field(default=None, max_length=32)
     model_id: str | None = Field(default=None, max_length=128)
     source: str | None = Field(default=None, max_length=32)
+    demo: bool = False
+
+
+class TaskforceSessionTurnEndedRequest(SQLModel):
+    """Mark a hook-driven session as having finished a turn (awaiting prompt).
+
+    Sent by the Claude Code Stop hook each time the agent goes idle. Kept
+    deliberately lightweight (no transcript) so the Fleet turn-state stays
+    fast and reliable, independent of the heavier ``/observe`` path.
+    """
+
+    session_id: str = Field(min_length=1, max_length=128)
     demo: bool = False
 
 
