@@ -1,6 +1,8 @@
-# /tf — Taskforce slash command for Claude Code (TF-188)
+# /tf — Taskforce slash command for Claude Code, Cursor & Codex (TF-188)
 
-A foreground, visible Taskforce flow for Claude Code. Where the [taskforce-hooks](../taskforce-hooks/README.md) bundle injects prior work *invisibly* on every prompt, `/tf` does the same thing *explicitly* — the user sees Taskforce surface matches, sees the specialist routing, watches the work happen, and sees the savings tally at the end. Built for demos, sales calls, and one-off "find me the prior thinking on X" moments.
+A foreground, visible Taskforce flow. Where the [taskforce-hooks](../taskforce-hooks/README.md) bundle injects prior work *invisibly* on every prompt, `/tf` does the same thing *explicitly* — the user sees Taskforce surface matches, sees the specialist routing, watches the work happen, and sees the savings tally at the end. Built for demos, sales calls, and one-off "find me the prior thinking on X" moments.
+
+The skill installs identically into every supported harness — `~/.claude/skills/tf/` (Claude Code), `~/.cursor/skills-cursor/tf/` (Cursor), `~/.codex/skills/tf/` (Codex). `install.sh` auto-detects which harnesses are present and installs into each; the `SKILL.md` and wrapper scripts are byte-identical across all three.
 
 ## What it does
 
@@ -24,9 +26,9 @@ Or from a clone:
 bash scripts/taskforce-skill/install.sh
 ```
 
-Idempotent — re-running leaves `~/.claude/skills/tf/` consistent.
+Idempotent — re-running leaves each harness's `tf/` skill dir consistent. Auto-detects Claude Code / Cursor / Codex; force a target set with `TASKFORCE_SKILL_TARGETS="claude cursor codex"`.
 
-Restart your Claude Code session, then type `/tf` followed by your task.
+Restart your agent session, then type `/tf` followed by your task.
 
 ## Configuration
 
