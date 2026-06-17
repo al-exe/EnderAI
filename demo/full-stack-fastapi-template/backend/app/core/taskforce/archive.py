@@ -94,7 +94,10 @@ def upsert_session_archive_from_observe(
     )
     if archive.ended_at is not None:
         move_archive_to_history(session, archive, actor, now=now)
-    archive.last_seen_at = now
+    # Checkpoint observe must not clobber the waiting state set by turn-ended:
+    # when last_turn_ended_at >= last_seen_at the agent is idle between turns.
+    if _should_bump_last_seen_from_observe(archive, kind=request.kind):
+        archive.last_seen_at = now
     archive.active_document_id = (
         document_id or request.active_document_id or archive.active_document_id
     )
@@ -141,6 +144,30 @@ def upsert_session_archive_from_observe(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _should_bump_last_seen_from_observe(
+    archive: TaskforceSessionArchive,
+    *,
+    kind: str,
+) -> bool:
+    """Whether an observe payload should advance ``last_seen_at``.
+
+    ``final`` / ``session_end`` always bump. ``checkpoint`` skips the bump when
+    the Stop hook already marked the session as awaiting the next prompt.
+    """
+
+    if kind != "checkpoint":
+        return True
+    if archive.last_turn_ended_at is None or archive.last_seen_at is None:
+        return True
+    return _as_utc(archive.last_turn_ended_at) < _as_utc(archive.last_seen_at)
 
 
 def _started_at(now: datetime, duration_ms: int) -> datetime:
