@@ -33,12 +33,24 @@ def _user_by_email(db: Session, email: str) -> User:
 
 
 def _discover(
-    client: TestClient, headers: dict[str, str], prompt: str, session_id: str
+    client: TestClient,
+    headers: dict[str, str],
+    prompt: str,
+    session_id: str,
+    *,
+    client_name: str | None = None,
 ):
+    body: dict[str, str | float] = {
+        "prompt": prompt,
+        "session_id": session_id,
+        "min_score": 0.0,
+    }
+    if client_name is not None:
+        body["client"] = client_name
     return client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
         headers=headers,
-        json={"prompt": prompt, "session_id": session_id, "min_score": 0.0},
+        json=body,
     )
 
 
@@ -279,3 +291,77 @@ def test_session_activity_is_owner_scoped(
         )
     ).all()
     assert len(rows) == 1
+
+
+def test_observe_cursor_transcript_captures_first_prompt(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    session_id = f"activity-{uuid.uuid4()}"
+    payload = {
+        "kind": "checkpoint",
+        "prompt": "",
+        "session_id": session_id,
+        "client": "cursor",
+        "transcript": [
+            {
+                "role": "user",
+                "content": (
+                    "<user_query>\nhow many sibling agents are in session #1\n</user_query>"
+                ),
+                "source_id": "turn-1-user",
+                "occurred_at": "2026-06-17T06:56:20Z",
+            },
+            {
+                "role": "assistant",
+                "content": "Checking the live Taskforce fleet roster.",
+                "source_id": "turn-1-assistant",
+                "occurred_at": "2026-06-17T06:56:25Z",
+            },
+        ],
+    }
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json=payload,
+    )
+    assert observe.status_code == 202, observe.text
+
+    prompts = [
+        entry["text"]
+        for entry in _activity(client, headers, session_id)["entries"]
+        if entry["kind"] == "prompt"
+    ]
+    assert prompts == ["how many sibling agents are in session #1"]
+
+
+def test_discover_cursor_prompt_cleans_fleet_ui_paste(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    session_id = f"activity-{uuid.uuid4()}"
+    pasted = """Activity
+now
+Awaiting user prompt
+11:57 PMprompt
+this cursor session has generated this agent session: Default
+View in Ledger
+
+Something might be wrong, check"""
+    assert (
+        _discover(
+            client,
+            headers,
+            pasted,
+            session_id,
+            client_name="cursor",
+        ).status_code
+        == 200
+    )
+
+    prompts = [
+        entry["text"]
+        for entry in _activity(client, headers, session_id)["entries"]
+        if entry["kind"] == "prompt"
+    ]
+    assert prompts == ["Something might be wrong, check"]
