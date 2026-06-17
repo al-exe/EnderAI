@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 from sqlmodel import Session
 
@@ -27,6 +28,9 @@ from app.models import (
     TaskforceDiscoverMatch,
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
+    TaskforceFleetSession,
+    TaskforceSessionContextEntry,
+    TaskforceSessionContextResponse,
     User,
     V2Document,
 )
@@ -34,6 +38,13 @@ from app.models import (
 # Latency budget: cap the candidate list at the user's N most-recently-updated
 # docs before scoring. Tuned for p95 < 500ms over a library of ~thousands.
 CANDIDATE_LIMIT = 200
+
+# Shared-context feed (Sessions drawer): how many of a group's documents to
+# surface, and the token budget the hooks honor when injecting them into an
+# agent turn. Newest documents win when the feed exceeds the budget.
+FLEET_CONTEXT_LIMIT = 20
+INJECT_TOKEN_BUDGET = 2000
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 # Tokens-per-character ratio used as a coarse estimate for the
 # ``consult_token_cost`` field. Real tokenization happens in the model
@@ -217,6 +228,60 @@ def discover(
         session_active_document_id=(
             archive.active_document_id if archive is not None else None
         ),
+    )
+
+
+def fleet_session_context(
+    session: Session,
+    *,
+    actor: User,
+    fleet_session: TaskforceFleetSession,
+    demo: bool,
+    limit: int = FLEET_CONTEXT_LIMIT,
+) -> TaskforceSessionContextResponse:
+    """Shared-context feed for one session group, from the discovery corpus.
+
+    Returns the documents scoped to ``fleet_session`` (newest first), shaped
+    like ``discover`` matches, so the Sessions "shared context" drawer reuses
+    the existing document store instead of a bespoke per-session notes table.
+    Read-only: no consult metrics are emitted and nothing is mutated.
+    """
+
+    documents = [
+        document
+        for document in list_v2_documents_for_actor(session, actor, demo=demo)
+        if document.fleet_session_id == fleet_session.id
+    ]
+    documents.sort(
+        key=lambda document: document.updated_at or document.created_at or _EPOCH,
+        reverse=True,
+    )
+
+    entries: list[TaskforceSessionContextEntry] = []
+    token_estimate = 0
+    for document in documents[:limit]:
+        summary = _summary_markdown(document)
+        token_cost = _estimate_tokens(summary)
+        token_estimate += token_cost
+        entries.append(
+            TaskforceSessionContextEntry(
+                document_id=document.id,
+                title=document.title,
+                summary_markdown=summary,
+                produced_by_client=document.produced_by_client,
+                outcome=_outcome_for(document),
+                last_touched_at=document.updated_at,
+                token_cost=token_cost,
+            )
+        )
+
+    return TaskforceSessionContextResponse(
+        fleet_session_id=fleet_session.id,
+        scope=fleet_session.name,
+        entry_count=len(entries),
+        token_estimate=token_estimate,
+        inject_token_budget=INJECT_TOKEN_BUDGET,
+        entries=entries,
     )
 
 

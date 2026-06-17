@@ -1791,6 +1791,40 @@ class TaskforceActiveSessionsResponse(SQLModel):
     active_sessions: list[TaskforceActiveSession]
 
 
+class TaskforceSessionContextEntry(SQLModel):
+    """One shared-context item for a session group (Sessions drawer).
+
+    Sourced from the document-discovery store rather than a bespoke notes
+    table: each entry is a document the group's agents have produced, shaped
+    like a ``discover`` match so the same corpus powers both surfaces.
+    """
+
+    document_id: uuid.UUID
+    title: str
+    summary_markdown: str
+    produced_by_client: str | None = None
+    outcome: str | None = None
+    last_touched_at: datetime | None = None
+    token_cost: int = Field(default=0, ge=0)
+
+
+class TaskforceSessionContextResponse(SQLModel):
+    """Response from GET /v2/taskforce/fleet/{fleet_session_id}/context.
+
+    Read-only "shared context" feed for one session group. Reuses the
+    discovery corpus (see ``/discover``) instead of introducing a per-session
+    notes table; ``token_estimate`` vs ``inject_token_budget`` mirrors the
+    budget the hooks apply when injecting this context into an agent turn.
+    """
+
+    fleet_session_id: uuid.UUID
+    scope: str
+    entry_count: int = Field(default=0, ge=0)
+    token_estimate: int = Field(default=0, ge=0)
+    inject_token_budget: int = Field(default=0, ge=0)
+    entries: list[TaskforceSessionContextEntry] = Field(default_factory=list)
+
+
 class TaskforceSessionLogEntry(SQLModel):
     """One discover→match in the per-session log (TF-176)."""
 
