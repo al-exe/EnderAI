@@ -1,4 +1,4 @@
-"""Active-sessions roster (TF-225) and Fleet agent roster (TF-227).
+"""Active-sessions roster (TF-225) and Sessions agent roster (TF-227).
 
 Gives each session a glanceable view of what its sibling sessions — other
 currently-open Claude Code instances for the same actor — are doing right
@@ -9,7 +9,7 @@ now. Several consumers share the underlying row query in this module:
   then calls :func:`get_active_sessions`.
 - ``GET /v2/taskforce/active-sessions`` (frontend presence rail): read-only,
   calls :func:`get_active_sessions`.
-- ``GET /v2/taskforce/fleet`` and friends (Fleet control panel, TF-227):
+- ``GET /v2/taskforce/fleet`` and friends (Sessions control panel, TF-227):
   call :func:`active_sessions_for_actor`, which returns the richer
   ``TaskforceFleetAgentPublic`` shape.
 
@@ -52,7 +52,7 @@ MAX_AGE = timedelta(hours=8)
 # Bounds the roster size regardless of how many sessions a user accumulates.
 ROSTER_LIMIT = 5
 
-# Fleet reports a server-derived state so clients do not duplicate freshness
+# Sessions reports a server-derived state so clients do not duplicate freshness
 # heuristics. Waiting and paused remain reserved until ingestion captures them.
 # An agent stays live (running/waiting) until it has been silent for this long,
 # then flips to ``idle`` — matched to MAX_AGE so a session is "active" for its
@@ -105,7 +105,7 @@ def register_session_heartbeat(
     prompt: str = "",
     model_id: str | None = None,
 ) -> TaskforceSessionArchive:
-    """Create or refresh the archive row used by active sessions and Fleet."""
+    """Create or refresh the archive row used by active sessions and Sessions."""
 
     now = _now()
     archive = session.exec(
@@ -209,7 +209,7 @@ def _active_session_rows(
     max_age: timedelta = MAX_AGE,
     now: datetime | None = None,
 ) -> tuple[list[TaskforceSessionArchive], datetime]:
-    """Shared row fetch for the active-sessions and Fleet rosters.
+    """Shared row fetch for the active-sessions and Sessions rosters.
 
     Scope: ``actor_id = actor``, same org (and ``is_demo`` space if given),
     ``ended_at IS NULL`` (cleanly-ended sessions are excluded outright — the
@@ -390,7 +390,7 @@ def _fleet_status(
     last_seen_at: datetime,
     last_turn_ended_at: datetime | None,
 ) -> str:
-    """Server-derived Fleet state.
+    """Server-derived Sessions state.
 
     Outside the live window the session is ``idle``. Within it, a turn-end at
     or after the last heartbeat means the agent finished its turn and is
@@ -414,10 +414,10 @@ def active_sessions_for_actor(
     limit: int = ROSTER_LIMIT,
     now: datetime | None = None,
 ) -> list[TaskforceFleetAgentPublic]:
-    """Return the actor's recent, non-ended sessions for the Fleet panel.
+    """Return the actor's recent, non-ended sessions for the Sessions panel.
 
     Built on the same row query as :func:`get_active_sessions`, but not
-    scoped to a single ``is_demo`` space (the Fleet panel shows all of the
+    scoped to a single ``is_demo`` space (the Sessions panel shows all of the
     actor's sessions) and returns the richer ``TaskforceFleetAgentPublic``
     shape, including ``fleet_session_id``, ``referenced_document_ids`` and
     ``specialist_slug``.

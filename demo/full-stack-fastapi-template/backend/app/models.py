@@ -1583,7 +1583,7 @@ class TaskforceFleetSession(SQLModel, table=True):
 
 
 class TaskforceSessionEvent(SQLModel, table=True):
-    """Canonical append-only event stream shared by Fleet and Ledger."""
+    """Canonical append-only event stream shared by Sessions and Ledger."""
 
     __tablename__ = "taskforce_session_event"
     __table_args__ = (
@@ -1815,7 +1815,7 @@ class TaskforceSessionLogResponse(SQLModel):
 
 
 class TaskforceSessionEventPublic(SQLModel):
-    """One canonical session event rendered by the owner-scoped Fleet view."""
+    """One canonical session event rendered by the owner-scoped Sessions view."""
 
     id: uuid.UUID
     kind: Literal["prompt", "reply", "command", "edit", "note"]
@@ -1842,7 +1842,7 @@ class TaskforceSessionActivityResponse(SQLModel):
 
 
 class TaskforceFleetAgentPublic(SQLModel):
-    """One active CLI session rendered in the Fleet control panel."""
+    """One active CLI session rendered in the Sessions control panel."""
 
     session_id: str
     fleet_session_id: uuid.UUID | None = None
@@ -2084,7 +2084,7 @@ class TaskforceObserveRequest(SQLModel):
       * The SessionEnd hook (TF-228) — ``kind: "session_end"``, fired once
         when the Claude Code session truly terminates. This is what marks
         the session archive's ``ended_at`` and removes it from the active
-        Fleet roster.
+        Sessions roster.
       * Tier 2 MCP tools (TF-181) — ``taskforce_session_observe`` with
         structured fields (``summary_points`` / ``details_sections`` /
         ``decisions`` / ``outcome``) so the backend can skip the haiku
@@ -2167,7 +2167,7 @@ class TaskforceSessionTurnEndedRequest(SQLModel):
     """Mark a hook-driven session as having finished a turn (awaiting prompt).
 
     Sent by the Claude Code Stop hook each time the agent goes idle. Kept
-    deliberately lightweight (no transcript) so the Fleet turn-state stays
+    deliberately lightweight (no transcript) so the Sessions turn-state stays
     fast and reliable, independent of the heavier ``/observe`` path.
     """
 

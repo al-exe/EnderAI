@@ -300,7 +300,7 @@ def build_codex_hook_installer() -> str:
             "",
             'echo "Taskforce Codex hooks installed."',
             'echo "Restart Codex, run /hooks, and trust the Taskforce hooks."',
-            'echo "Start one more Codex session after trusting them to activate Fleet registration."',
+            'echo "Start one more Codex session after trusting them to activate Sessions registration."',
             "",
         ]
     )
@@ -395,7 +395,7 @@ def build_cursor_hook_installer() -> str:
             "",
             'echo "Taskforce Cursor hooks installed."',
             'echo "Restart Cursor (or reload hooks from Settings -> Hooks) to activate."',
-            'echo "New Agent sessions will appear in Fleet after sessionStart fires."',
+            'echo "New Agent sessions will appear in Sessions after sessionStart fires."',
             "",
         ]
     )
