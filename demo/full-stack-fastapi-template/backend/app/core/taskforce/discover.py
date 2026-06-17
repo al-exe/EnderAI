@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.metrics.events import record_document_consulted
 from app.core.taskforce.active_sessions import (
@@ -29,6 +29,7 @@ from app.models import (
     TaskforceDiscoverRequest,
     TaskforceDiscoverResponse,
     TaskforceFleetSession,
+    TaskforceSessionArchive,
     TaskforceSessionContextEntry,
     TaskforceSessionContextResponse,
     User,
@@ -231,6 +232,41 @@ def discover(
     )
 
 
+def _group_member_document_ids(
+    session: Session,
+    *,
+    actor: User,
+    fleet_session: TaskforceFleetSession,
+    demo: bool,
+) -> set[uuid.UUID]:
+    """Doc ids touched by the agent sessions currently assigned to this group.
+
+    Each archive records the documents it produced/referenced
+    (``active_document_id`` + ``referenced_document_ids``). Unioning those over
+    the archives whose ``fleet_session_id`` is this group gives a membership set
+    that moves with the agents: a session that leaves the group takes its docs
+    out of the feed automatically.
+    """
+
+    archives = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == actor.id)
+        .where(TaskforceSessionArchive.is_demo == demo)
+        .where(TaskforceSessionArchive.fleet_session_id == fleet_session.id)
+    ).all()
+
+    document_ids: set[uuid.UUID] = set()
+    for archive in archives:
+        if archive.active_document_id is not None:
+            document_ids.add(archive.active_document_id)
+        for raw in archive.referenced_document_ids or []:
+            try:
+                document_ids.add(uuid.UUID(str(raw)))
+            except (TypeError, ValueError):
+                continue
+    return document_ids
+
+
 def fleet_session_context(
     session: Session,
     *,
@@ -241,16 +277,27 @@ def fleet_session_context(
 ) -> TaskforceSessionContextResponse:
     """Shared-context feed for one session group, from the discovery corpus.
 
-    Returns the documents scoped to ``fleet_session`` (newest first), shaped
-    like ``discover`` matches, so the Sessions "shared context" drawer reuses
-    the existing document store instead of a bespoke per-session notes table.
-    Read-only: no consult metrics are emitted and nothing is mutated.
+    Context follows the **agents currently in the group**, not a frozen stamp:
+    we gather the documents touched by the session archives whose
+    ``fleet_session_id`` is this group right now, so when an agent moves to
+    another group (or is archived), its docs leave this group's context with
+    it. This avoids the old write-once ``document.fleet_session_id`` stamp,
+    which was set on creation and never unset — leaving every doc a session ever
+    produced piled up here forever.
+
+    Returns those documents newest first, shaped like ``discover`` matches so
+    the Sessions "shared context" drawer reuses the existing document store
+    instead of a bespoke per-session notes table. Read-only: no consult metrics
+    are emitted and nothing is mutated.
     """
 
+    member_document_ids = _group_member_document_ids(
+        session, actor=actor, fleet_session=fleet_session, demo=demo
+    )
     documents = [
         document
         for document in list_v2_documents_for_actor(session, actor, demo=demo)
-        if document.fleet_session_id == fleet_session.id
+        if document.id in member_document_ids
     ]
     documents.sort(
         key=lambda document: document.updated_at or document.created_at or _EPOCH,
