@@ -51,6 +51,7 @@ def _create_archive(
     referenced_document_ids: list[str] | None = None,
     model_id: str | None = "claude-opus-4-8",
     client: str | None = None,
+    harness_label: str | None = None,
     started_at: datetime | None = None,
 ) -> TaskforceSessionArchive:
     archive = TaskforceSessionArchive(
@@ -64,6 +65,7 @@ def _create_archive(
         specialist_slug="backend",
         model_id=model_id,
         client=client,
+        harness_label=harness_label if harness_label is not None else client,
         started_at=started_at,
         imported_at=imported_at,
         last_seen_at=imported_at,
@@ -251,15 +253,17 @@ def test_fleet_agent_kind_classifies_driving_tool(
     now = datetime.now(timezone.utc)
 
     cases = {
-        "agent-claude": ("claude-code", "claude-opus-4-8", "claude"),
-        "agent-codex": ("codex", "gpt-5.4", "codex"),
-        "agent-cursor": ("cursor", "claude-sonnet-4-6", "cursor"),
-        # No self-reported client: fall back to the model id.
-        "agent-model-fallback": (None, "gpt-5.4", "codex"),
-        # Neither client nor a recognizable model: unknown tool.
-        "agent-unknown": (None, "mystery-model-1", "other"),
+        "agent-claude": ("claude-code", None, "claude-opus-4-8", "claude"),
+        "agent-codex": ("codex", None, "gpt-5.4", "codex"),
+        "agent-cursor": ("cursor", None, "claude-sonnet-4-6", "cursor"),
+        # Cursor/Codex hooks always send client; harness_label is the backup.
+        "agent-cursor-label": (None, "cursor", "claude-sonnet-4-6", "cursor"),
+        # claude-* models are shared by Cursor and Claude Code — never infer.
+        "agent-claude-model-ambiguous": (None, None, "claude-sonnet-4-6", "other"),
     }
-    for index, (session_id, (client_value, model_id, _)) in enumerate(cases.items()):
+    for index, (session_id, (client_value, harness_label, model_id, _)) in enumerate(
+        cases.items()
+    ):
         _create_archive(
             db,
             user=user,
@@ -267,6 +271,7 @@ def test_fleet_agent_kind_classifies_driving_tool(
             imported_at=now - timedelta(minutes=index),
             fleet_session_id=fleet_id,
             client=client_value,
+            harness_label=harness_label,
             model_id=model_id,
         )
 
@@ -283,7 +288,7 @@ def test_fleet_agent_kind_classifies_driving_tool(
     kind_by_session = {
         agent["session_id"]: agent["agent_kind"] for agent in grouped["agents"]
     }
-    for session_id, (_, _, expected_kind) in cases.items():
+    for session_id, (_, _, _, expected_kind) in cases.items():
         assert kind_by_session[session_id] == expected_kind
 
 
