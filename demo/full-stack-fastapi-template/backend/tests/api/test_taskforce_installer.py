@@ -296,6 +296,75 @@ fi
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_cursor_stop_hook_marks_turn_ended(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    turn_ended_file = tmp_path / "turn-ended.json"
+    observe_file = tmp_path / "observe.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+output_file=""
+url=""
+while (($#)); do
+    case "$1" in
+        --data)
+            shift
+            data="$1"
+            ;;
+        -o)
+            shift
+            output_file="$1"
+            ;;
+        http*)
+            url="$1"
+            ;;
+    esac
+    shift
+done
+if [[ "$url" == *session/turn-ended* ]]; then
+    printf '%s' "$data" > "$TURN_ENDED_FILE"
+    printf '204'
+elif [[ "$output_file" != "/dev/null" && "$output_file" != "" ]]; then
+    printf '%s' "$data" > "$OBSERVE_FILE"
+    printf '202'
+else
+    printf '204'
+fi
+"""
+    )
+    curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "TURN_ENDED_FILE": str(turn_ended_file),
+        "OBSERVE_FILE": str(observe_file),
+    }
+
+    subprocess.run(
+        ["bash", str(CANONICAL_CURSOR_HOOK_DIR / "stop.sh")],
+        input=json.dumps(
+            {
+                "session_id": "cursor-session-stop",
+                "cwd": str(tmp_path),
+                "prompt": "Finish the Fleet row polish",
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    turn_ended = json.loads(turn_ended_file.read_text())
+    assert turn_ended == {"session_id": "cursor-session-stop", "demo": False}
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
 def test_codex_installer_is_idempotent_and_preserves_existing_hooks(
     tmp_path: Path,
 ) -> None:
