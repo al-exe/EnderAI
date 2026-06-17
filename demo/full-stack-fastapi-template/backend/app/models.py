@@ -1764,8 +1764,6 @@ class TaskforceActiveSession(SQLModel):
 
     session_id: str
     cwd: str | None = None
-    branch: str | None = None
-    repo: str | None = None
     active_document_id: uuid.UUID | None = None
     title: str | None = None
     summary_markdown: str = ""
@@ -1847,8 +1845,6 @@ class TaskforceFleetAgentPublic(SQLModel):
     session_id: str
     fleet_session_id: uuid.UUID | None = None
     cwd: str | None = None
-    branch: str | None = None
-    repo: str | None = None
     active_document_id: uuid.UUID | None = None
     referenced_document_ids: list[uuid.UUID] = Field(default_factory=list)
     display_name: str
