@@ -39,6 +39,22 @@ case "${TASKFORCE_DEMO:-0}" in
 esac
 readonly DEMO_FLAG
 
+detect_client() {
+    if [[ -n "${TASKFORCE_CLIENT:-}" ]]; then
+        printf '%s\n' "$TASKFORCE_CLIENT"
+        return
+    fi
+
+    case "${BASH_SOURCE[0]:-$0}" in
+        */.codex/*)  printf 'codex\n' ;;
+        */.cursor/*) printf 'cursor\n' ;;
+        */.claude/*) printf 'claude-code\n' ;;
+        *)           printf '\n' ;;
+    esac
+}
+
+readonly TASKFORCE_CLIENT_VALUE="$(detect_client)"
+
 mkdir -p "$(dirname "$LOG_FILE")"
 log() { printf '[%s] tf-discover %s\n' "$(date -u +%FT%TZ)" "$*" >> "$LOG_FILE"; }
 
@@ -87,12 +103,14 @@ body="$(jq -cn \
     --arg prompt "$prompt" \
     --arg cwd "$cwd" \
     --arg git_branch "$git_branch" \
+    --arg client "$TASKFORCE_CLIENT_VALUE" \
     --argjson files "$files_json" \
     --argjson demo "$DEMO_FLAG" '
     {
         prompt: $prompt,
         cwd: (if $cwd == "" then null else $cwd end),
         git_branch: (if $git_branch == "" then null else $git_branch end),
+        client: (if $client == "" then null else $client end),
         files: $files,
         k: 3,
         min_score: 0.3,
