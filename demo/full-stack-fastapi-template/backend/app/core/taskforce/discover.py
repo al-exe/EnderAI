@@ -211,7 +211,12 @@ def discover(
     )
 
     return TaskforceDiscoverResponse(
-        query_id=query_id, matches=matches, active_sessions=active_sessions
+        query_id=query_id,
+        matches=matches,
+        active_sessions=active_sessions,
+        session_active_document_id=(
+            archive.active_document_id if archive is not None else None
+        ),
     )
 
 

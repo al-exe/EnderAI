@@ -203,7 +203,7 @@ fi
 
 http_status="$(
     curl -sS \
-        -o /dev/null \
+        -o "${STATE_DIR}/${session_id}.observe-response.json" \
         -w '%{http_code}' \
         --max-time 30 \
         -X POST \
@@ -212,5 +212,16 @@ http_status="$(
         --data "$body" \
         "${BACKEND_URL}/api/v1/v2/taskforce/observe" 2>>"$LOG_FILE"
 )" || { log "skip: curl failed"; exit 0; }
+
+if [[ -n "$session_id" && ( "$http_status" == "200" || "$http_status" == "202" ) ]]; then
+    doc_id="$(
+        jq -r '.document_id // empty' \
+            "${STATE_DIR}/${session_id}.observe-response.json" 2>/dev/null || true
+    )"
+    if [[ -n "$doc_id" ]]; then
+        printf '%s' "$doc_id" > "${STATE_DIR}/${session_id}.active"
+    fi
+fi
+rm -f "${STATE_DIR}/${session_id}.observe-response.json"
 
 log "POST /v2/taskforce/observe → ${http_status}"

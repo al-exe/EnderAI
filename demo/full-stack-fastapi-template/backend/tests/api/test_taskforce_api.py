@@ -982,6 +982,61 @@ def test_session_observe_created_document_stamps_produced_by_client(
     assert document.produced_by_client == "codex"
 
 
+def test_session_observe_reuses_archive_active_document_without_request_pin(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    """Checkpoint hooks often omit active_document_id; reuse the archive pin."""
+
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+    session_id = "one-doc-per-agent-session"
+
+    first = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Start fleet session doc",
+            "client": "claude-code",
+            "session_id": session_id,
+            "summary_points": ["Initial checkpoint summary."],
+            "files_touched": ["src/foo.py"],
+            "duration_ms": 500,
+        },
+    )
+    assert first.status_code == 202, first.text
+    first_body = first.json()
+    assert first_body["action"] == "created"
+    document_id = first_body["document_id"]
+
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Continue the same agent session",
+            "client": "claude-code",
+            "session_id": session_id,
+            "summary_points": ["Second checkpoint adds more context."],
+            "files_touched": ["src/bar.py"],
+            "duration_ms": 500,
+        },
+    )
+    assert second.status_code == 202, second.text
+    second_body = second.json()
+    assert second_body["action"] == "updated"
+    assert second_body["document_id"] == document_id
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == session_id
+        )
+    ).one()
+    assert archive.active_document_id == uuid.UUID(document_id)
+
+
 def test_demo_structured_observe_creates_recallable_document(
     client: TestClient,
     monkeypatch,
