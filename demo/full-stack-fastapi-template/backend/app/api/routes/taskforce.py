@@ -370,11 +370,13 @@ async def observe_route(
 
     Called by the Stop hook (``kind: "final"``) and the PostToolUse
     hook (``kind: "checkpoint"``). The handler:
-      * runs a deterministic materiality check
-      * calls the haiku summarizer when material
-      * patches the active document (or creates a fresh one) — unless
-        ``TASKFORCE_OBSERVE_SHADOW=1`` (default), in which case the
-        intent is audited but no doc state changes
+      * runs a deterministic materiality check (the only skip path)
+      * for any material session, patches the active document (or creates a
+        fresh one) so the shared-context feed fills in — content comes from
+        the client's structured fields, the haiku summarizer when enabled +
+        affordable, or a deterministic free digest as the floor
+      * ``TASKFORCE_OBSERVE_SHADOW=1`` no longer blocks the write; it only
+        disables the paid haiku enrichment (writes stay on the free path)
       * records ``tokens.consumed`` events for the summarizer and the
         harness-reported session totals
     Returns a structured envelope so the hook can log + the dashboard

@@ -84,6 +84,10 @@ services:
       - key: SEARCH_INDEX_BATCH_SIZE
         sync: false
       # Taskforce-side toggles.
+      # TASKFORCE_OBSERVE_SHADOW: set to 1 to disable the PAID haiku
+      # summarizer enrichment (observe still writes documents via the free
+      # deterministic digest). Unset/0 = allow haiku when a managed key is
+      # configured. It no longer blocks document writes.
       - key: TASKFORCE_OBSERVE_SHADOW
         sync: false
       # Secrets — set via the dashboard, blueprint never overwrites.

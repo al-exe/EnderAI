@@ -13,9 +13,22 @@ Flow:
        * ``taskforce.observed`` — audit row so we can reconcile checkpoint
          + final calls per session.
 
-Shadow mode: when ``TASKFORCE_OBSERVE_SHADOW=1`` (default), the route
-logs the intent and records the audit event but does **not** patch the
-document. This is the safety hatch from §7.4 of the brainstorm.
+Always-write contract: a *material* session always produces or refreshes
+one document so the Sessions shared-context feed fills in as the agent
+conversation develops. The document content comes from, in priority order:
+
+  1. structured fields the client supplied (free, no LLM),
+  2. the haiku summarizer — only when a managed key is configured, we're
+     under the daily cost cap, and the paid summarizer is enabled,
+  3. a deterministic digest built from the prompt + files + commands +
+     transcript the hook already ships (free fallback).
+
+``TASKFORCE_OBSERVE_SHADOW=1`` no longer suppresses the write — the
+deterministic floor (1)/(3) always lands so a missing managed key or a
+stale rollout flag can't silently starve the shared context. The flag now
+only disables the *paid* haiku enrichment (falls back to 3 instead of 2).
+The old behavior ("record audit, write nothing") was the §7.4 rollout
+safety hatch and is retired now that the feature ships.
 """
 
 from __future__ import annotations
@@ -67,8 +80,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAILY_USD_CAP = Decimal("1.00")
 
 
-def _shadow_mode() -> bool:
-    return os.environ.get("TASKFORCE_OBSERVE_SHADOW", "1") not in {
+def _paid_summarizer_enabled() -> bool:
+    """Whether the paid haiku enrichment may run this turn.
+
+    Was the TF-178 "shadow mode" kill switch (``TASKFORCE_OBSERVE_SHADOW``).
+    Now that deterministic writes always land, the flag only gates the
+    *paid* summarizer: ``TASKFORCE_OBSERVE_SHADOW=1`` keeps writes on the
+    free deterministic path; unset/``0`` allows the haiku enrichment when a
+    managed key is configured. Default is enabled (write rich when we can).
+    """
+
+    return os.environ.get("TASKFORCE_OBSERVE_SHADOW", "0") in {
         "0",
         "false",
         "False",
@@ -114,6 +136,124 @@ def _summary_from_structured(request: TaskforceObserveRequest) -> SummarizerResu
     )
 
 
+def _distinct_commands(request: TaskforceObserveRequest) -> list[str]:
+    """Order-preserving, deduped shell commands from the request."""
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for command in request.commands_run:
+        normalized = " ".join(command.cmd.split())
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            out.append(normalized)
+    return out
+
+
+def _activity_markdown(request: TaskforceObserveRequest) -> str:
+    """Compact 'what happened' section from the data the hook already ships.
+
+    Keeps the deterministic floor readable in the Library/shared-context
+    without an LLM: a bullet list of files touched and commands run.
+    """
+
+    lines: list[str] = []
+    if request.files_touched:
+        lines.append("**Files touched**")
+        lines.extend(f"- `{path}`" for path in request.files_touched[:20])
+    commands = _distinct_commands(request)
+    if commands:
+        if lines:
+            lines.append("")
+        lines.append("**Commands run**")
+        lines.extend(f"- `{cmd[:200]}`" for cmd in commands[:20])
+    return "\n".join(lines)
+
+
+def _summary_from_request(request: TaskforceObserveRequest) -> SummarizerResult:
+    """Deterministic, zero-cost digest from the hook payload.
+
+    The free floor under the always-write contract: guarantees every material
+    session has writable content even when the paid summarizer is disabled or
+    no managed key is configured. The haiku summarizer is enrichment on top of
+    this, never a gate.
+    """
+
+    points: list[str] = [p.strip() for p in request.summary_points[:6] if p.strip()]
+    if not points and request.prompt.strip():
+        points.append(request.prompt.strip()[:280])
+    if request.files_touched:
+        shown = ", ".join(request.files_touched[:6])
+        points.append(f"Touched {len(request.files_touched)} file(s): {shown}")
+    commands = _distinct_commands(request)
+    if commands:
+        points.append("Ran: " + "; ".join(cmd[:80] for cmd in commands[:5]))
+    if not points:
+        points.append("Taskforce session")
+
+    details = [
+        {"anchor_id": s.anchor_id, "markdown": s.markdown[:4000]}
+        for s in request.details_sections
+    ][:4]
+    if not details:
+        activity = _activity_markdown(request)
+        if activity:
+            details.append({"anchor_id": "activity", "markdown": activity[:4000]})
+
+    return SummarizerResult(
+        materiality_score=1.0,
+        summary_points=points[:6],
+        details_sections=details,
+        files_touched=list(request.files_touched),
+        commands_of_interest=[command.cmd for command in request.commands_run][:8],
+        decisions=list(request.decisions)[:4],
+        outcome=request.outcome,
+        open_questions=[],
+        raw_text="<deterministic>",
+        input_tokens=0,
+        output_tokens=0,
+        usd_cost=Decimal(0),
+        prompt_version=PROMPT_VERSION,
+    )
+
+
+async def _resolve_summary(
+    session: Session,
+    *,
+    actor: User,
+    request: TaskforceObserveRequest,
+    structured: bool,
+) -> tuple[SummarizerResult, bool]:
+    """Pick the summary source under the always-write contract.
+
+    Returns ``(summary, used_paid_summarizer)``. Structured payloads win
+    (free). Otherwise the haiku summarizer runs only when it's enabled, a
+    managed key exists, and we're under the daily cost cap; anything else
+    falls back to the deterministic free digest. The summarizer is never
+    wrapped in a try/except here — a raised error still aborts the request so
+    the early archive commit (see ``persist_session_archive_capture``) is what
+    preserves the transcript on a hook timeout.
+    """
+
+    if structured:
+        return _summary_from_structured(request), False
+
+    if _paid_summarizer_enabled():
+        api_key = settings.ANTHROPIC_API_KEY
+        if (
+            api_key
+            and _summarizer_cost_today(session, actor=actor) < DEFAULT_DAILY_USD_CAP
+        ):
+            summary = await summarize(
+                transcript=request.transcript,
+                prompt=request.prompt,
+                api_key=api_key,
+            )
+            if summary.summary_points or summary.details_sections:
+                return summary, True
+
+    return _summary_from_request(request), False
+
+
 def persist_session_archive_capture(session: Session) -> None:
     """Commit ledger capture before slow observe work.
 
@@ -132,7 +272,6 @@ async def observe(
     request: TaskforceObserveRequest,
     demo: bool,
 ) -> TaskforceObserveResponse:
-    shadow = _shadow_mode()
     structured = _has_structured_payload(request)
     archive = upsert_session_archive_from_observe(
         session,
@@ -148,6 +287,7 @@ async def observe(
 
     materiality = assess_materiality(request)
     if not materiality.material:
+        # The only skip path: a trivial session isn't worth a document.
         audit = _record_audit(
             session,
             actor=actor,
@@ -155,67 +295,23 @@ async def observe(
             action="skipped",
             reason=materiality.reason,
             summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
+            shadow=False,
         )
         return TaskforceObserveResponse(
             action="skipped",
             reason=materiality.reason,
             metrics_events_recorded=[audit.id],
             summarizer_usd_cost=Decimal(0),
-            shadow=shadow,
+            shadow=False,
             structured_path=structured,
         )
 
-    if structured:
-        # Agent already gave us the digest; no LLM call, no cost cap check,
-        # no managed-key requirement.
-        summary = _summary_from_structured(request)
-    else:
-        today_cost = _summarizer_cost_today(session, actor=actor)
-        if today_cost >= DEFAULT_DAILY_USD_CAP:
-            audit = _record_audit(
-                session,
-                actor=actor,
-                request=request,
-                action="skipped",
-                reason=f"cost_capped (today=${today_cost})",
-                summarizer_usd_cost=Decimal(0),
-                shadow=shadow,
-            )
-            return TaskforceObserveResponse(
-                action="skipped",
-                reason="cost_capped",
-                metrics_events_recorded=[audit.id],
-                summarizer_usd_cost=Decimal(0),
-                shadow=shadow,
-                structured_path=structured,
-            )
-
-        api_key = settings.ANTHROPIC_API_KEY
-        if not api_key:
-            audit = _record_audit(
-                session,
-                actor=actor,
-                request=request,
-                action="skipped",
-                reason="no_managed_anthropic_key",
-                summarizer_usd_cost=Decimal(0),
-                shadow=shadow,
-            )
-            return TaskforceObserveResponse(
-                action="skipped",
-                reason="no_managed_anthropic_key",
-                metrics_events_recorded=[audit.id],
-                summarizer_usd_cost=Decimal(0),
-                shadow=shadow,
-                structured_path=structured,
-            )
-
-        summary = await summarize(
-            transcript=request.transcript,
-            prompt=request.prompt,
-            api_key=api_key,
-        )
+    # Always-write: structured → haiku enrichment (when enabled/affordable) →
+    # deterministic free digest. _resolve_summary never returns empty for a
+    # material session, so the write below always lands.
+    summary, _ = await _resolve_summary(
+        session, actor=actor, request=request, structured=structured
+    )
 
     summarizer_event = _record_summarizer_consumption(
         session,
@@ -234,55 +330,8 @@ async def observe(
         session, actor=actor, request=request, demo=demo, archive=archive
     )
 
-    if document is None and not summary.summary_points and not summary.details_sections:
-        audit = _record_audit(
-            session,
-            actor=actor,
-            request=request,
-            action="skipped",
-            reason="empty_summary_no_active_doc",
-            summarizer_usd_cost=summary.usd_cost,
-            shadow=shadow,
-        )
-        recorded_ids = _ids(summarizer_event, harness_event, audit)
-        return TaskforceObserveResponse(
-            action="skipped",
-            reason="empty_summary_no_active_doc",
-            metrics_events_recorded=recorded_ids,
-            summarizer_usd_cost=summary.usd_cost,
-            shadow=shadow,
-            structured_path=structured,
-        )
-
     update_payload = _build_update_payload(summary)
     patched_fields = sorted(update_payload.keys())
-
-    if shadow:
-        audit = _record_audit(
-            session,
-            actor=actor,
-            request=request,
-            action="updated" if document is not None else "created",
-            reason="shadow_mode",
-            summarizer_usd_cost=summary.usd_cost,
-            shadow=True,
-            extra_payload={
-                "would_patch_document_id": str(document.id) if document else None,
-                "would_patch_fields": patched_fields,
-                "structured_path": structured,
-            },
-        )
-        recorded_ids = _ids(summarizer_event, harness_event, audit)
-        return TaskforceObserveResponse(
-            action="skipped",
-            document_id=document.id if document else None,
-            reason="shadow_mode",
-            patched_fields=patched_fields,
-            metrics_events_recorded=recorded_ids,
-            summarizer_usd_cost=summary.usd_cost,
-            shadow=True,
-            structured_path=structured,
-        )
 
     action: str
     target_doc: V2Document

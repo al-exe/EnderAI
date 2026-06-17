@@ -1197,17 +1197,63 @@ def test_session_observe_without_structured_fields_uses_summarizer_path(
     )
     assert response.status_code == 202, response.text
     body = response.json()
-    # structured_path should be False since no summary_points/details/decisions/outcome
+    # structured_path is False: no summary_points/details/decisions/outcome.
     assert body["structured_path"] is False
-    # Likely skipped with no_managed_anthropic_key in test env, but the path is
-    # documented as non-structured.
-    assert body["reason"] in {
-        "no_managed_anthropic_key",
-        "cost_capped",
-        "ok",
-        "shadow_mode",
-        "empty_summary_no_active_doc",
-    }
+    # Always-write: with no managed key in the test env the deterministic free
+    # digest writes the pinned document instead of skipping.
+    assert body["reason"] == "ok"
+    assert body["action"] == "updated"
+    assert body["document_id"] == doc_id
+
+
+def test_observe_always_writes_without_key_or_paid_summarizer(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    """Core always-write guarantee: a material non-structured session creates a
+    document even with the paid summarizer disabled and no managed key, so the
+    Sessions shared-context feed fills in regardless of LLM config."""
+
+    from app.core.taskforce import observe as observe_mod
+
+    # Paid summarizer off + no managed key → deterministic free digest only.
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "1")
+    monkeypatch.setattr(observe_mod.settings, "ANTHROPIC_API_KEY", "")
+
+    _, headers = _signup(client)
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": "Wire up the deterministic observe fallback",
+            "transcript": [
+                {"role": "user", "content": "do work"},
+                {"role": "assistant", "content": "doing"},
+                {"role": "assistant", "content": "done"},
+            ],
+            "session_id": "always-write-no-key",
+            "files_touched": ["app/core/taskforce/observe.py"],
+            "duration_ms": 1000,
+        },
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["action"] == "created"
+    assert body["reason"] == "ok"
+    assert body["structured_path"] is False
+    assert body["document_id"] is not None
+    # Free path: no summarizer spend.
+    assert body["summarizer_usd_cost"] in ("0", 0, "0.0", "0.00")
+
+    # The created doc is recallable — i.e. it actually landed in the corpus the
+    # shared-context feed reads from.
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "deterministic observe fallback", "client": "claude-code"},
+    )
+    assert discover.status_code == 200, discover.text
 
 
 def test_observe_archive_persisted_before_summarizer_failure(
