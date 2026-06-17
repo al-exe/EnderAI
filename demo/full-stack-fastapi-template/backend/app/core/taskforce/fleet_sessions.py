@@ -15,7 +15,9 @@ HISTORY_SESSION_NAME = "History"
 _SESSION_NUMBER = re.compile(r"^Session ([1-9][0-9]*)$")
 
 # Inactive agents older than this window are swept into History on fleet reads.
-INACTIVE_WINDOW_MINUTES = 5
+# 8h keeps an agent in its live fleet session for a full working session before
+# it ages into History (matches FLEET_RUNNING_WINDOW / MAX_AGE).
+INACTIVE_WINDOW_MINUTES = 8 * 60
 
 
 def fleet_sessions_for_actor(
