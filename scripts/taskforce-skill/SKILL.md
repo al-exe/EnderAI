@@ -17,13 +17,13 @@ All three return a single JSON envelope on stdout. They always exit 0; check `.o
 
 ## Beyond the demo flow — the live Taskforce surface
 
-The `/tf` beats below cover the **foreground demo** (discover → work → reference → savings). Beyond it, Taskforce runs a **passive telemetry + fleet layer** driven by the shell hooks your harness installed (`taskforce-hooks` for Claude Code, `taskforce-codex-hooks` for Codex, `taskforce-cursor-hooks` for Cursor) — **not** by anything you invoke. Those hooks call home on every prompt/tool-use, so an agent never sees them fire except for the `─── Related prior work ───` preamble the discover hook injects.
+The `/tf` beats below cover the **foreground demo** (discover → work → reference → savings). Beyond it, Taskforce runs a **passive telemetry + Sessions layer** driven by the shell hooks your harness installed (`taskforce-hooks` for Claude Code, `taskforce-codex-hooks` for Codex, `taskforce-cursor-hooks` for Cursor) — **not** by anything you invoke. Those hooks call home on every prompt/tool-use, so an agent never sees them fire except for the `─── Related prior work ───` preamble the discover hook injects.
 
 **This means a cold-start agent has no pointer to the rest of the surface. Use this section as that pointer.** All endpoints are under `${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}/api/v1/v2/taskforce/` and authenticate with `Authorization: Bearer $(cat ~/.taskforce_mcp_token)` (the token path is shared across all three harnesses).
 
-### Seeing the rest of your fleet (the common ask — a standing reflex, not just a /tf step)
+### Seeing the rest of your Sessions roster (the common ask — a standing reflex, not just a /tf step)
 
-This is an **always-on reflex**, not something gated behind `/tf`. Whenever the user asks *"what is the other agent doing"* / *"what are the other agents working on"* / *"get/pull the fleet"* / *"pull the shared context"* / *"who else is running"* — in any session — pull the roster **yourself, immediately, without asking first**.
+This is an **always-on reflex**, not something gated behind `/tf`. Whenever the user asks *"what is the other agent doing"* / *"what are the other agents working on"* / *"get/pull the sessions roster"* / *"pull the shared context"* / *"who else is running"* — in any session — pull the roster **yourself, immediately, without asking first**.
 
 They do **not** mean `/discover` (that's topical retrieval of *your own* docs and will echo your own recent prompts back at you). They mean the **roster**:
 
@@ -41,13 +41,13 @@ curl -sS --max-time 20 -H "Authorization: Bearer ${tok}" \
 |---|---|---|
 | **Discover / work** (this skill) | `POST /discover`, `POST /session/start`, `POST /reference`, `GET /session-savings` | The `/tf` demo flow below. |
 | **Telemetry** (hooks, auto) | `POST /session/heartbeat`, `POST /observe`, `GET /active-sessions` | Presence + tool-use capture → writes `V2Document`s. You never call these by hand. |
-| **Fleet roster** | `GET /fleet`, `POST /fleet`, `PATCH /fleet/{id}`, `DELETE /fleet/{id}`, `PATCH /session/{session_id}` | Group/rename/assign live sessions. `GET /fleet` is read-only and safe. |
+| **Sessions roster** | `GET /fleet`, `POST /fleet`, `PATCH /fleet/{id}`, `DELETE /fleet/{id}`, `PATCH /session/{session_id}` | Group/rename/assign live sessions. `GET /fleet` is read-only and safe. |
 | **Inspect a session** | `GET /session-log`, `GET /session-activity` | What a given agent discovered/reused and its per-turn activity. |
 | **ROI ledger** | `GET /ledger`, `GET /ledger/{session_id}`, `GET /ledger/{session_id}/raw-transcript`, `GET /documents/{id}/sessions` | Per-session savings rollup + transcript. |
 
 ### What is *not* wired yet (don't promise it)
 
-Cross-agent sharing today is **pull-based and topical**: agent A writes a doc, agent B only gets it if B's *own* `/discover` prompt semantically matches it. There is **no push channel** — nothing injects a sibling's context into a running agent, and `/fleet` membership does **not** change what `/discover` returns. The **fleet knowledge bus** and **directive channel** (`docs/planning/taskforce-fleet-mission-control.md` + `taskforce-fleet-knowledge-bus.md`) that would make "pull from another agent" real are **designed but unshipped**. If a user remembers context "automatically" arriving from a sibling, that was topical `/discover` overlap, not a live handoff.
+Cross-agent sharing today is **pull-based and topical**: agent A writes a doc, agent B only gets it if B's *own* `/discover` prompt semantically matches it. There is **no push channel** — nothing injects a sibling's context into a running agent, and `/fleet` membership does **not** change what `/discover` returns. The **Sessions knowledge bus** and **directive channel** (`docs/planning/taskforce-fleet-mission-control.md` + `taskforce-fleet-knowledge-bus.md`) that would make "pull from another agent" real are **designed but unshipped**. If a user remembers context "automatically" arriving from a sibling, that was topical `/discover` overlap, not a live handoff.
 
 ## Required output sequence
 

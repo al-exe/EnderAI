@@ -1,4 +1,4 @@
-"""Fleet session membership helpers (TF-229)."""
+"""Session group membership helpers (TF-229)."""
 
 from __future__ import annotations
 
@@ -168,7 +168,7 @@ def resurrect_archive_from_history(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Return a live agent session to the actor's default Fleet session."""
+    """Return a live agent session to the actor's default session group."""
 
     history = history_fleet_session_for_actor(session, actor)
     was_inactive = archive.ended_at is not None or (

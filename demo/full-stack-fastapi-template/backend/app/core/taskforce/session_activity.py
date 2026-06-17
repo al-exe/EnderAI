@@ -1,4 +1,4 @@
-"""Canonical append-only event capture shared by Fleet and Ledger."""
+"""Canonical append-only event capture shared by Sessions and Ledger."""
 
 from __future__ import annotations
 

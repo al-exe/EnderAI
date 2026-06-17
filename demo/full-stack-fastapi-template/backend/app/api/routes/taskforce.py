@@ -307,7 +307,7 @@ def session_turn_ended_route(
     current_user: CurrentUser,
     body: TaskforceSessionTurnEndedRequest,
 ) -> Response:
-    """Mark a session's turn as finished so Fleet shows "awaiting prompt".
+    """Mark a session's turn as finished so Sessions shows "awaiting prompt".
 
     Driven by the Claude Code Stop hook. A no-op (still 204) when the session
     has no archive row yet — the next prompt's heartbeat will create one.
@@ -524,14 +524,14 @@ def _fleet_session_for_actor(
 ) -> TaskforceFleetSession:
     fleet_session = session.get(TaskforceFleetSession, fleet_session_id)
     if fleet_session is None or fleet_session.actor_id != actor_id:
-        raise HTTPException(status_code=404, detail="Fleet session not found")
+        raise HTTPException(status_code=404, detail="Session group not found")
     return fleet_session
 
 
 def _fleet_name(value: str) -> str:
     name = value.strip()
     if not name:
-        raise HTTPException(status_code=422, detail="Fleet session name is required")
+        raise HTTPException(status_code=422, detail="Session group name is required")
     return name
 
 
@@ -540,7 +540,7 @@ def fleet_route(
     session: SessionDep,
     current_user: CurrentUser,
 ) -> Any:
-    """Group the current actor's active-session roster into Fleet sessions."""
+    """Group the current actor's active-session roster into session groups."""
 
     reconcile_inactive_fleet_membership(session, current_user)
     history = get_or_create_history_fleet_session(session, current_user)
@@ -619,7 +619,7 @@ def update_fleet_session_route(
     fleet_session_id: uuid.UUID,
     body: TaskforceFleetSessionUpdate,
 ) -> Any:
-    """Rename one Fleet session owned by the current actor."""
+    """Rename one session group owned by the current actor."""
 
     fleet_session = _fleet_session_for_actor(
         session,
@@ -697,7 +697,7 @@ def assign_fleet_session_route(
     session_id: str,
     body: TaskforceFleetSessionAssignment,
 ) -> Any:
-    """Move an agent between fleets and/or rename its Fleet session label."""
+    """Move an agent between session groups and/or rename its session label."""
 
     if body.fleet_session_id is None and body.display_name is None:
         raise HTTPException(
@@ -772,7 +772,7 @@ def assign_fleet_session_route(
             history_agent.display_name = archive.display_name or history_agent.display_name
         return history_agent
 
-    raise HTTPException(status_code=404, detail="Taskforce session not found in Fleet")
+    raise HTTPException(status_code=404, detail="Taskforce session not found in Sessions")
 
 
 def _ledger_response_from_page(

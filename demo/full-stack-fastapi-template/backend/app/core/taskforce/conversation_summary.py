@@ -1,6 +1,6 @@
-"""One-line Fleet session labels from the opening user prompt.
+"""One-line Sessions labels from the opening user prompt.
 
-The Fleet roster shows a stable conversation label — not the rolling last
+The Sessions roster shows a stable conversation label — not the rolling last
 prompt. We capture it once when the session first speaks and never overwrite
 it unless the user renames the session explicitly.
 """

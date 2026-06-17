@@ -6,7 +6,7 @@
 # unlike the Stop hook (stop.sh), which fires on every agent-idle turn.
 # Ships a minimal digest to /v2/taskforce/observe with
 # `kind: "session_end"`, which marks the session archive's `ended_at` and
-# removes it from the active Fleet roster.
+# removes it from the active Sessions roster.
 #
 # - Never blocks the session (all failures exit 0).
 # - Sends no transcript/structured fields, so the payload is "not material"
