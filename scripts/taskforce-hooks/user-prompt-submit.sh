@@ -34,6 +34,9 @@ readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/git-context.sh"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
@@ -83,13 +86,9 @@ prompt="$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null)"
 [[ -z "$prompt" ]] && { log "skip: no prompt in payload"; exit 0; }
 
 session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
+cwd="$(taskforce_resolve_cwd_from_payload "$payload")"
 
-# Best-effort git branch — keeps the scoring slightly sharper.
-git_branch=""
-if [[ -n "$cwd" && -d "$cwd/.git" ]] && command -v git >/dev/null 2>&1; then
-    git_branch="$(cd "$cwd" && git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-fi
+git_branch="$(taskforce_resolve_git_branch_from_payload "$payload" 2>/dev/null || true)"
 
 # Build the request body.
 body="$(jq -cn \

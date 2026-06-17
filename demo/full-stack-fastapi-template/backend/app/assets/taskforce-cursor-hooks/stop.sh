@@ -31,6 +31,8 @@ readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.co
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly TRANSCRIPT_JQ="${SCRIPT_DIR}/transcript-extract.jq"
 readonly COMMANDS_JQ="${SCRIPT_DIR}/commands-extract.jq"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/git-context.sh"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
@@ -68,7 +70,8 @@ payload="$(cat || true)"
 
 session_id="$(jq -r '.session_id // .conversation_id // empty' <<<"$payload" 2>/dev/null)"
 transcript_path="$(jq -r '.transcript_path // empty' <<<"$payload" 2>/dev/null)"
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
+cwd="$(taskforce_resolve_cwd_from_payload "$payload")"
+git_branch="$(taskforce_resolve_git_branch_from_payload "$payload" 2>/dev/null || true)"
 
 prompt_user="$(
     jq -r '
@@ -123,6 +126,10 @@ if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
                   } end' 2>/dev/null
     )"
     [[ -z "$harness_payload" ]] && harness_payload="null"
+
+    if [[ -z "$git_branch" ]]; then
+        git_branch="$(taskforce_resolve_git_branch_from_files_json "$files_touched" 2>/dev/null || true)"
+    fi
 fi
 
 # Session duration: span between the first and last transcript timestamps.
@@ -140,9 +147,9 @@ if [[ -n "$transcript_path" && -r "$transcript_path" ]]; then
 fi
 
 # Active git branch (best effort; the hook runs in the session cwd).
-branch=""
-if [[ -n "$cwd" && -d "$cwd" ]]; then
-    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+branch="$git_branch"
+if [[ -z "$branch" ]]; then
+    branch="$(taskforce_git_branch_for_path "$cwd" 2>/dev/null || true)"
 fi
 
 # Pin the active document if the user-prompt-submit hook stashed one.

@@ -13,6 +13,9 @@ readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
 readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/git-context.sh"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
@@ -54,14 +57,11 @@ prompt="$(jq -r '.prompt // empty' <<<"$payload" 2>/dev/null)"
 session_id="$(
     jq -r '.session_id // .conversation_id // empty' <<<"$payload" 2>/dev/null
 )"
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
+cwd="$(taskforce_resolve_cwd_from_payload "$payload")"
 [[ -z "$prompt" ]] && { log "skip: no prompt"; printf '%s\n' '{"continue": true}'; exit 0; }
 [[ -z "$session_id" ]] && { log "skip: no session_id"; printf '%s\n' '{"continue": true}'; exit 0; }
 
-git_branch=""
-if [[ -n "$cwd" && -d "$cwd" ]] && command -v git >/dev/null 2>&1; then
-    git_branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-fi
+git_branch="$(taskforce_resolve_git_branch_from_payload "$payload" 2>/dev/null || true)"
 
 body="$(jq -cn \
     --arg prompt "$prompt" \
