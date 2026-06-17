@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import desc
 from sqlmodel import Session, col, select
 
+from app.core.taskforce.cursor_prompt import clean_cursor_user_prompt
 from app.models import (
     TaskforceCommandRun,
     TaskforceObserveRequest,
@@ -83,6 +84,15 @@ def _normalize(text: str | None, limit: int = _MAX_EVENT_TEXT) -> str:
     return " ".join((text or "").split())[:limit]
 
 
+def prepare_user_prompt(text: str | None, client: str | None) -> str:
+    """Normalize a human prompt, including Cursor wrapper and Fleet UI paste noise."""
+
+    raw = text or ""
+    if (client or "").lower() == "cursor":
+        raw = clean_cursor_user_prompt(raw)
+    return _normalize(raw)
+
+
 def _fallback_source_id(kind: str, values: list[str], occurrence: int) -> str:
     digest = hashlib.sha256("\0".join([kind, *values]).encode()).hexdigest()[:24]
     return f"observe:{kind}:{digest}:{occurrence}"
@@ -127,6 +137,7 @@ def normalized_session_events(
     events: list[dict[str, Any]] = []
     pending_commands = list(request.commands_run)
     occurrences: Counter[tuple[str, ...]] = Counter()
+    client = (request.client or "").lower()
 
     def next_occurrence(kind: str, *values: str) -> int:
         signature = (kind, *values)
@@ -160,6 +171,10 @@ def normalized_session_events(
         if not content:
             continue
         is_user = role in {"user", "human"}
+        if is_user and not _is_synthetic_user_turn(content):
+            content = prepare_user_prompt(content, client)
+            if not content:
+                continue
         # A user-role turn that is pure harness plumbing (local-command output,
         # slash-command metadata, system reminders) is the agent talking to
         # itself, not a prompt — attribute it to the system instead.
@@ -193,23 +208,26 @@ def normalized_session_events(
         )
 
     if request.prompt and not any(event["kind"] == "prompt" for event in events):
-        content = request.prompt[:_MAX_EVENT_TEXT]
+        content = prepare_user_prompt(request.prompt, client)[:_MAX_EVENT_TEXT]
+        if not content:
+            content = ""
         occurrence = next_occurrence("prompt", "user", content)
-        events.insert(
-            0,
-            {
-                "source_event_id": _fallback_source_id(
-                    "prompt",
-                    ["user", content],
-                    occurrence,
-                ),
-                "kind": "prompt",
-                "occurred_at": now,
-                "role": "user",
-                "who": "@user",
-                "text": content,
-            },
-        )
+        if content:
+            events.insert(
+                0,
+                {
+                    "source_event_id": _fallback_source_id(
+                        "prompt",
+                        ["user", content],
+                        occurrence,
+                    ),
+                    "kind": "prompt",
+                    "occurred_at": now,
+                    "role": "user",
+                    "who": "@user",
+                    "text": content,
+                },
+            )
 
     flush_commands()
 
@@ -254,11 +272,12 @@ def record_activity_prompt(
     prompt: str,
     demo: bool,
     fleet_session_id: uuid.UUID | None,
+    client: str | None = None,
     now: datetime | None = None,
 ) -> TaskforceSessionEvent | None:
     """Record a prompt immediately when `/discover` receives it."""
 
-    text = _normalize(prompt)
+    text = prepare_user_prompt(prompt, client)
     if not session_id or not text:
         return None
 

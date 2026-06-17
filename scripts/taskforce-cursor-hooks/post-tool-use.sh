@@ -129,6 +129,17 @@ harness_payload="$(
 )"
 [[ -z "$harness_payload" ]] && harness_payload="null"
 
+prompt_user=""
+if [[ "$transcript_array" != "[]" ]]; then
+    prompt_user="$(
+        jq -r '[.[] | select(.role == "user") | .content] | map(select(length > 0)) | last // ""' \
+            <<<"$transcript_array" 2>/dev/null
+    )"
+    if [[ ${#prompt_user} -gt 8000 ]]; then
+        prompt_user="${prompt_user:0:7997}..."
+    fi
+fi
+
 active_doc_id="null"
 if [[ -f "${STATE_DIR}/${session_id}.active" ]]; then
     active_doc_id="\"$(cat "${STATE_DIR}/${session_id}.active" | tr -d '\r\n')\""
@@ -144,6 +155,7 @@ body="$(jq -cn \
     --arg session_id "$session_id" \
     --arg cwd "$cwd" \
     --arg branch "$branch" \
+    --arg prompt "$prompt_user" \
     --argjson transcript "$transcript_array" \
     --argjson files "$files_touched" \
     --argjson commands "$commands_run" \
@@ -152,7 +164,7 @@ body="$(jq -cn \
     --argjson checkpoint_index "$checkpoint_index" \
     '{
         kind: "checkpoint",
-        prompt: "",
+        prompt: $prompt,
         transcript: $transcript,
         active_document_id: $active,
         session_id: $session_id,

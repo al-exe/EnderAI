@@ -36,7 +36,7 @@ from app.core.taskforce.session_provenance import (
     resolve_session_client,
     sync_session_provenance,
 )
-from app.core.taskforce.session_activity import record_activity_prompt
+from app.core.taskforce.session_activity import prepare_user_prompt, record_activity_prompt
 from app.models import (
     AgentSpecialist,
     TaskforceActiveSession,
@@ -150,10 +150,12 @@ def register_session_heartbeat(
         archive.fleet_session_id = get_or_create_default_fleet_session(
             session, actor
         ).id
-    if prompt.strip():
-        archive.title = " ".join(prompt.split())[:255]
+    effective_client = resolve_session_client(client) or archive.client
+    cleaned_prompt = prepare_user_prompt(prompt, effective_client)
+    if cleaned_prompt:
+        archive.title = cleaned_prompt[:255]
         if archive.conversation_summary is None:
-            archive.conversation_summary = summarize_opening_prompt(prompt)
+            archive.conversation_summary = summarize_opening_prompt(cleaned_prompt)
 
     archive.last_seen_at = now
     archive.updated_at = now
@@ -161,7 +163,7 @@ def register_session_heartbeat(
 
     # Append the prompt to the durable per-turn activity timeline (TF-247).
     # Deduped against this session's most recent row inside the helper.
-    if prompt.strip():
+    if cleaned_prompt:
         record_activity_prompt(
             session,
             actor=actor,
@@ -169,6 +171,7 @@ def register_session_heartbeat(
             prompt=prompt,
             demo=demo,
             fleet_session_id=archive.fleet_session_id,
+            client=effective_client,
             now=now,
         )
     return archive
