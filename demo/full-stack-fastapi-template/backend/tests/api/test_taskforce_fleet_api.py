@@ -50,6 +50,7 @@ def _create_archive(
     fleet_session_id: uuid.UUID | None = None,
     referenced_document_ids: list[str] | None = None,
     model_id: str | None = "claude-opus-4-8",
+    client: str | None = None,
     started_at: datetime | None = None,
 ) -> TaskforceSessionArchive:
     archive = TaskforceSessionArchive(
@@ -62,6 +63,7 @@ def _create_archive(
         title=f"Archive {session_id}",
         specialist_slug="backend",
         model_id=model_id,
+        client=client,
         started_at=started_at,
         imported_at=imported_at,
         last_seen_at=imported_at,
@@ -234,6 +236,55 @@ def test_fleet_groups_top_five_recent_active_sessions(
     assert grouped["agents"][1]["status"] == "running"
     assert grouped["agents"][2]["status"] == "running"
     assert "recent-5" not in grouped_ids
+
+
+def test_fleet_agent_kind_classifies_driving_tool(
+    client: TestClient,
+    db: Session,
+) -> None:
+    """Each row reports which coding tool drives it, for the Fleet chip."""
+
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Mixed tools")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    cases = {
+        "agent-claude": ("claude-code", "claude-opus-4-8", "claude"),
+        "agent-codex": ("codex", "gpt-5.4", "codex"),
+        "agent-cursor": ("cursor", "claude-sonnet-4-6", "cursor"),
+        # No self-reported client: fall back to the model id.
+        "agent-model-fallback": (None, "gpt-5.4", "codex"),
+        # Neither client nor a recognizable model: unknown tool.
+        "agent-unknown": (None, "mystery-model-1", "other"),
+    }
+    for index, (session_id, (client_value, model_id, _)) in enumerate(cases.items()):
+        _create_archive(
+            db,
+            user=user,
+            session_id=session_id,
+            imported_at=now - timedelta(minutes=index),
+            fleet_session_id=fleet_id,
+            client=client_value,
+            model_id=model_id,
+        )
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    grouped = next(
+        item
+        for item in response.json()["fleet_sessions"]
+        if item["id"] == str(fleet_id)
+    )
+    kind_by_session = {
+        agent["session_id"]: agent["agent_kind"] for agent in grouped["agents"]
+    }
+    for session_id, (_, _, expected_kind) in cases.items():
+        assert kind_by_session[session_id] == expected_kind
 
 
 def test_reassign_and_delete_move_agent_without_ending_session(

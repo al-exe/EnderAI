@@ -1861,6 +1861,10 @@ class TaskforceFleetAgentPublic(SQLModel):
     specialist_slug: str | None = None
     specialist_rule_count: int | None = Field(default=None, ge=0)
     model_id: str | None = None
+    # Which coding tool is driving the session, for the Fleet row chip. Derived
+    # from the self-reported ``client`` provenance (advisory only; identity is
+    # JWT) with a ``model_id`` fallback. "other" covers unknown/unreported.
+    agent_kind: Literal["claude", "codex", "cursor", "other"] = "other"
 
 
 class TaskforceFleetSessionCreate(SQLModel):
