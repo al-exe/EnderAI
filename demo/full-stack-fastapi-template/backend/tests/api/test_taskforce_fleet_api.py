@@ -1193,16 +1193,24 @@ def test_archive_session_cannot_be_renamed_or_deleted(
     assert deleted.status_code == 422, deleted.text
 
 
-def test_fleet_session_context_surfaces_group_documents(
+def test_fleet_session_context_follows_agents_currently_in_group(
     client: TestClient,
     db: Session,
 ) -> None:
-    """The drawer feed returns this group's docs, newest first, group-scoped."""
+    """The drawer feed reflects the agents in the group now — not a frozen stamp.
+
+    Context is derived from the documents the group's current session archives
+    produced, so a doc whose producing agent has moved to another group drops
+    out even if its (stale) ``fleet_session_id`` still points here, and a doc no
+    current agent produced never appears.
+    """
 
     email, headers = _signup(client)
     user = _user_by_email(db, email)
     fleet = _create_fleet(client, headers, "Shared context group")
     fleet_id = uuid.UUID(str(fleet["id"]))
+    other = _create_fleet(client, headers, "Other group")
+    other_id = uuid.UUID(str(other["id"]))
     now = datetime.now(timezone.utc)
 
     older = V2Document(
@@ -1223,15 +1231,55 @@ def test_fleet_session_context_surfaces_group_documents(
         fleet_session_id=fleet_id,
         updated_at=now,
     )
-    ungrouped = V2Document(
+    # Stale stamp still points at this group, but its agent has moved away.
+    moved_away = V2Document(
         owner_id=user.id,
         organization_id=user.organization_id,
-        title="Ungrouped doc",
-        ai_generated_summary="Belongs to no session group.",
-        fleet_session_id=None,
+        title="Moved-away doc",
+        ai_generated_summary="Produced before the agent left this group.",
+        produced_by_client="claude",
+        fleet_session_id=fleet_id,
+        updated_at=now,
     )
-    db.add_all([older, newer, ungrouped])
+    orphan = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Orphan doc",
+        ai_generated_summary="No current agent produced this.",
+        fleet_session_id=fleet_id,
+    )
+    db.add_all([older, newer, moved_away, orphan])
     db.commit()
+    db.refresh(older)
+    db.refresh(newer)
+    db.refresh(moved_away)
+
+    # Two live agents in this group produced the older/newer docs.
+    _create_archive(
+        db,
+        user=user,
+        session_id="agent-older",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+        referenced_document_ids=[str(older.id)],
+    )
+    _create_archive(
+        db,
+        user=user,
+        session_id="agent-newer",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+        referenced_document_ids=[str(newer.id)],
+    )
+    # The agent that produced moved_away now lives in the other group.
+    _create_archive(
+        db,
+        user=user,
+        session_id="agent-moved",
+        imported_at=now,
+        fleet_session_id=other_id,
+        referenced_document_ids=[str(moved_away.id)],
+    )
 
     response = client.get(
         f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet_id}/context",
@@ -1246,7 +1294,9 @@ def test_fleet_session_context_surfaces_group_documents(
 
     titles = [entry["title"] for entry in body["entries"]]
     assert titles == ["Newer group doc", "Older group doc"]
-    assert "Ungrouped doc" not in titles
+    # Stale stamp no longer pollutes; orphan doc never appears.
+    assert "Moved-away doc" not in titles
+    assert "Orphan doc" not in titles
 
     first = body["entries"][0]
     assert first["produced_by_client"] == "cursor"
