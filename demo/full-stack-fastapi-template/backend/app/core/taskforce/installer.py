@@ -53,7 +53,7 @@ CODEX_HOOKS = (
         "session-start.sh",
         "taskforce-session-start.sh",
         "SessionStart",
-        "startup|resume|clear",
+        "startup|resume|clear|compact",
         10,
         "TASKFORCE_CODEX_SESSION_START_EOF",
     ),
@@ -64,6 +64,22 @@ CODEX_HOOKS = (
         "*",
         5,
         "TASKFORCE_CODEX_USER_PROMPT_SUBMIT_EOF",
+    ),
+    (
+        "observe.sh",
+        "taskforce-observe.sh",
+        "PostToolUse",
+        "*",
+        15,
+        "TASKFORCE_CODEX_OBSERVE_POST_TOOL_USE_EOF",
+    ),
+    (
+        "observe.sh",
+        "taskforce-observe.sh",
+        "Stop",
+        "*",
+        15,
+        "TASKFORCE_CODEX_OBSERVE_STOP_EOF",
     ),
 )
 
@@ -386,9 +402,7 @@ def build_cursor_hook_installer() -> str:
     )
 
     for _, target_name, hook_name, timeout, _ in CURSOR_HOOKS:
-        lines.append(
-            f'merge_hook {hook_name} "./hooks/{target_name}" {timeout}'
-        )
+        lines.append(f'merge_hook {hook_name} "./hooks/{target_name}" {timeout}')
 
     lines.extend(
         [
