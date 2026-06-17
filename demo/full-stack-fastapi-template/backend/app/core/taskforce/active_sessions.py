@@ -32,7 +32,10 @@ from app.core.taskforce.fleet_sessions import (
     history_fleet_session_for_actor,
     resurrect_archive_from_history,
 )
-from app.core.taskforce.session_provenance import merge_session_client
+from app.core.taskforce.session_provenance import (
+    resolve_session_client,
+    sync_session_provenance,
+)
 from app.core.taskforce.session_activity import record_activity_prompt
 from app.models import (
     AgentSpecialist,
@@ -116,13 +119,14 @@ def register_session_heartbeat(
     ).first()
 
     if archive is None:
+        canonical_client = resolve_session_client(client)
         archive = TaskforceSessionArchive(
             session_id=session_id,
             actor_id=actor.id,
             organization_id=actor.organization_id,
             is_demo=demo,
-            client=client,
-            harness_label=client,
+            client=canonical_client,
+            harness_label=canonical_client,
             model_id=model_id,
             cwd=cwd,
             repo=_repo_from_cwd(cwd),
@@ -135,8 +139,11 @@ def register_session_heartbeat(
         archive.cwd = cwd or archive.cwd
         archive.repo = _repo_from_cwd(cwd) or archive.repo
         archive.branch = branch or archive.branch
-        archive.client = merge_session_client(archive.client, client)
-        archive.harness_label = merge_session_client(archive.harness_label, client)
+        archive.client, archive.harness_label = sync_session_provenance(
+            client=archive.client,
+            harness_label=archive.harness_label,
+            incoming=client,
+        )
         archive.model_id = model_id or archive.model_id
         resurrect_archive_from_history(session, archive, actor, now=now)
     if archive.fleet_session_id is None:
@@ -343,10 +350,10 @@ def _agent_kind(
     ``client`` is briefly missing.
     """
 
-    for value in (client, harness_label):
-        kind = _AGENT_KIND_BY_CLIENT.get((value or "").strip().lower())
-        if kind is not None:
-            return kind
+    canonical = resolve_session_client(client, harness_label)
+    kind = _AGENT_KIND_BY_CLIENT.get((canonical or "").strip().lower())
+    if kind is not None:
+        return kind
     model = (model_id or "").lower()
     if model.startswith(("gpt", "o1", "o3", "o4")):
         return "codex"

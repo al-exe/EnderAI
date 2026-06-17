@@ -42,3 +42,24 @@ def merge_session_client(
     if _CLIENT_PRIORITY.get(inc, 0) > _CLIENT_PRIORITY.get(ex, 0):
         return inc
     return existing
+
+
+def resolve_session_client(*values: str | None) -> str | None:
+    """Pick the strongest harness label across all known provenance fields."""
+
+    resolved: str | None = None
+    for value in values:
+        resolved = merge_session_client(resolved, value)
+    return resolved
+
+
+def sync_session_provenance(
+    *,
+    client: str | None,
+    harness_label: str | None,
+    incoming: str | None,
+) -> tuple[str | None, str | None]:
+    """Merge incoming provenance and keep ``client`` / ``harness_label`` aligned."""
+
+    canonical = resolve_session_client(client, harness_label, incoming)
+    return canonical, canonical

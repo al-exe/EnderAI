@@ -14,5 +14,9 @@ def test_agent_kind_does_not_infer_claude_from_model_id_alone() -> None:
     assert _agent_kind(None, "claude-sonnet-4-6", None) == "other"
 
 
+def test_agent_kind_prefers_cursor_harness_label_over_claude_client() -> None:
+    assert _agent_kind("claude-code", "claude-opus-4-8", "cursor") == "cursor"
+
+
 def test_agent_kind_infers_codex_from_openai_model_id() -> None:
     assert _agent_kind(None, "gpt-5.4", None) == "codex"
