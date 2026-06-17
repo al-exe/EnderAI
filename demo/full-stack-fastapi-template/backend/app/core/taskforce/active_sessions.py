@@ -318,6 +318,35 @@ def _minutes_ago(now: datetime, value: datetime) -> int:
     )
 
 
+# Maps the self-reported ``client`` provenance string (set by the hooks —
+# see app/assets/taskforce-*-hooks) to the Fleet row chip kind.
+_AGENT_KIND_BY_CLIENT = {
+    "claude-code": "claude",
+    "claude": "claude",
+    "codex": "codex",
+    "cursor": "cursor",
+}
+
+
+def _agent_kind(client: str | None, model_id: str | None) -> str:
+    """Classify the coding tool driving a session into a Fleet chip kind.
+
+    Prefers the self-reported ``client`` provenance. Cursor and Codex always
+    report a client, so the ``model_id`` fallback only disambiguates older
+    Claude Code sessions recorded before ``client`` was sent.
+    """
+
+    kind = _AGENT_KIND_BY_CLIENT.get((client or "").strip().lower())
+    if kind is not None:
+        return kind
+    model = (model_id or "").lower()
+    if model.startswith("claude"):
+        return "claude"
+    if model.startswith(("gpt", "o1", "o3", "o4")):
+        return "codex"
+    return "other"
+
+
 def _model_label(model_id: str | None) -> str | None:
     if not model_id:
         return None
@@ -501,6 +530,7 @@ def _fleet_agent_public_from_archive(
                     else None
                 ),
                 model_id=archive.model_id,
+                agent_kind=_agent_kind(archive.client, archive.model_id),
             )
         )
 
