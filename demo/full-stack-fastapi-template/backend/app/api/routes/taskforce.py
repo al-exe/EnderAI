@@ -30,6 +30,7 @@ from app.core.taskforce.active_sessions import (
     register_session_heartbeat,
 )
 from app.core.taskforce.discover import discover as run_discover
+from app.core.taskforce.discover import fleet_session_context
 from app.core.taskforce.fleet_sessions import (
     archive_is_inactive,
     get_or_create_default_fleet_session,
@@ -71,6 +72,7 @@ from app.models import (
     TaskforceReferenceResponse,
     TaskforceSessionActivityResponse,
     TaskforceSessionArchive,
+    TaskforceSessionContextResponse,
     TaskforceSessionEvent,
     TaskforceSessionEventPublic,
     TaskforceSessionHeartbeatRequest,
@@ -579,6 +581,35 @@ def fleet_route(
             )
             for fleet_session in fleet_sessions
         ]
+    )
+
+
+@router.get(
+    "/fleet/{fleet_session_id}/context",
+    response_model=TaskforceSessionContextResponse,
+)
+def fleet_session_context_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    fleet_session_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    """Shared-context feed for one session group (Sessions drawer).
+
+    Read-only: reuses the document-discovery corpus scoped to this group
+    rather than a bespoke per-session notes table.
+    """
+
+    fleet_session = _fleet_session_for_actor(
+        session,
+        actor_id=current_user.id,
+        fleet_session_id=fleet_session_id,
+    )
+    return fleet_session_context(
+        session,
+        actor=current_user,
+        fleet_session=fleet_session,
+        demo=demo,
     )
 
 

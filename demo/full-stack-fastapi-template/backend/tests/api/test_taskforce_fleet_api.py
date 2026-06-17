@@ -1083,3 +1083,79 @@ def test_history_session_cannot_be_renamed_or_deleted(
         headers=headers,
     )
     assert deleted.status_code == 422, deleted.text
+
+
+def test_fleet_session_context_surfaces_group_documents(
+    client: TestClient,
+    db: Session,
+) -> None:
+    """The drawer feed returns this group's docs, newest first, group-scoped."""
+
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Shared context group")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    older = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Older group doc",
+        ai_generated_summary="First slice of the shared work.",
+        produced_by_client="codex",
+        fleet_session_id=fleet_id,
+        updated_at=now - timedelta(minutes=10),
+    )
+    newer = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Newer group doc",
+        ai_generated_summary="Latest slice of the shared work.",
+        produced_by_client="cursor",
+        fleet_session_id=fleet_id,
+        updated_at=now,
+    )
+    ungrouped = V2Document(
+        owner_id=user.id,
+        organization_id=user.organization_id,
+        title="Ungrouped doc",
+        ai_generated_summary="Belongs to no session group.",
+        fleet_session_id=None,
+    )
+    db.add_all([older, newer, ungrouped])
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet_id}/context",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["fleet_session_id"] == str(fleet_id)
+    assert body["scope"] == "Shared context group"
+    assert body["inject_token_budget"] == 2000
+    assert body["entry_count"] == 2
+
+    titles = [entry["title"] for entry in body["entries"]]
+    assert titles == ["Newer group doc", "Older group doc"]
+    assert "Ungrouped doc" not in titles
+
+    first = body["entries"][0]
+    assert first["produced_by_client"] == "cursor"
+    assert "Latest slice" in first["summary_markdown"]
+    assert first["token_cost"] > 0
+    assert body["token_estimate"] >= first["token_cost"]
+
+
+def test_fleet_session_context_is_actor_scoped(
+    client: TestClient,
+) -> None:
+    _, owner_headers = _signup(client)
+    _, other_headers = _signup(client)
+    fleet = _create_fleet(client, owner_headers, "Private group")
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet['id']}/context",
+        headers=other_headers,
+    )
+    assert response.status_code == 404, response.text
