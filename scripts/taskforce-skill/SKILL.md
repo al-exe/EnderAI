@@ -53,27 +53,50 @@ Cross-agent sharing today is **pull-based and topical**: agent A writes a doc, a
 
 You MUST execute the beats in this exact order. The skill is load-bearing for a recorded demo — do not skip, reorder, or summarize.
 
-### Beat 1 — Announce + show payload
+### Beat 1 — Find candidate files, then announce + show payload
 
-Before calling anything, print:
+Before calling the discover script, do two things in order.
 
-```
-🔎 Checking Taskforce for related prior work…
+**1a. Discover candidate files via Grep.**
 
-📨 Sending to Taskforce:
-```
-
-Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, `files`, `git_branch`.
-
-To populate `files` honestly (so the preview matches what the script actually sends), run this first with the Bash tool and use its output:
+Pick 1–2 high-signal nouns from the user's prompt (e.g. "Stripe webhook double-charging" → `stripe`, `webhook`; "JWT refresh failing" → `jwt`, `refresh`). Run a single Grep scoped to likely source dirs, excluding tests, migrations, and build artifacts:
 
 ```bash
-git diff --name-only --relative HEAD~1 HEAD 2>/dev/null \
-  | grep -vE '(^|/)(tests?|migrations?|alembic)/' \
-  | head -5
+grep -rln -E "(<kw1>.*<kw2>|<kw2>.*<kw1>)" \
+  --include="*.py" --include="*.ts" --include="*.tsx" --include="*.js" \
+  --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=.git \
+  --exclude-dir=tests --exclude-dir=migrations --exclude-dir=alembic \
+  app/ src/ backend/ 2>/dev/null | head -5
 ```
 
-If that returns nothing (not a git repo, or no recent commits), render `files` as `[]`. The discover script applies the same heuristic internally as a fallback, so the rendered payload mirrors the actual HTTP body.
+Print one line per candidate you'll send, using 🔎:
+
+```
+🔎 Found candidate file: app/api/routes/billing.py
+```
+
+**Cap at 2 files.** When grep returns more than 2, rank by how "handler-shaped" the path is and keep the top 2:
+1. Files under `routes/`, `handlers/`, `api/`, `controllers/` (the request entry points)
+2. Files under `services/`, `core/`, or whose filename matches a prompt noun (e.g. `stripe_billing.py` for a "stripe" prompt)
+3. Everything else (drop)
+
+Extra files dilute the scorer's per-doc files-match ratio (each match doc is rewarded for how many of the sent files appear in *its* corpus, so unrelated files drag scores down). Two well-chosen paths is the sweet spot.
+
+If zero come back, refine the grep once with different terms; if still zero, print `🔎 No obvious candidates from prompt — Sending without file hints.` and proceed with `files: []`.
+
+Do **not** Read the file contents here. The paths are scoring signal for Taskforce; full content comes after matches return (Beat 5).
+
+**1b. Announce + show payload.**
+
+Print:
+
+```
+🟪 Checking Taskforce for related prior work…
+
+📬 Sending to Taskforce:
+```
+
+Then a fenced ` ```json ` block with the literal payload you are about to send: `prompt`, `cwd`, the `files` from step 1a, and `git_branch`. The payload must match what you pass to `tf-discover.sh` in Beat 2 — no hidden differences.
 
 ### Beat 2 — Call discover
 
@@ -96,7 +119,7 @@ Parse the JSON result. If `.ok == false`:
 If `.matched_specialist` is non-null, print it FIRST, before listing documents. A "profile" is reusable operating context (routing triggers, linked memory, code touchpoints) that any harness/model can adopt — not an autonomous agent.
 
 ```
-✓ Selected profile: <name> — <role>
+🧑‍💻 Bringing in profile: <name> — <role>
   Confidence: <band> (<confidence>)
   Why: <reasons joined with " · ">
   [→ View profile](<href>)
@@ -106,12 +129,26 @@ If `.matched_specialist` is null, skip this beat silently (no banner, no apology
 
 ### Beat 4 — Render the document matches with 3-line previews
 
-If `.matches` is empty, print `No related prior work in Taskforce yet — proceeding from scratch.` and skip ahead to Beat 5.
+If `.matches` is empty, print `No related prior work in Taskforce yet — Proceeding from scratch.` and skip ahead to Beat 5.
 
-Otherwise, for each match print a numbered card:
+Otherwise, first print a header line attributing the documents to whoever did the bringing — the matched profile if there was one, otherwise Taskforce itself. Pluralize `document` based on count.
+
+- If `.matched_specialist` is non-null:
+
+  ```
+  📖 <matched_specialist.name> is bringing in <N> related document<s>:
+  ```
+
+- If `.matched_specialist` is null:
+
+  ```
+  📖 Taskforce is bringing in <N> related document<s>:
+  ```
+
+Then, for each match print a numbered card:
 
 ```
-N. **<title>** — confidence: <confidence_band> (<score, 2 decimals>)
+N. **<title>** — Confidence: <confidence_band> (<score, 2 decimals>)
    [→ Open at <matched_anchor_id>](<href>)
    Matched on: <match_reasons joined with ", ">
 
@@ -126,9 +163,33 @@ Now read each `match.anchor_full` as additional context for your reasoning. **Do
 
 Tackle the user's task normally — read code, propose a fix, make edits, run tests. Reference the prior decision in your reasoning when it applies ("Based on the prior decision in *<title>* (<anchor_id>), …") so the viewer sees the context shaped the work.
 
-### Beat 6 — Record the consultation
+### Beat 5b — Confirm with the user before recording
 
-When the work is done (tests pass, edit applied, or you've otherwise reached a stopping point), call:
+After your edits land and tests pass (or you've otherwise reached a stopping point), print a short recap and ask one yes/no question:
+
+```
+Recap of this session:
+  • Applied: <one-line summary of what changed and where>
+  • Verified: <test name(s)>, passed
+
+Did this resolve the issue?
+```
+
+Then **wait** for the user's response. Do NOT call `tf-reference.sh` or `tf-savings.sh` until the user replies.
+
+- If the user replies with any affirmation (yes, y, yep, looks good, ship it, etc.): proceed to Beat 6.
+- If the user replies with any negation (no, n, not yet, undo, etc.) or asks for further changes:
+  - Print: `Got it — leaving Taskforce in "consulted-only" mode. The matches stayed in your context for this session; no reference rows added, no session recorded as resolved.`
+  - Do NOT call `tf-reference.sh` or `tf-savings.sh`.
+  - Continue the conversation normally — the user wants to keep iterating.
+
+If the reply is ambiguous (a follow-up question, not a clear yes/no), ask once more: `Just to confirm — is this issue resolved, or do you want to keep iterating?`
+
+This gate is the only thing standing between Taskforce and a false-positive save. Don't skip it, don't pre-fire references, don't print savings before the user agrees the fix landed.
+
+### Beat 6 — Record the consultation (only after Beat 5b confirms)
+
+Once the user has confirmed in Beat 5b that the fix resolved the issue, call:
 
 ```bash
 ~/.claude/skills/tf/tf-reference.sh \
@@ -144,20 +205,22 @@ If you consulted all matches (the usual case), pass all their ids. If you skippe
 Print, before any savings line:
 
 ```
-Recording this session in the referenced docs…
+✍️ Writing this session back to the referenced documents…
 ```
 
-Then one line per `updated_document_ids` entry. You'll need to look up the title from the discover results:
+Then one indented bullet per `updated_document_ids` entry. Render the title as a markdown link to the document page — construct the URL as `<frontend_host>/v2/library/<doc_id>` (`frontend_host` is on the discover response; `doc_id` matches the entry in `updated_document_ids`):
 
 ```
-✓ <title> — added Referenced by entry
+  • [<title>](<frontend_host>/v2/library/<doc_id>) — Added "Referenced by" entry
 ```
 
-If the matched specialist was non-null, also print:
+If the matched specialist was non-null, also print (indented to match; link the name to the profile page using `matched_specialist.href` from discover):
 
 ```
-✓ <specialist name> — added invocation
+  • Profile [<specialist name>](<matched_specialist.href>) — Added invocation
 ```
+
+Do **not** collapse these into a summary like "Recorded consultation in N documents." The per-document bullets are load-bearing for the demo — viewer sees each write happen, which is the only visible proof of the back-link. Keep ✍️ on the header line only; child lines stay clean bullets with linked titles.
 
 (The specialist invocation is recorded server-side by the matched_specialist routing on discover; this line is for the user's benefit.)
 
@@ -174,10 +237,10 @@ Call:
 Then print, as the **final** line of your response:
 
 ```
-Finished. [Taskforce saved you <net_saved_tokens> tokens on <model_display><optional effort suffix> (~$<usd_saved>)](<metrics_url>)
+💰 [Taskforce saved you <net_saved_tokens> tokens on <model_display><optional effort suffix> (~$<usd_saved>)](<metrics_url>)
 ```
 
-Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is non-empty, append ` <effort_label> effort`; if it is empty, omit the effort suffix entirely. Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `Finished.` is one markdown link, so the user can click it to open the metrics page filtered to this session.
+Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is non-empty, append ` <effort_label> effort`; if it is empty, omit the effort suffix entirely. Format `net_saved_tokens` with comma thousands separators (e.g. `28,432`). Format `usd_saved` to 2 decimals (e.g. `0.38`). The whole sentence after `💰 ` is one markdown link, so the user can click it to open the metrics page filtered to this session.
 
 `tf-savings.sh` reads `CLAUDE_MODEL` from the running Claude Code environment and passes it as `pricing_model_id`; when unset it falls back to `claude-opus-4-7`. It also reads `CLAUDE_EFFORT` when present for display only. Do not hardcode `Opus 4.7 xhigh effort`; render the values returned by the script so the USD math and model label stay aligned.
 
@@ -185,15 +248,17 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 
 | Scenario | Behavior |
 |---|---|
-| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/6/7/8, do the work normally |
-| `.matches == []` | Skip Beats 4/6/7/8 (no docs to reference / record savings against), do the work normally |
+| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/5b/6/7/8, do the work normally |
+| `.matches == []` | Skip Beats 4/5b/6/7/8 (nothing to confirm, reference, or score), do the work normally |
 | `.matched_specialist == null` | Skip Beat 3, keep all other beats |
-| `tf-reference.sh` returns `ok:false` | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
-| `tf-savings.sh` returns `ok:false` | Print `Finished.` with no savings line |
+| User says no (or anything non-affirmative) at Beat 5b | Skip Beats 6/7/8 entirely; print the "consulted-only mode" line; keep helping the user |
+| `tf-reference.sh` returns `ok:false` (after Beat 5b yes) | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
+| `tf-savings.sh` returns `ok:false` (after Beat 5b yes) | Print `💰 (Savings unavailable)` with no link, then stop |
 
 ## Ordering rules — non-negotiable
 
-- **Do not** call `tf-reference.sh` before the work is done. The user must see the edits + test pass before the "Referenced by" banner.
+- **Do not** call `tf-reference.sh` before the user explicitly confirms at Beat 5b. The "Referenced by" rows are evidence the consultation was useful; pre-firing them lies about that.
 - **Do not** call `tf-savings.sh` before `tf-reference.sh`. The savings number is computed from consultation events, but the order also matters for the demo recording flow.
-- **Do not** call `tf-discover.sh` more than once per `/tf` invocation. One discover → one session_id → one reference call → one savings call.
+- **Do not** call `tf-discover.sh` more than once per `/tf` invocation. One discover → one session_id → one Beat 5b confirmation → one reference call → one savings call.
 - **Do not** render `match.anchor_full` to the user. That content is for your reasoning only — the user sees the 3-line preview.
+- **Do not** assume yes at Beat 5b. Wait for an explicit reply; "I think that's it" or "looks reasonable" without a yes/no should trigger the clarification prompt, not auto-proceed.

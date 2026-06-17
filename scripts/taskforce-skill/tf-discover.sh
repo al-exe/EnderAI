@@ -73,25 +73,10 @@ fi
 token="$(tr -d '\r\n' < "$token_file")"
 [[ -z "$token" ]] && emit_error "no_token" "token file empty"
 
-# Build files JSON array from CSV.
-# Fallback when caller passes empty: Claude Code doesn't expose VS Code's open
-# tabs to the agent, so the SKILL.md "pull from open tabs" guidance produces []
-# in practice. Use the last commit's changed files instead — for demo branches
-# whose tip commit IS the bug, this gives the scorer exactly the right hint.
-if [[ -z "$files_csv" ]] && [[ -n "$cwd" ]] && git -C "$cwd" rev-parse --show-toplevel >/dev/null 2>&1; then
-    # Filter to source files only — alembic migrations and tests dilute the
-    # per-doc files-match ratio (scorer rewards files that appear in the doc
-    # corpus / total files sent), which can push the score below min_score
-    # even when the relevant files are present.
-    fallback_files=$(git -C "$cwd" diff --name-only --relative HEAD~1 HEAD 2>/dev/null \
-        | grep -vE '(^|/)(tests?|migrations?|alembic)/' \
-        | head -5 \
-        | paste -sd, -)
-    if [[ -n "$fallback_files" ]]; then
-        files_csv="$fallback_files"
-    fi
-fi
-
+# Build files JSON array from CSV. Caller (Claude, per SKILL.md Beat 1a) is
+# responsible for populating --files via grep-based discovery on the user's
+# prompt. Empty is valid — the backend will score on the prompt alone, which
+# may return zero matches if the prompt isn't specific enough on its own.
 files_json="$(jq -cn --arg csv "$files_csv" '
     if $csv == "" then []
     else ($csv | split(",") | map(select(. != "")))
