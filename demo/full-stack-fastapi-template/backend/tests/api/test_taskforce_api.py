@@ -982,6 +982,50 @@ def test_session_observe_created_document_stamps_produced_by_client(
     assert document.produced_by_client == "codex"
 
 
+def test_session_observe_preserves_cursor_client_over_claude_code(
+    client: TestClient,
+    db: Session,
+) -> None:
+    """Cursor hooks stamp ``cursor``; shared MCP defaults must not clobber it."""
+
+    _, headers = _signup(client)
+    session_id = "cursor-client-sticky"
+
+    first = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Travel recommendations for Tokyo",
+            "client": "cursor",
+            "session_id": session_id,
+            "duration_ms": 100,
+        },
+    )
+    assert first.status_code == 202, first.text
+
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Follow-up from MCP default client",
+            "client": "claude-code",
+            "session_id": session_id,
+            "duration_ms": 100,
+        },
+    )
+    assert second.status_code == 202, second.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == session_id
+        )
+    ).one()
+    assert archive.client == "cursor"
+    assert archive.harness_label == "cursor"
+
+
 def test_session_observe_reuses_archive_active_document_without_request_pin(
     client: TestClient,
     db: Session,

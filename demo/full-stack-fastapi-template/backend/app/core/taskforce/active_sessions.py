@@ -32,6 +32,7 @@ from app.core.taskforce.fleet_sessions import (
     history_fleet_session_for_actor,
     resurrect_archive_from_history,
 )
+from app.core.taskforce.session_provenance import merge_session_client
 from app.core.taskforce.session_activity import record_activity_prompt
 from app.models import (
     AgentSpecialist,
@@ -134,8 +135,8 @@ def register_session_heartbeat(
         archive.cwd = cwd or archive.cwd
         archive.repo = _repo_from_cwd(cwd) or archive.repo
         archive.branch = branch or archive.branch
-        archive.client = client or archive.client
-        archive.harness_label = client or archive.harness_label
+        archive.client = merge_session_client(archive.client, client)
+        archive.harness_label = merge_session_client(archive.harness_label, client)
         archive.model_id = model_id or archive.model_id
         resurrect_archive_from_history(session, archive, actor, now=now)
     if archive.fleet_session_id is None:
@@ -328,20 +329,25 @@ _AGENT_KIND_BY_CLIENT = {
 }
 
 
-def _agent_kind(client: str | None, model_id: str | None) -> str:
+def _agent_kind(
+    client: str | None,
+    model_id: str | None,
+    harness_label: str | None = None,
+) -> str:
     """Classify the coding tool driving a session into a Fleet chip kind.
 
-    Prefers the self-reported ``client`` provenance. Cursor and Codex always
-    report a client, so the ``model_id`` fallback only disambiguates older
-    Claude Code sessions recorded before ``client`` was sent.
+    Prefers hook-reported ``client`` / ``harness_label`` provenance. Only
+    OpenAI-style ``model_id`` values are used as a last resort — never
+    ``claude-*``, because Cursor and Claude Code share Anthropic models and
+    inferring "claude" from the model alone mislabels Cursor sessions whenever
+    ``client`` is briefly missing.
     """
 
-    kind = _AGENT_KIND_BY_CLIENT.get((client or "").strip().lower())
-    if kind is not None:
-        return kind
+    for value in (client, harness_label):
+        kind = _AGENT_KIND_BY_CLIENT.get((value or "").strip().lower())
+        if kind is not None:
+            return kind
     model = (model_id or "").lower()
-    if model.startswith("claude"):
-        return "claude"
     if model.startswith(("gpt", "o1", "o3", "o4")):
         return "codex"
     return "other"
@@ -530,7 +536,11 @@ def _fleet_agent_public_from_archive(
                     else None
                 ),
                 model_id=archive.model_id,
-                agent_kind=_agent_kind(archive.client, archive.model_id),
+                agent_kind=_agent_kind(
+                    archive.client,
+                    archive.model_id,
+                    archive.harness_label,
+                ),
             )
         )
 
