@@ -8,15 +8,25 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, col, select
 
-from app.models import TaskforceFleetSession, TaskforceSessionArchive, User, get_datetime_utc
+from app.models import (
+    TaskforceFleetSession,
+    TaskforceSessionArchive,
+    User,
+    get_datetime_utc,
+)
 
 DEFAULT_SESSION_NAME = "Session 1"
-HISTORY_SESSION_NAME = "History"
+# The user-controlled "Archive" bucket. Agents are never swept here
+# automatically — archiving is a deliberate, user-initiated drag (TF). The
+# ``is_history`` column name predates the rename and is kept for schema
+# stability; the display name is "Archive".
+HISTORY_SESSION_NAME = "Archive"
 _SESSION_NUMBER = re.compile(r"^Session ([1-9][0-9]*)$")
 
-# Inactive agents older than this window are swept into History on fleet reads.
-# 8h keeps an agent in its live fleet session for a full working session before
-# it ages into History (matches FLEET_RUNNING_WINDOW / MAX_AGE).
+# How long an agent's last heartbeat can age before it is considered inactive
+# (gray "Inactive" state). Inactive agents stay put in their group — they are
+# not moved anywhere — until the user archives them. Matches MAX_AGE so an
+# agent stays live for a full working session before flipping to Inactive.
 INACTIVE_WINDOW_MINUTES = 8 * 60
 
 
@@ -168,43 +178,27 @@ def resurrect_archive_from_history(
     *,
     now: datetime | None = None,
 ) -> None:
-    """Return a live agent session to the actor's default session group."""
+    """Bring an inactive agent back to life when the user types in it again.
+
+    Two cases:
+
+    - The agent went **Inactive in place** (``ended_at`` set, still in its own
+      group): just clear ``ended_at`` so it reports ``running`` again. It stays
+      in the same group — we never relocate a session the user didn't move.
+    - The agent was **archived** (sitting in the actor's Archive group): clear
+      ``ended_at`` *and* pull it back into the default working group, since the
+      Archive is for sessions the user has set aside.
+    """
 
     history = history_fleet_session_for_actor(session, actor)
-    was_inactive = archive.ended_at is not None or (
-        history is not None and archive.fleet_session_id == history.id
-    )
-    if not was_inactive:
+    in_archive = history is not None and archive.fleet_session_id == history.id
+    if archive.ended_at is None and not in_archive:
         return
 
     archive.ended_at = None
-    archive.fleet_session_id = get_or_create_default_fleet_session(session, actor).id
+    if in_archive:
+        archive.fleet_session_id = get_or_create_default_fleet_session(
+            session, actor
+        ).id
     archive.updated_at = now or get_datetime_utc()
     session.add(archive)
-
-
-def reconcile_inactive_fleet_membership(
-    session: Session,
-    actor: User,
-    *,
-    now: datetime | None = None,
-) -> None:
-    """Sweep inactive agent archives into the actor's History session."""
-
-    now = now or get_datetime_utc()
-    history = get_or_create_history_fleet_session(session, actor)
-    archives = session.exec(
-        select(TaskforceSessionArchive)
-        .where(TaskforceSessionArchive.actor_id == actor.id)
-        .where(TaskforceSessionArchive.fleet_session_id != history.id)
-    ).all()
-    changed = False
-    for archive in archives:
-        if not archive_is_inactive(archive, now=now):
-            continue
-        archive.fleet_session_id = history.id
-        archive.updated_at = now
-        session.add(archive)
-        changed = True
-    if changed:
-        session.flush()

@@ -133,7 +133,7 @@ def test_fleet_session_crud_is_actor_scoped(
     assert db.get(TaskforceFleetSession, uuid.UUID(str(fleet["id"]))) is None
 
 
-def test_fleet_groups_top_five_recent_active_sessions(
+def test_fleet_keeps_inactive_agents_in_their_group(
     client: TestClient,
     db: Session,
 ) -> None:
@@ -173,8 +173,9 @@ def test_fleet_groups_top_five_recent_active_sessions(
             db,
             user=user,
             session_id=f"recent-{index}",
-            # 0-2 stay fresh (active); 3-5 age past the 8h window so they get
-            # swept into History, preserving the active/history split.
+            # 0-2 stay fresh (active/running); 3-5 age past the 8h live window.
+            # Aged-out sessions are NOT swept anywhere — they stay in this group
+            # and report the gray "Inactive" state.
             imported_at=now
             - (
                 timedelta(minutes=index * 2)
@@ -188,18 +189,14 @@ def test_fleet_groups_top_five_recent_active_sessions(
         archive.specialist_slug = specialist.slug
         db.add(archive)
     db.commit()
-    _create_archive(
-        db,
-        user=user,
-        session_id="too-old",
-        imported_at=now - timedelta(hours=9),
-    )
+    # A cleanly ended session also stays in its group as Inactive.
     _create_archive(
         db,
         user=user,
         session_id="ended",
         imported_at=now,
         ended_at=now,
+        fleet_session_id=fleet_id,
     )
 
     response = client.get(
@@ -211,33 +208,41 @@ def test_fleet_groups_top_five_recent_active_sessions(
     grouped = next(
         item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
     )
-    grouped_ids = [agent["session_id"] for agent in grouped["agents"]]
+    status_by_id = {
+        agent["session_id"]: agent["status"] for agent in grouped["agents"]
+    }
 
     assert "unassigned" not in body
-    assert grouped_ids == [
+    # Every session stays in its group — nothing is auto-moved to Archive.
+    assert set(status_by_id) == {
         "recent-0",
         "recent-1",
         "recent-2",
-    ]
-    assert "recent-3" not in grouped_ids
-    assert "recent-4" not in grouped_ids
+        "recent-3",
+        "recent-4",
+        "recent-5",
+        "ended",
+    }
     history = next(item for item in body["fleet_sessions"] if item["is_history"])
-    history_ids = {agent["session_id"] for agent in history["agents"]}
-    assert {"recent-3", "recent-4"}.issubset(history_ids)
-    assert "too-old" not in grouped_ids
-    assert "ended" not in grouped_ids
-    assert grouped["agents"][0]["active_document_id"] == str(document.id)
-    assert grouped["agents"][0]["title"] == "Fleet document"
-    assert "implemented the Fleet backend" in grouped["agents"][0]["summary_markdown"]
-    assert grouped["agents"][0]["model_id"] == "claude-opus-4-8"
-    assert grouped["agents"][0]["status"] == "running"
+    assert history["agents"] == []
+    # Fresh sessions run; aged-out and ended sessions are Inactive in place.
+    assert status_by_id["recent-0"] == "running"
+    assert status_by_id["recent-1"] == "running"
+    assert status_by_id["recent-2"] == "running"
+    assert status_by_id["recent-3"] == "inactive"
+    assert status_by_id["recent-4"] == "inactive"
+    assert status_by_id["recent-5"] == "inactive"
+    assert status_by_id["ended"] == "inactive"
+
+    fresh = next(a for a in grouped["agents"] if a["session_id"] == "recent-0")
+    assert fresh["active_document_id"] == str(document.id)
+    assert fresh["title"] == "Fleet document"
+    assert "implemented the Fleet backend" in fresh["summary_markdown"]
+    assert fresh["model_id"] == "claude-opus-4-8"
     assert datetime.fromisoformat(
-        grouped["agents"][0]["started_at"].replace("Z", "+00:00")
+        fresh["started_at"].replace("Z", "+00:00")
     ) == now - timedelta(hours=1)
-    assert grouped["agents"][0]["specialist_rule_count"] == 2
-    assert grouped["agents"][1]["status"] == "running"
-    assert grouped["agents"][2]["status"] == "running"
-    assert "recent-5" not in grouped_ids
+    assert fresh["specialist_rule_count"] == 2
 
 
 def test_fleet_agent_kind_classifies_driving_tool(
@@ -543,7 +548,7 @@ def _agent_in_fleet(
     return next(item for item in agents if item["session_id"] == session_id)
 
 
-def test_fleet_status_distinguishes_running_waiting_idle() -> None:
+def test_fleet_status_distinguishes_running_waiting_inactive() -> None:
     now = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
 
     # A prompt arrived after the last turn end → a turn is in progress.
@@ -566,10 +571,23 @@ def test_fleet_status_distinguishes_running_waiting_idle() -> None:
     )
     # No turn-end recorded yet but fresh → running.
     assert _fleet_status(1, last_seen_at=now, last_turn_ended_at=None) == "running"
-    # Within the 8h live window, a quiet agent stays surfaced (not idle).
+    # Within the 8h live window, a quiet agent stays surfaced (not inactive).
     assert _fleet_status(120, last_seen_at=now, last_turn_ended_at=now) == "waiting"
-    # Stale beyond the 8h live window → idle regardless of turn state.
-    assert _fleet_status(8 * 60 + 1, last_seen_at=now, last_turn_ended_at=now) == "idle"
+    # Stale beyond the 8h live window → inactive regardless of turn state.
+    assert (
+        _fleet_status(8 * 60 + 1, last_seen_at=now, last_turn_ended_at=now)
+        == "inactive"
+    )
+    # A cleanly ended session is inactive even while still fresh.
+    assert (
+        _fleet_status(1, last_seen_at=now, last_turn_ended_at=None, ended_at=now)
+        == "inactive"
+    )
+    # Archive members are forced inactive regardless of freshness.
+    assert (
+        _fleet_status(1, last_seen_at=now, last_turn_ended_at=None, force_inactive=True)
+        == "inactive"
+    )
 
 
 def test_session_turn_ended_marks_agent_awaiting_prompt(
@@ -889,7 +907,7 @@ def test_observe_stamps_future_documents_without_moving_past_documents(
     assert legacy_global_doc.fleet_session_id is None
 
 
-def test_fleet_creates_history_session_and_moves_inactive_agents(
+def test_fleet_never_auto_moves_inactive_agents_to_archive(
     client: TestClient,
     db: Session,
     monkeypatch,
@@ -937,22 +955,26 @@ def test_fleet_creates_history_session_and_moves_inactive_agents(
         item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
     )
 
-    assert history["name"] == "History"
-    assert {agent["session_id"] for agent in history["agents"]} == {
-        "went-idle",
-        "was-ended",
+    # The Archive group is renamed and stays empty — nothing is swept into it.
+    assert history["name"] == "Archive"
+    assert history["agents"] == []
+    status_by_id = {
+        agent["session_id"]: agent["status"] for agent in active_fleet["agents"]
     }
-    assert [agent["session_id"] for agent in active_fleet["agents"]] == [
-        "still-running"
-    ]
+    assert status_by_id == {
+        "still-running": "running",
+        "went-idle": "inactive",
+        "was-ended": "inactive",
+    }
 
+    # Membership is unchanged in the database.
     db.refresh(idle)
     db.refresh(ended)
-    assert idle.fleet_session_id == uuid.UUID(history["id"])
-    assert ended.fleet_session_id == uuid.UUID(history["id"])
+    assert idle.fleet_session_id == fleet_id
+    assert ended.fleet_session_id == fleet_id
 
 
-def test_ended_session_moves_to_history_on_observe(
+def test_ended_session_stays_in_place_on_observe(
     client: TestClient,
     db: Session,
     monkeypatch,
@@ -960,14 +982,23 @@ def test_ended_session_moves_to_history_on_observe(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "history-on-end"
+    session_id = "inactive-on-end"
 
     discover = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
         headers=headers,
-        json={"prompt": "Wrap up the fleet history work", "session_id": session_id},
+        json={"prompt": "Wrap up the fleet work", "session_id": session_id},
     )
     assert discover.status_code == 200, discover.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    group_before = archive.fleet_session_id
+    assert group_before is not None
 
     observe = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/observe",
@@ -980,22 +1011,13 @@ def test_ended_session_moves_to_history_on_observe(
     )
     assert observe.status_code == 202, observe.text
 
-    archive = db.exec(
-        select(TaskforceSessionArchive).where(
-            TaskforceSessionArchive.actor_id == user.id,
-            TaskforceSessionArchive.session_id == session_id,
-        )
-    ).one()
-    history = db.exec(
-        select(TaskforceFleetSession)
-        .where(TaskforceFleetSession.actor_id == user.id)
-        .where(TaskforceFleetSession.is_history.is_(True))
-    ).one()
+    db.refresh(archive)
+    # Ended → marked inactive (ended_at) but kept in its own (non-Archive) group.
     assert archive.ended_at is not None
-    assert archive.fleet_session_id == history.id
+    assert archive.fleet_session_id == group_before
 
 
-def test_discover_resurrects_agent_from_history(
+def test_typing_resurrects_inactive_agent_in_place(
     client: TestClient,
     db: Session,
     monkeypatch,
@@ -1003,7 +1025,7 @@ def test_discover_resurrects_agent_from_history(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "history-resurrect"
+    session_id = "resurrect-in-place"
 
     client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -1022,8 +1044,73 @@ def test_discover_resurrects_agent_from_history(
             TaskforceSessionArchive.session_id == session_id,
         )
     ).one()
-    history_id = archive.fleet_session_id
+    assert archive.ended_at is not None
+    group_before = archive.fleet_session_id
 
+    revived = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "Back for more work", "session_id": session_id},
+    )
+    assert revived.status_code == 200, revived.text
+
+    db.refresh(archive)
+    # Typing clears the inactive flag and the agent stays in the same group.
+    assert archive.ended_at is None
+    assert archive.fleet_session_id == group_before
+
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    body = fleet.json()
+    group = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(group_before)
+    )
+    agent = next(a for a in group["agents"] if a["session_id"] == session_id)
+    assert agent["status"] == "running"
+
+
+def test_typing_resurrects_archived_agent_back_to_default(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = "resurrect-from-archive"
+
+    client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={"prompt": "Initial work", "session_id": session_id},
+    )
+
+    # The user archives the agent by dragging it into the Archive group.
+    fleet = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet", headers=headers
+    ).json()
+    archive_group = next(
+        item for item in fleet["fleet_sessions"] if item["is_history"]
+    )
+    moved = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/session/{session_id}",
+        headers=headers,
+        json={"fleet_session_id": archive_group["id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["status"] == "inactive"
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    assert archive.fleet_session_id == uuid.UUID(archive_group["id"])
+
+    # Typing in the archived chat pulls it back into the default group, running.
     revived = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
         headers=headers,
@@ -1040,23 +1127,43 @@ def test_discover_resurrects_agent_from_history(
     ).one()
     assert archive.ended_at is None
     assert archive.fleet_session_id == default.id
-    assert archive.fleet_session_id != history_id
 
-    fleet = client.get(
+
+def test_fleet_agent_surfaces_recent_activity_newest_first(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+    session_id = "recent-activity"
+
+    for prompt in ("First task: scaffold the API", "Second task: add the tests"):
+        resp = client.post(
+            f"{settings.API_V1_STR}/v2/taskforce/discover",
+            headers=headers,
+            json={"prompt": prompt, "session_id": session_id},
+        )
+        assert resp.status_code == 200, resp.text
+
+    body = client.get(
         f"{settings.API_V1_STR}/v2/taskforce/fleet",
         headers=headers,
+    ).json()
+    agent = next(
+        agent
+        for item in body["fleet_sessions"]
+        for agent in item["agents"]
+        if agent["session_id"] == session_id
     )
-    assert fleet.status_code == 200, fleet.text
-    body = fleet.json()
-    history = next(item for item in body["fleet_sessions"] if item["is_history"])
-    default_fleet = next(
-        item for item in body["fleet_sessions"] if item["id"] == str(default.id)
-    )
-    assert all(agent["session_id"] != session_id for agent in history["agents"])
-    assert [agent["session_id"] for agent in default_fleet["agents"]] == [session_id]
+    # Newest-first: current turn then the one before it.
+    assert agent["recent_activity"] == [
+        "Second task: add the tests",
+        "First task: scaffold the API",
+    ]
 
 
-def test_history_session_cannot_be_renamed_or_deleted(
+def test_archive_session_cannot_be_renamed_or_deleted(
     client: TestClient,
     db: Session,
 ) -> None:
@@ -1070,6 +1177,7 @@ def test_history_session_cannot_be_renamed_or_deleted(
     history = next(
         item for item in fleet.json()["fleet_sessions"] if item["is_history"]
     )
+    assert history["name"] == "Archive"
 
     renamed = client.patch(
         f"{settings.API_V1_STR}/v2/taskforce/fleet/{history['id']}",
