@@ -206,3 +206,20 @@ fi
 rm -f "${STATE_DIR}/${session_id}.observe-response.json"
 
 log "POST /v2/taskforce/observe → ${http_status}"
+
+# Mark turn finished last so checkpoint observe cannot advance last_seen_at past
+# last_turn_ended_at and flip Fleet back to running.
+if [[ -n "$session_id" ]]; then
+    turn_status="$(
+        curl -sS \
+            -o /dev/null \
+            -w '%{http_code}' \
+            --max-time 5 \
+            -X POST \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/session/turn-ended" 2>>"$LOG_FILE"
+    )" || turn_status="curl-failed"
+    log "POST /v2/taskforce/session/turn-ended → ${turn_status}"
+fi

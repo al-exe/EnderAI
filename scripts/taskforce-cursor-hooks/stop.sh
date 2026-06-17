@@ -70,25 +70,6 @@ session_id="$(jq -r '.session_id // .conversation_id // empty' <<<"$payload" 2>/
 transcript_path="$(jq -r '.transcript_path // empty' <<<"$payload" 2>/dev/null)"
 cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
 
-# Fast turn-state ping: tell Fleet this session finished a turn and is now
-# awaiting the next user prompt. Deliberately lightweight (no transcript) and
-# independent of the /observe call below, so the running→waiting flip is quick
-# and survives observe shadow-mode. Best effort — never blocks the session.
-if [[ -n "$session_id" ]]; then
-    turn_status="$(
-        curl -sS \
-            -o /dev/null \
-            -w '%{http_code}' \
-            --max-time 5 \
-            -X POST \
-            -H "Authorization: Bearer ${token}" \
-            -H "Content-Type: application/json" \
-            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
-            "${BACKEND_URL}/api/v1/v2/taskforce/session/turn-ended" 2>>"$LOG_FILE"
-    )" || turn_status="curl-failed"
-    log "POST /v2/taskforce/session/turn-ended → ${turn_status}"
-fi
-
 prompt_user="$(
     jq -r '
         (.prompt // "")
@@ -214,3 +195,20 @@ http_status="$(
 )" || { log "skip: curl failed"; exit 0; }
 
 log "POST /v2/taskforce/observe → ${http_status}"
+
+# Mark turn finished last so checkpoint observe cannot advance last_seen_at past
+# last_turn_ended_at and flip Fleet back to running.
+if [[ -n "$session_id" ]]; then
+    turn_status="$(
+        curl -sS \
+            -o /dev/null \
+            -w '%{http_code}' \
+            --max-time 5 \
+            -X POST \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/session/turn-ended" 2>>"$LOG_FILE"
+    )" || turn_status="curl-failed"
+    log "POST /v2/taskforce/session/turn-ended → ${turn_status}"
+fi

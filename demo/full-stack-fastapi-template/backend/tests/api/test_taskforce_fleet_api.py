@@ -488,6 +488,47 @@ def test_session_turn_ended_marks_agent_awaiting_prompt(
     assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "running"
 
 
+def test_checkpoint_observe_after_turn_ended_stays_waiting(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "1")
+    _, headers = _signup(client)
+    session_id = "turn-state-observe-session"
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Capture without clobbering waiting state",
+            "session_id": session_id,
+            "min_score": 0.0,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+
+    turn_ended = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/turn-ended",
+        headers=headers,
+        json={"session_id": session_id},
+    )
+    assert turn_ended.status_code == 204, turn_ended.text
+    assert _agent_in_fleet(client, headers, session_id)["status"] == "waiting"
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Capture without clobbering waiting state",
+            "session_id": session_id,
+            "client": "cursor",
+        },
+    )
+    assert observe.status_code == 202, observe.text
+    assert _agent_in_fleet(client, headers, session_id)["status"] == "waiting"
+
+
 def test_session_turn_ended_is_noop_without_archive(client: TestClient) -> None:
     _, headers = _signup(client)
     response = client.post(
