@@ -53,7 +53,10 @@ ROSTER_LIMIT = 5
 
 # Fleet reports a server-derived state so clients do not duplicate freshness
 # heuristics. Waiting and paused remain reserved until ingestion captures them.
-FLEET_RUNNING_WINDOW = timedelta(minutes=5)
+# An agent stays live (running/waiting) until it has been silent for this long,
+# then flips to ``idle`` — matched to MAX_AGE so a session is "active" for its
+# whole live window and only goes inactive once it ages out of the roster.
+FLEET_RUNNING_WINDOW = timedelta(hours=8)
 
 # History keeps more receipts than the live roster cap.
 HISTORY_ROSTER_LIMIT = 50

@@ -169,7 +169,14 @@ def test_fleet_groups_top_five_recent_active_sessions(
             db,
             user=user,
             session_id=f"recent-{index}",
-            imported_at=now - timedelta(minutes=index * 2),
+            # 0-2 stay fresh (active); 3-5 age past the 8h window so they get
+            # swept into History, preserving the active/history split.
+            imported_at=now
+            - (
+                timedelta(minutes=index * 2)
+                if index < 3
+                else timedelta(hours=9, minutes=index)
+            ),
             started_at=now - timedelta(hours=1, minutes=index),
             fleet_session_id=fleet_id,
             referenced_document_ids=[str(document.id)] if index == 0 else None,
@@ -434,8 +441,10 @@ def test_fleet_status_distinguishes_running_waiting_idle() -> None:
     )
     # No turn-end recorded yet but fresh → running.
     assert _fleet_status(1, last_seen_at=now, last_turn_ended_at=None) == "running"
-    # Stale beyond the live window → idle regardless of turn state.
-    assert _fleet_status(120, last_seen_at=now, last_turn_ended_at=now) == "idle"
+    # Within the 8h live window, a quiet agent stays surfaced (not idle).
+    assert _fleet_status(120, last_seen_at=now, last_turn_ended_at=now) == "waiting"
+    # Stale beyond the 8h live window → idle regardless of turn state.
+    assert _fleet_status(8 * 60 + 1, last_seen_at=now, last_turn_ended_at=now) == "idle"
 
 
 def test_session_turn_ended_marks_agent_awaiting_prompt(
@@ -737,7 +746,7 @@ def test_fleet_creates_history_session_and_moves_inactive_agents(
         db,
         user=user,
         session_id="went-idle",
-        imported_at=now - timedelta(minutes=12),
+        imported_at=now - timedelta(hours=9),
         fleet_session_id=fleet_id,
     )
     ended = _create_archive(
