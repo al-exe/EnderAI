@@ -126,6 +126,10 @@ JQ_FILES = (
     ("commands-extract.jq", "commands-extract.jq", "TASKFORCE_COMMANDS_JQ_EOF"),
 )
 
+GIT_CONTEXT_FILES = (
+    ("git-context.sh", "git-context.sh", "TASKFORCE_GIT_CONTEXT_EOF"),
+)
+
 
 def build_hook_installer() -> str:
     """Return an installer that writes and registers all Taskforce hooks."""
@@ -170,6 +174,19 @@ def build_hook_installer() -> str:
                 f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
                 script,
                 delimiter,
+                "",
+            ]
+        )
+
+    for source_name, target_name, delimiter in GIT_CONTEXT_FILES:
+        script = (HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                f'chmod 0755 "$HOOK_DIR/{target_name}"',
                 "",
             ]
         )
@@ -254,6 +271,19 @@ def build_codex_hook_installer() -> str:
     ]
 
     for source_name, target_name, _, _, _, delimiter in CODEX_HOOKS:
+        script = (CODEX_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-codex-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                f'chmod 0755 "$HOOK_DIR/{target_name}"',
+                "",
+            ]
+        )
+
+    for source_name, target_name, delimiter in GIT_CONTEXT_FILES:
         script = (CODEX_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
         lines.extend(
             [
@@ -367,6 +397,19 @@ def build_cursor_hook_installer() -> str:
                 f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
                 script,
                 delimiter,
+                "",
+            ]
+        )
+
+    for source_name, target_name, delimiter in GIT_CONTEXT_FILES:
+        script = (CURSOR_HOOK_ASSET_DIR / source_name).read_text().rstrip("\n")
+        lines.extend(
+            [
+                f"# Source: scripts/taskforce-cursor-hooks/{source_name}",
+                f"cat > \"$HOOK_DIR/{target_name}\" <<'{delimiter}'",
+                script,
+                delimiter,
+                f'chmod 0755 "$HOOK_DIR/{target_name}"',
                 "",
             ]
         )

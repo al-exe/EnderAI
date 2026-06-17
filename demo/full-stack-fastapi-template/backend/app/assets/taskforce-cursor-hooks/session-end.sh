@@ -6,7 +6,7 @@
 # unlike the Stop hook (stop.sh), which fires on every agent-idle turn.
 # Ships a minimal digest to /v2/taskforce/observe with
 # `kind: "session_end"`, which marks the session archive's `ended_at` and
-# removes it from the active Sessions roster.
+# removes it from the active Fleet roster.
 #
 # - Never blocks the session (all failures exit 0).
 # - Sends no transcript/structured fields, so the payload is "not material"
@@ -29,6 +29,9 @@ readonly TOKEN_FILE="${HOME}/.taskforce_mcp_token"
 readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/git-context.sh"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR"
 
@@ -65,13 +68,8 @@ payload="$(cat || true)"
 [[ -z "$payload" ]] && { log "skip: empty stdin"; exit 0; }
 
 session_id="$(jq -r '.session_id // .conversation_id // empty' <<<"$payload" 2>/dev/null)"
-cwd="$(jq -r '.cwd // empty' <<<"$payload" 2>/dev/null)"
-
-# Active git branch (best effort; the hook runs in the session cwd).
-branch=""
-if [[ -n "$cwd" && -d "$cwd" ]]; then
-    branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-fi
+cwd="$(taskforce_resolve_cwd_from_payload "$payload")"
+branch="$(taskforce_resolve_git_branch_from_payload "$payload" 2>/dev/null || true)"
 
 body="$(jq -cn \
     --arg session_id "$session_id" \

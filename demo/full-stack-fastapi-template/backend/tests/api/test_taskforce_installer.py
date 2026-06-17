@@ -8,7 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from app.core.taskforce.installer import CODEX_HOOKS, CURSOR_HOOKS, HOOKS, JQ_FILES
+from app.core.taskforce.installer import (
+    CODEX_HOOKS,
+    CURSOR_HOOKS,
+    GIT_CONTEXT_FILES,
+    HOOKS,
+    JQ_FILES,
+)
 from app.main import app
 
 INSTALLER_URL = f"{settings.API_V1_STR}/v2/taskforce/install.sh"
@@ -143,7 +149,64 @@ def test_cursor_installer_is_public_and_self_contained() -> None:
     for source_name, target_name, _ in JQ_FILES:
         assert f"scripts/taskforce-cursor-hooks/{source_name}" in response.text
         assert f"$HOOK_DIR/{target_name}" in response.text
+    for source_name, target_name, _ in GIT_CONTEXT_FILES:
+        assert f"scripts/taskforce-cursor-hooks/{source_name}" in response.text
+        assert f"$HOOK_DIR/{target_name}" in response.text
     assert "Settings -> Hooks" in response.text
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_git_context_resolves_branch_from_attachment(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "feature/foo"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    tracked = repo / "src" / "main.ts"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("export {}\n")
+    git_env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Taskforce",
+        "GIT_AUTHOR_EMAIL": "taskforce@example.com",
+        "GIT_COMMITTER_NAME": "Taskforce",
+        "GIT_COMMITTER_EMAIL": "taskforce@example.com",
+    }
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=git_env,
+    )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    script = CANONICAL_CURSOR_HOOK_DIR / "git-context.sh"
+    payload = json.dumps(
+        {
+            "workspace_roots": [str(workspace)],
+            "attachments": [{"file_path": str(tracked)}],
+        }
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; taskforce_resolve_git_branch_from_payload "$2"',
+            "bash",
+            str(script),
+            payload,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "feature/foo"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
