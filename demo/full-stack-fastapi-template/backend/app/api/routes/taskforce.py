@@ -36,7 +36,6 @@ from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     get_or_create_history_fleet_session,
     next_fleet_session_name,
-    reconcile_inactive_fleet_membership,
 )
 from app.core.taskforce.installer import (
     build_codex_hook_installer,
@@ -439,9 +438,7 @@ def session_log_route(
     return TaskforceSessionLogResponse(session_id=session_id, entries=entries)
 
 
-@router.get(
-    "/session-activity", response_model=TaskforceSessionActivityResponse
-)
+@router.get("/session-activity", response_model=TaskforceSessionActivityResponse)
 def session_activity_route(
     session: SessionDep,
     current_user: CurrentUser,
@@ -484,10 +481,7 @@ def session_activity_route(
 def _activity_ledger_href(row: TaskforceSessionEvent) -> str:
     """Deep-link to this exact canonical event in the Ledger."""
 
-    return (
-        f"/v2/ledger?session_id={row.session_id}"
-        f"&event_id={row.id}"
-    )
+    return f"/v2/ledger?session_id={row.session_id}&event_id={row.id}"
 
 
 @router.get("/session-savings", response_model=TaskforceSessionSavingsResponse)
@@ -544,7 +538,8 @@ def fleet_route(
 ) -> Any:
     """Group the current actor's active-session roster into session groups."""
 
-    reconcile_inactive_fleet_membership(session, current_user)
+    # No automatic sweep: inactive agents stay in their group (shown gray) until
+    # the user archives them. We only ensure the Archive group exists.
     history = get_or_create_history_fleet_session(session, current_user)
     session.commit()
 
@@ -770,17 +765,17 @@ def assign_fleet_session_route(
         )
         destination = session.get(TaskforceFleetSession, body.fleet_session_id)
         assert destination is not None
-        if destination.is_history:
-            raise HTTPException(
-                status_code=422,
-                detail="Agents move to History automatically when inactive",
-            )
+        # Moving into the Archive group is an explicit, user-initiated action —
+        # this is the only way a session reaches Archive. (Typing in an archived
+        # session resurrects it back out; see resurrect_archive_from_history.)
 
         archive.fleet_session_id = body.fleet_session_id
         archive.updated_at = get_datetime_utc()
         session.add(archive)
         session.commit()
         agent.fleet_session_id = body.fleet_session_id
+        if destination.is_history:
+            agent.status = "inactive"
         if body.display_name is not None:
             agent.display_name = archive.display_name or agent.display_name
         return agent
@@ -800,10 +795,14 @@ def assign_fleet_session_route(
     )
     if history_agent is not None:
         if body.display_name is not None:
-            history_agent.display_name = archive.display_name or history_agent.display_name
+            history_agent.display_name = (
+                archive.display_name or history_agent.display_name
+            )
         return history_agent
 
-    raise HTTPException(status_code=404, detail="Taskforce session not found in Sessions")
+    raise HTTPException(
+        status_code=404, detail="Taskforce session not found in Sessions"
+    )
 
 
 def _ledger_response_from_page(

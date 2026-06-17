@@ -13,13 +13,12 @@ from sqlmodel import Session, col, select
 
 from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
-    move_archive_to_history,
 )
-from app.core.taskforce.session_provenance import sync_session_provenance
 from app.core.taskforce.session_activity import (
     ingest_observe_events,
     normalized_session_events,
 )
+from app.core.taskforce.session_provenance import sync_session_provenance
 from app.models import (
     MetricsEvent,
     TaskforceObserveRequest,
@@ -96,8 +95,10 @@ def upsert_session_archive_from_observe(
     archive.ended_at = (
         now if request.kind in ("final", "session_end") else archive.ended_at
     )
-    if archive.ended_at is not None:
-        move_archive_to_history(session, archive, actor, now=now)
+    # When a session ends (clean /exit or the harness closing) we mark it
+    # ``ended_at`` so it reports the gray "Inactive" state, but we deliberately
+    # leave it in its current group. Sessions are never relocated automatically;
+    # archiving to the Archive group is a user-initiated drag.
     # Checkpoint observe must not clobber the waiting state set by turn-ended:
     # when last_turn_ended_at >= last_seen_at the agent is idle between turns.
     if _should_bump_last_seen_from_observe(archive, kind=request.kind):

@@ -1886,7 +1886,10 @@ class TaskforceFleetAgentPublic(SQLModel):
     summary_markdown: str = ""
     last_seen_at: datetime
     minutes_ago: int = Field(ge=0)
-    status: Literal["running", "waiting", "paused", "idle"]
+    status: Literal["running", "waiting", "paused", "idle", "inactive"]
+    # Newest-first recent per-turn prompts ("what just happened"). The Fleet row
+    # shows the prior turn for a running agent and the latest otherwise.
+    recent_activity: list[str] = Field(default_factory=list)
     started_at: datetime | None = None
     specialist_slug: str | None = None
     specialist_rule_count: int | None = Field(default=None, ge=0)

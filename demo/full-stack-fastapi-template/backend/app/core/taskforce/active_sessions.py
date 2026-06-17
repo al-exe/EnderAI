@@ -32,17 +32,18 @@ from app.core.taskforce.fleet_sessions import (
     history_fleet_session_for_actor,
     resurrect_archive_from_history,
 )
+from app.core.taskforce.session_activity import record_activity_prompt
 from app.core.taskforce.session_provenance import (
     resolve_session_client,
     sync_session_provenance,
 )
-from app.core.taskforce.session_activity import record_activity_prompt
 from app.models import (
     AgentSpecialist,
     TaskforceActiveSession,
     TaskforceDiscoverRequest,
     TaskforceFleetAgentPublic,
     TaskforceSessionArchive,
+    TaskforceSessionEvent,
     User,
     V2Document,
 )
@@ -214,15 +215,19 @@ def _active_session_rows(
     exclude_session_id: str | None = None,
     limit: int = ROSTER_LIMIT,
     max_age: timedelta = MAX_AGE,
+    include_inactive: bool = False,
     now: datetime | None = None,
 ) -> tuple[list[TaskforceSessionArchive], datetime]:
     """Shared row fetch for the active-sessions and Sessions rosters.
 
-    Scope: ``actor_id = actor``, same org (and ``is_demo`` space if given),
-    ``ended_at IS NULL`` (cleanly-ended sessions are excluded outright — the
-    ``max_age`` window is a backstop for "forgot to /exit", not the primary
-    filter), and ``last_seen_at`` within ``max_age``. Capped at ``limit``
-    rows, most recent first.
+    Scope: ``actor_id = actor``, same org (and ``is_demo`` space if given).
+    Capped at ``limit`` rows, most recent first.
+
+    By default (``include_inactive=False``, the sibling-presence rail) only live
+    sessions are returned: ``ended_at IS NULL`` and ``last_seen_at`` within
+    ``max_age``. The Sessions/Fleet panel passes ``include_inactive=True`` so
+    ended and aged-out sessions stay visible **in place** as gray "Inactive"
+    rows — they are no longer hidden or swept into Archive automatically.
     """
 
     now = now or _now()
@@ -232,10 +237,12 @@ def _active_session_rows(
         select(TaskforceSessionArchive)
         .where(TaskforceSessionArchive.actor_id == actor.id)
         .where(TaskforceSessionArchive.organization_id == actor.organization_id)
-        .where(TaskforceSessionArchive.ended_at.is_(None))
         .where(TaskforceSessionArchive.last_seen_at.is_not(None))
-        .where(TaskforceSessionArchive.last_seen_at >= cutoff)
     )
+    if not include_inactive:
+        statement = statement.where(TaskforceSessionArchive.ended_at.is_(None)).where(
+            TaskforceSessionArchive.last_seen_at >= cutoff
+        )
     if demo is not None:
         statement = statement.where(TaskforceSessionArchive.is_demo == demo)
     if exclude_session_id:
@@ -394,17 +401,24 @@ def _fleet_status(
     *,
     last_seen_at: datetime,
     last_turn_ended_at: datetime | None,
+    ended_at: datetime | None = None,
+    force_inactive: bool = False,
 ) -> str:
     """Server-derived Sessions state.
 
-    Outside the live window the session is ``idle``. Within it, a turn-end at
-    or after the last heartbeat means the agent finished its turn and is
-    awaiting the next user prompt (``waiting``); otherwise a prompt arrived
-    after the last turn end and a turn is in progress (``running``).
+    A session is ``inactive`` (gray "Inactive") when it has cleanly ended
+    (``ended_at`` set — e.g. the user closed it), when it sits in the Archive
+    group (``force_inactive``), or when it has aged out of the live window.
+    Inactive agents stay put; they are not hidden or relocated. Otherwise, a
+    turn-end at or after the last heartbeat means the agent finished its turn
+    and awaits the next prompt (``waiting``); a prompt after the last turn end
+    means a turn is in progress (``running``).
     """
 
+    if force_inactive or ended_at is not None:
+        return "inactive"
     if minutes_ago >= int(FLEET_RUNNING_WINDOW.total_seconds() // 60):
-        return "idle"
+        return "inactive"
     if last_turn_ended_at is not None and _as_utc(last_turn_ended_at) >= _as_utc(
         last_seen_at
     ):
@@ -412,20 +426,73 @@ def _fleet_status(
     return "running"
 
 
+# Newest-first per-turn prompt texts surfaced on each fleet row so the user can
+# glance at "what just happened" (and, for a running agent, the turn before the
+# in-progress one). Two is enough for current + previous.
+_RECENT_ACTIVITY_LIMIT = 2
+
+
+def _recent_activity_by_session(
+    session: Session,
+    *,
+    actor: User,
+    session_ids: list[str],
+) -> dict[str, list[str]]:
+    """Most recent prompt texts per session, newest-first, batched.
+
+    Reads the canonical per-turn prompt events (``TaskforceSessionEvent`` with
+    ``kind='prompt'``) for the given sessions in one query, returning up to
+    ``_RECENT_ACTIVITY_LIMIT`` cleaned texts each. Empty when no prompts exist.
+    """
+
+    if not session_ids:
+        return {}
+
+    rows = session.exec(
+        select(
+            TaskforceSessionEvent.session_id,
+            TaskforceSessionEvent.text,
+        )
+        .where(col(TaskforceSessionEvent.session_id).in_(session_ids))
+        .where(TaskforceSessionEvent.actor_id == actor.id)
+        .where(TaskforceSessionEvent.kind == "prompt")
+        .order_by(
+            desc(col(TaskforceSessionEvent.occurred_at)),
+            desc(col(TaskforceSessionEvent.source_order)),
+            desc(col(TaskforceSessionEvent.created_at)),
+        )
+    ).all()
+
+    by_session: dict[str, list[str]] = {}
+    for session_id, text in rows:
+        cleaned = " ".join((text or "").split())
+        if not cleaned:
+            continue
+        bucket = by_session.setdefault(session_id, [])
+        if len(bucket) < _RECENT_ACTIVITY_LIMIT:
+            bucket.append(cleaned)
+    return by_session
+
+
 def active_sessions_for_actor(
     session: Session,
     *,
     actor: User,
-    limit: int = ROSTER_LIMIT,
+    limit: int = HISTORY_ROSTER_LIMIT,
     now: datetime | None = None,
 ) -> list[TaskforceFleetAgentPublic]:
-    """Return the actor's recent, non-ended sessions for the Sessions panel.
+    """Return the actor's recent sessions for the Sessions panel.
 
     Built on the same row query as :func:`get_active_sessions`, but not
     scoped to a single ``is_demo`` space (the Sessions panel shows all of the
     actor's sessions) and returns the richer ``TaskforceFleetAgentPublic``
     shape, including ``fleet_session_id``, ``referenced_document_ids`` and
     ``specialist_slug``.
+
+    Includes ended/aged-out sessions (``include_inactive=True``) so they remain
+    visible in their group as gray "Inactive" rows. The cap is raised to the
+    Archive roster limit because inactive rows now share the budget with live
+    ones.
     """
 
     archives, now_utc = _active_session_rows(
@@ -433,6 +500,7 @@ def active_sessions_for_actor(
         actor=actor,
         demo=None,
         limit=limit,
+        include_inactive=True,
         now=now,
     )
     return _fleet_agent_public_from_archive(
@@ -449,7 +517,13 @@ def _fleet_agent_public_from_archive(
     actor: User,
     archives: list[TaskforceSessionArchive],
     now_utc: datetime,
+    force_inactive: bool = False,
 ) -> list[TaskforceFleetAgentPublic]:
+    recent_activity_by_session = _recent_activity_by_session(
+        session,
+        actor=actor,
+        session_ids=[archive.session_id for archive in archives],
+    )
     referenced_by_session: dict[str, list[uuid.UUID]] = {}
     all_document_ids: set[uuid.UUID] = set()
     for archive in archives:
@@ -530,7 +604,10 @@ def _fleet_agent_public_from_archive(
                     minutes_ago,
                     last_seen_at=last_seen_at,
                     last_turn_ended_at=archive.last_turn_ended_at,
+                    ended_at=archive.ended_at,
+                    force_inactive=force_inactive,
                 ),
+                recent_activity=recent_activity_by_session.get(archive.session_id, []),
                 started_at=archive.started_at,
                 specialist_slug=archive.specialist_slug,
                 specialist_rule_count=(
@@ -557,7 +634,7 @@ def history_agents_for_actor(
     limit: int = HISTORY_ROSTER_LIMIT,
     now: datetime | None = None,
 ) -> list[TaskforceFleetAgentPublic]:
-    """Return inactive agent receipts stored in the actor's History session."""
+    """Return agent receipts the user has set aside in their Archive group."""
 
     history = history_fleet_session_for_actor(session, actor)
     if history is None:
@@ -578,4 +655,5 @@ def history_agents_for_actor(
         actor=actor,
         archives=archives,
         now_utc=now_utc,
+        force_inactive=True,
     )
