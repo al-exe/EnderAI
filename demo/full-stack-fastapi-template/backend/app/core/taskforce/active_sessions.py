@@ -293,8 +293,6 @@ def get_active_sessions(
             TaskforceActiveSession(
                 session_id=row.session_id,
                 cwd=row.cwd,
-                branch=row.branch,
-                repo=row.repo,
                 active_document_id=row.active_document_id,
                 title=document.title if document else None,
                 summary_markdown=(document.ai_generated_summary or "")
@@ -513,8 +511,6 @@ def _fleet_agent_public_from_archive(
                 session_id=archive.session_id,
                 fleet_session_id=archive.fleet_session_id,
                 cwd=archive.cwd,
-                branch=archive.branch,
-                repo=archive.repo,
                 active_document_id=active_document_id,
                 referenced_document_ids=referenced,
                 display_name=_fleet_display_name(archive),

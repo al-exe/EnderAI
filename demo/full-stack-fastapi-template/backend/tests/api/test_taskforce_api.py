@@ -1414,8 +1414,6 @@ def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -
     sibling = siblings[0]
     assert sibling["session_id"] == "tf225-sibling-alpha"
     assert sibling["cwd"] == "/home/alexlee/dev/EnderAI-frontend"
-    assert sibling["branch"] == "feature/checkout"
-    assert sibling["repo"] == "EnderAI-frontend"
     assert sibling["active_document_id"] is None
     assert sibling["minutes_ago"] == 0
 
