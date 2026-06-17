@@ -292,6 +292,75 @@ def test_fleet_agent_kind_classifies_driving_tool(
         assert kind_by_session[session_id] == expected_kind
 
 
+def test_fleet_cursor_chip_stays_cursor_when_provenance_fields_diverged(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    """Hook-stamped cursor must win even if ``client`` was clobbered earlier."""
+
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Onboarding")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    _create_archive(
+        db,
+        user=user,
+        session_id="cursor-diverged",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+        client="claude-code",
+        harness_label="cursor",
+        model_id="claude-opus-4-8",
+    )
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Continue fleet chip work",
+            "client": "claude-code",
+            "session_id": "cursor-diverged",
+            "duration_ms": 100,
+            "harness": {
+                "model_id": "claude-opus-4-8",
+                "total_input_tokens": 10,
+                "total_output_tokens": 5,
+                "total_cache_read_tokens": 0,
+                "total_cache_write_tokens": 0,
+            },
+        },
+    )
+    assert response.status_code == 202, response.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.session_id == "cursor-diverged"
+        )
+    ).one()
+    assert archive.client == "cursor"
+    assert archive.harness_label == "cursor"
+
+    fleet_response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert fleet_response.status_code == 200, fleet_response.text
+    grouped = next(
+        item
+        for item in fleet_response.json()["fleet_sessions"]
+        if item["id"] == str(fleet_id)
+    )
+    agent = next(
+        item for item in grouped["agents"] if item["session_id"] == "cursor-diverged"
+    )
+    assert agent["agent_kind"] == "cursor"
+
+
 def test_reassign_and_delete_move_agent_without_ending_session(
     client: TestClient,
     db: Session,

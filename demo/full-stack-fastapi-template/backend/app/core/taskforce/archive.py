@@ -15,7 +15,7 @@ from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     move_archive_to_history,
 )
-from app.core.taskforce.session_provenance import merge_session_client
+from app.core.taskforce.session_provenance import sync_session_provenance
 from app.core.taskforce.session_activity import (
     ingest_observe_events,
     normalized_session_events,
@@ -79,9 +79,12 @@ def upsert_session_archive_from_observe(
 
     archive.actor_id = actor.id
     archive.organization_id = actor.organization_id
-    archive.client = merge_session_client(archive.client, request.client)
+    archive.client, archive.harness_label = sync_session_provenance(
+        client=archive.client,
+        harness_label=archive.harness_label,
+        incoming=request.client,
+    )
     archive.specialist_slug = request.specialist_slug or archive.specialist_slug
-    archive.harness_label = merge_session_client(archive.harness_label, request.client)
     archive.model_id = (
         request.harness.model_id if request.harness is not None else archive.model_id
     )
