@@ -534,6 +534,153 @@ fi
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_codex_observe_hook_posts_structured_session_context(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    capture_file = tmp_path / "payload.json"
+    transcript = tmp_path / "codex-session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-06-17T04:00:00Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": "Fix the Codex Taskforce hooks",
+                                }
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-06-17T04:00:01Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "exec_command",
+                            "arguments": json.dumps(
+                                {
+                                    "cmd": "codex --strict-config doctor --json --all",
+                                    "workdir": str(tmp_path),
+                                }
+                            ),
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-06-17T04:00:02Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Codex hooks are wired.",
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+output_file=""
+while (($#)); do
+    case "$1" in
+        --data)
+            shift
+            printf '%s' "$1" > "$CAPTURE_FILE"
+            ;;
+        -o)
+            shift
+            output_file="$1"
+            ;;
+    esac
+    shift
+done
+printf '%s' "$CURL_RESPONSE" > "$output_file"
+printf '200'
+"""
+    )
+    curl.chmod(0o755)
+    document_id = "5477ef23-c561-4b1d-8e80-f46f7c193e59"
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE_FILE": str(capture_file),
+        "CURL_RESPONSE": json.dumps(
+            {
+                "action": "created",
+                "document_id": document_id,
+                "reason": "ok",
+            }
+        ),
+    }
+
+    result = subprocess.run(
+        ["bash", str(CANONICAL_CODEX_HOOK_DIR / "observe.sh")],
+        input=json.dumps(
+            {
+                "hook_event_name": "Stop",
+                "session_id": "codex-session-1",
+                "transcript_path": str(transcript),
+                "cwd": str(tmp_path),
+                "model": "gpt-5.5",
+                "last_assistant_message": "Codex hooks are wired.",
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    assert json.loads(result.stdout) == {"continue": True, "suppressOutput": True}
+    observe = json.loads(capture_file.read_text())
+    assert observe["session_id"] == "codex-session-1"
+    assert observe["client"] == "codex"
+    assert observe["active_document_id"] is None
+    assert observe["transcript"] == []
+    assert observe["harness"]["model_id"] == "gpt-5.5"
+    assert observe["summary_points"] == [
+        "User asked: Fix the Codex Taskforce hooks",
+        "Codex reported: Codex hooks are wired.",
+    ]
+    assert observe["details_sections"][0]["anchor_id"] == "codex-latest-turn"
+    assert (
+        "Latest user prompt: Fix the Codex Taskforce hooks"
+        in observe["details_sections"][0]["markdown"]
+    )
+    assert observe["commands_run"] == [
+        {
+            "cmd": "codex --strict-config doctor --json --all",
+            "exit_code": None,
+            "output": None,
+        }
+    ]
+    assert (home / ".taskforce" / "codex-session-1.active").read_text() == document_id
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
 def test_installer_is_idempotent_and_preserves_existing_stop_hook(
     tmp_path: Path,
 ) -> None:
