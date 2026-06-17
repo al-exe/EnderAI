@@ -80,6 +80,19 @@ prompt_user="$(
     ' <<<"$payload" 2>/dev/null
 )"
 
+if [[ -z "$prompt_user" && -n "$transcript_path" && -r "$transcript_path" ]]; then
+    prompt_user="$(
+        tail -n 200 "$transcript_path" 2>/dev/null \
+            | jq -sr '
+                [.[] | select((.type // .role // "") == "user")
+                 | .message.content[]? | select(.type == "text") | .text]
+                | map(select(length > 0)) | last // ""' 2>/dev/null
+    )"
+    if [[ ${#prompt_user} -gt 8000 ]]; then
+        prompt_user="${prompt_user:0:7997}..."
+    fi
+fi
+
 # Build a compact transcript from the session JSONL (best effort).
 transcript_array="[]"
 files_touched="[]"
