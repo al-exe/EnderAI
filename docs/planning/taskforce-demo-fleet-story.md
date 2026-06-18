@@ -223,3 +223,107 @@ agent display names before rolling so the board reads cleanly.
 5. **Two tasks vs one:** keep Task B (Cy/Orin) for breadth, or go all-billing so
    the whole fleet shares one brain harder? *(Impact: medium — breadth vs.
    intensity.)*
+
+---
+
+## 7. How to run it — operator runbook
+
+Everything below is real commands. Two helper scripts live next to this doc:
+[`demo-fleet-seed.sh`](./demo-fleet-seed.sh) (seed it all) and
+[`demo-fleet-reset.sh`](./demo-fleet-reset.sh) (reset between takes). The
+on-screen beats are §2 (2-min) / §3 (5-min); this section is the plumbing.
+
+### 7.0 One-time setup (before the first take)
+
+**A. Install the demo-work `/tf` skill** (the fleet bus + capture; from PR #177
+branch or after merge):
+
+```bash
+cd ~/dev/EnderAI                       # or wherever the repo is checked out
+git fetch origin && git checkout feature/demo-fleet-skill   # skip after merge
+bash scripts/taskforce-skill/install.sh
+ls ~/.claude/skills/tf                 # → SKILL.md tf-discover tf-fleet tf-reference tf-capture tf-savings
+```
+
+**B. Seed profiles + library + ledger.** In the **Render Shell** on the
+`EnderAI-backend` service (`cd /app/backend`):
+
+```bash
+bash /path/to/demo-fleet-seed.sh --email alexlee4190@gmail.com
+# (or paste the three `python -m app.scripts.*` lines it runs)
+```
+
+Verify on the web app with **Demo mode ON**: Profiles shows 5 cards, Library
+renders the Stripe docs, Ledger has rows. Routing smoke test:
+
+```bash
+TASKFORCE_DEMO=1 ~/.claude/skills/tf/tf-discover.sh \
+  --prompt "Stripe is double-charging on plan upgrades — webhook retries fulfilled twice. Fix it?" \
+  --files "app/api/routes/billing.py,app/core/stripe_billing.py" | jq .matched_specialist
+# expect: slug "jensen", band medium/high
+```
+
+**C. Recording hygiene:** pre-warm the backend (one `/tf` dry run), browser
+zoom ≥110%, terminal ≥16pt, Demo mode ON in the web app.
+
+### 7.1 Launch the fleet (one terminal per agent)
+
+Each agent is its own terminal in the demo repo. The shared env makes `/tf` the
+only Taskforce surface (no double-injection) and scopes to the seeded library:
+
+```bash
+cd ~/dev/taskforce-claude                 # the demo backend repo
+git checkout demo/stripe-double-charge    # the pre-built buggy branch
+export TASKFORCE_DEMO=1                    # seeded specialists + docs + captures
+export TASKFORCE_HOOKS_DISABLED=1          # /tf is the only injector on camera
+# (optional, the cross-tool agent only:)  export TASKFORCE_CLIENT=codex
+claude                                     # launch; rename the session "Atlas" etc.
+```
+
+New sessions auto-join the **Default** fleet session, so they see each other on
+the **Sessions** board and the knowledge bus is in-scope. Rename each from the
+Sessions roster (Atlas / Bree / Cy) before rolling so the board reads cleanly.
+
+### 7.2 The prompts, in order (order matters for the bus)
+
+| # | Agent · profile | Type into the agent |
+|---|---|---|
+| 1 | **Atlas** · Jensen | `/tf Stripe is double-charging some users on plan upgrades — looks like webhook retries are getting fulfilled twice. Can you fix it?` |
+| 2 | **Cy** · Orin *(parallel, any time)* | `/tf The Stop hook isn't appending "Referenced by" entries after sessions — fix it.` |
+| 3 | **Bree** · Jensen *(AFTER Atlas confirms)* | `/tf Lock in the fix — add the regression test proving the plan-upgrade webhook dedupe happens before dispatch (test_plan_upgrade_webhook_retry_short_circuits_before_dispatch).` |
+
+**Why the order:** Atlas must reach Beat 5b ("yes") so its Beat 7b **capture**
+writes the decision into the Library *before* Bree runs `/tf`. Bree's Beat 4b
+(`tf-fleet.sh`) then pulls Atlas's fresh doc and surfaces it (🛰) — that's the
+"fleet shares a brain" handoff. It's a pull on Bree's `/tf` turn (one discover
+cycle), **not** realtime — film Bree's prompt right after Atlas finishes.
+
+When Atlas finishes, confirm "yes" at its recap so Beats 6/7/7b fire: you'll see
+the `✍️ Referenced by` writes **and** the `Captured: …` decision link land live
+(that's the Library "updating as we go" beat). The profile pill on each Sessions
+card (PR #340) shows which specialist is steering each agent.
+
+### 7.3 Reset between takes (one command)
+
+```bash
+# Easy / token-only — clears just this take's captured docs:
+bash /path/to/demo-fleet-reset.sh
+
+# Full reset (also consult events + Referenced-by + code edits):
+DATABASE_URL='postgresql://…' \
+  TASKFORCE_DEMO_REPO=~/dev/taskforce-claude \
+  TASKFORCE_DEMO_BRANCH=demo/stripe-double-charge \
+  bash /path/to/demo-fleet-reset.sh
+```
+
+It deletes the docs `tf-capture.sh` wrote this take (ids logged at
+`~/.claude/taskforce-demo-captures.log`, deleted via `?demo=true`), then — if
+`DATABASE_URL` + `psql` are present — removes non-seeded consult events, strips
+the appended "Referenced by" sections, and git-resets the demo branch. The
+seeded baseline (profiles, library, ledger history) is left intact, so you do
+**not** re-seed every take. After it runs: quit each agent (Ctrl-D), relaunch,
+pre-warm, roll the next take.
+
+> `DATABASE_URL`: Render → Postgres → "External Database URL". No local `psql`?
+> Run steps 2–3 from the Render-shell Python fallback at the bottom of
+> [`reset-between-takes.sh`](./reset-between-takes.sh).
