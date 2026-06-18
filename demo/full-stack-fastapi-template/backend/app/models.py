@@ -1552,6 +1552,50 @@ class TaskforceSessionArchive(SQLModel, table=True):
     )
 
 
+class TaskforceSessionInboxMessage(SQLModel, table=True):
+    """A queued prompt the user sent to an idle agent from the Sessions page.
+
+    The Sessions "Reply to agent" box enqueues a row here. The agent's Stop
+    hook (Claude Code ``stop.sh`` / Codex ``observe.sh``) claims the oldest
+    undelivered row when it goes idle and re-injects ``body`` as a fresh user
+    prompt via the harness's ``{"decision":"block","reason":...}`` Stop-hook
+    contract. Delivery is one-shot: ``delivered_at`` is stamped on claim so the
+    same message can never be injected twice. Only Claude and Codex agents
+    consume this — Cursor has no Stop-hook injection surface.
+    """
+
+    __tablename__ = "taskforce_session_inbox_message"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_id: str = Field(min_length=1, max_length=128, index=True)
+    actor_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        index=True,
+        ondelete="SET NULL",
+    )
+    is_demo: bool = Field(default=False, nullable=False, index=True)
+    body: str = Field(min_length=1, max_length=8000)
+    # NULL until the agent's Stop hook claims and injects the message; once set,
+    # the row is spent and never re-delivered.
+    delivered_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+    created_at: datetime = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+        index=True,
+    )
+
+
 class TaskforceFleetSession(SQLModel, table=True):
     """A user-owned grouping for currently active Taskforce sessions."""
 
@@ -2209,6 +2253,44 @@ class TaskforceSessionTurnEndedRequest(SQLModel):
 
     session_id: str = Field(min_length=1, max_length=128)
     demo: bool = False
+
+
+class TaskforceSessionInboxEnqueueRequest(SQLModel):
+    """Queue a prompt for an idle agent from the Sessions "Reply to agent" box."""
+
+    body: str = Field(min_length=1, max_length=8000)
+    demo: bool = False
+
+
+class TaskforceSessionInboxMessagePublic(SQLModel):
+    """A queued inbox message as surfaced to the Sessions UI."""
+
+    id: uuid.UUID
+    body: str
+    created_at: datetime
+    delivered_at: datetime | None = None
+
+
+class TaskforceSessionInboxListResponse(SQLModel):
+    """Pending (undelivered) inbox messages for a session."""
+
+    session_id: str
+    pending: list[TaskforceSessionInboxMessagePublic] = Field(default_factory=list)
+
+
+class TaskforceSessionInboxClaimRequest(SQLModel):
+    """Stop-hook request to atomically claim the next queued prompt, if any."""
+
+    session_id: str = Field(min_length=1, max_length=128)
+    demo: bool = False
+
+
+class TaskforceSessionInboxClaimResponse(SQLModel):
+    """Result of a Stop-hook claim. ``message`` is null when the queue is empty."""
+
+    session_id: str
+    message_id: uuid.UUID | None = None
+    message: str | None = None
 
 
 class TaskforceSessionStartRequest(SQLModel):

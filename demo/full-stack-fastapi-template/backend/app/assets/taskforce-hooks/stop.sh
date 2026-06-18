@@ -223,3 +223,30 @@ if [[ -n "$session_id" ]]; then
     )" || turn_status="curl-failed"
     log "POST /v2/taskforce/session/turn-ended → ${turn_status}"
 fi
+
+# ── Inbox: deliver any queued "reply to agent" prompt (TF-260). ──────
+# When the user has queued a prompt for this now-idle agent from the
+# Sessions page, claim it and re-inject it as a fresh user turn via the
+# Stop-hook decision:block contract — Claude treats "reason" as the next
+# user prompt. The claim is one-shot server-side, so when the queue is
+# empty we print nothing and the agent stops normally (no infinite loop).
+# This is the LAST thing the hook does: stdout must carry only this JSON.
+if [[ -n "$session_id" ]]; then
+    claim_response="$(
+        curl -sS \
+            --max-time 5 \
+            -X POST \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/session/inbox/claim" 2>>"$LOG_FILE"
+    )" || claim_response=""
+    if [[ -n "$claim_response" ]]; then
+        queued_prompt="$(jq -r '.message // empty' <<<"$claim_response" 2>/dev/null)"
+        if [[ -n "$queued_prompt" ]]; then
+            log "inbox: injecting queued prompt (${#queued_prompt} chars)"
+            jq -cn --arg reason "$queued_prompt" '{decision: "block", reason: $reason}'
+            exit 0
+        fi
+    fi
+fi

@@ -246,4 +246,30 @@ if [[ "$hook_event_name" == "Stop" ]]; then
             "${BACKEND_URL}/api/v1/v2/taskforce/session/turn-ended" 2>>"$LOG_FILE"
     )" || turn_status="curl-failed"
     log "POST /v2/taskforce/session/turn-ended -> ${turn_status}"
+
+    # ── Inbox: deliver any queued "reply to agent" prompt (TF-260). ──
+    # When the user queued a prompt for this now-idle agent from the
+    # Sessions page, claim it and re-inject it as a fresh user turn via
+    # the Codex Stop-hook decision:block contract — "reason" becomes the
+    # next user prompt. One-shot server-side: an empty queue falls through
+    # to the normal {"continue":true} emitted by the EXIT trap. Setting
+    # did_emit=1 stops emit_continue from also printing (one JSON object
+    # only — two would be invalid on the Stop hook's stdout).
+    claim_response="$(
+        curl -sS \
+            --max-time 5 \
+            -X POST \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/session/inbox/claim" 2>>"$LOG_FILE"
+    )" || claim_response=""
+    if [[ -n "$claim_response" ]]; then
+        queued_prompt="$(jq -r '.message // empty' <<<"$claim_response" 2>/dev/null)"
+        if [[ -n "$queued_prompt" ]]; then
+            log "inbox: injecting queued prompt (${#queued_prompt} chars)"
+            jq -cn --arg reason "$queued_prompt" '{decision: "block", reason: $reason}'
+            did_emit=1
+        fi
+    fi
 fi

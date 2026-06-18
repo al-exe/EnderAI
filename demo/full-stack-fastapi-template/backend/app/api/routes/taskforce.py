@@ -38,6 +38,11 @@ from app.core.taskforce.fleet_sessions import (
     next_fleet_session_name,
     set_default_fleet_session,
 )
+from app.core.taskforce.inbox import (
+    claim_inbox_message,
+    enqueue_inbox_message,
+    list_pending_inbox_messages,
+)
 from app.core.taskforce.installer import (
     build_codex_hook_installer,
     build_cursor_hook_installer,
@@ -76,6 +81,11 @@ from app.models import (
     TaskforceSessionEvent,
     TaskforceSessionEventPublic,
     TaskforceSessionHeartbeatRequest,
+    TaskforceSessionInboxClaimRequest,
+    TaskforceSessionInboxClaimResponse,
+    TaskforceSessionInboxEnqueueRequest,
+    TaskforceSessionInboxListResponse,
+    TaskforceSessionInboxMessagePublic,
     TaskforceSessionLogEntry,
     TaskforceSessionLogResponse,
     TaskforceSessionSavingsResponse,
@@ -323,6 +333,102 @@ def session_turn_ended_route(
     )
     session.commit()
     return Response(status_code=204)
+
+
+def _inbox_message_public(message: Any) -> TaskforceSessionInboxMessagePublic:
+    return TaskforceSessionInboxMessagePublic(
+        id=message.id,
+        body=message.body,
+        created_at=message.created_at,
+        delivered_at=message.delivered_at,
+    )
+
+
+@router.post(
+    "/session/{session_id}/inbox",
+    response_model=TaskforceSessionInboxMessagePublic,
+    status_code=201,
+)
+def enqueue_session_inbox_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str,
+    body: TaskforceSessionInboxEnqueueRequest,
+) -> Any:
+    """Queue a prompt for an idle agent from the Sessions "Reply to agent" box.
+
+    The agent's Stop hook (Claude/Codex) claims and re-injects it when it next
+    goes idle. 404 when the session is not one the caller owns.
+    """
+
+    message = enqueue_inbox_message(
+        session,
+        actor=current_user,
+        session_id=session_id,
+        demo=body.demo,
+        body=body.body,
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Taskforce session not found")
+    session.commit()
+    session.refresh(message)
+    return _inbox_message_public(message)
+
+
+@router.get(
+    "/session/{session_id}/inbox",
+    response_model=TaskforceSessionInboxListResponse,
+)
+def list_session_inbox_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    session_id: str,
+    demo: bool = False,
+) -> Any:
+    """List undelivered queued prompts for a session (Sessions UI pending list)."""
+
+    pending = list_pending_inbox_messages(
+        session,
+        actor=current_user,
+        session_id=session_id,
+        demo=demo,
+    )
+    return TaskforceSessionInboxListResponse(
+        session_id=session_id,
+        pending=[_inbox_message_public(message) for message in pending],
+    )
+
+
+@router.post(
+    "/session/inbox/claim",
+    response_model=TaskforceSessionInboxClaimResponse,
+)
+def claim_session_inbox_route(
+    session: SessionDep,
+    current_user: CurrentUser,
+    body: TaskforceSessionInboxClaimRequest,
+) -> Any:
+    """Atomically claim the next queued prompt for a session (Stop-hook driven).
+
+    Called by the Claude Code / Codex Stop hook when the agent goes idle. Returns
+    ``message: null`` when the queue is empty so the hook can fall through to a
+    normal stop. Each message is delivered exactly once (FOR UPDATE SKIP LOCKED).
+    """
+
+    message = claim_inbox_message(
+        session,
+        actor=current_user,
+        session_id=body.session_id,
+        demo=body.demo,
+    )
+    if message is None:
+        return TaskforceSessionInboxClaimResponse(session_id=body.session_id)
+    session.commit()
+    return TaskforceSessionInboxClaimResponse(
+        session_id=body.session_id,
+        message_id=message.id,
+        message=message.body,
+    )
 
 
 @router.post(
