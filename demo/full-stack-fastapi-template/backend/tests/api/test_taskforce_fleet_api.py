@@ -1317,3 +1317,103 @@ def test_fleet_session_context_is_actor_scoped(
         headers=other_headers,
     )
     assert response.status_code == 404, response.text
+
+
+def _fleet_listing(client: TestClient, headers: dict[str, str]) -> list[dict]:
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return [
+        item for item in response.json()["fleet_sessions"] if not item["is_history"]
+    ]
+
+
+def test_lone_session_is_marked_default(client: TestClient) -> None:
+    _, headers = _signup(client)
+    fleet = _create_fleet(client, headers, "Only group")
+
+    listing = _fleet_listing(client, headers)
+    assert len(listing) == 1
+    only = listing[0]
+    assert only["id"] == fleet["id"]
+    assert only["is_default"] is True
+
+
+def test_make_default_moves_flag_to_exactly_one(client: TestClient) -> None:
+    _, headers = _signup(client)
+    first = _create_fleet(client, headers, "First")
+    second = _create_fleet(client, headers, "Second")
+
+    # The first (oldest) group is the default until the user changes it.
+    listing = {item["id"]: item for item in _fleet_listing(client, headers)}
+    assert listing[first["id"]]["is_default"] is True
+    assert listing[second["id"]]["is_default"] is False
+
+    promoted = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{second['id']}",
+        headers=headers,
+        json={"is_default": True},
+    )
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["is_default"] is True
+
+    listing = {item["id"]: item for item in _fleet_listing(client, headers)}
+    assert listing[second["id"]]["is_default"] is True
+    assert listing[first["id"]]["is_default"] is False
+    assert sum(item["is_default"] for item in listing.values()) == 1
+
+
+def test_new_agents_join_the_chosen_default(client: TestClient, db: Session) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    _create_fleet(client, headers, "First")
+    second = _create_fleet(client, headers, "Second")
+    second_id = uuid.UUID(str(second["id"]))
+
+    promoted = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{second['id']}",
+        headers=headers,
+        json={"is_default": True},
+    )
+    assert promoted.status_code == 200, promoted.text
+
+    discover = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Join the chosen default group",
+            "session_id": "joins-default",
+            "min_score": 0.0,
+        },
+    )
+    assert discover.status_code == 200, discover.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == "joins-default",
+        )
+    ).one()
+    assert archive.fleet_session_id == second_id
+
+
+def test_history_cannot_be_made_default(client: TestClient) -> None:
+    _, headers = _signup(client)
+    _create_fleet(client, headers, "Live group")
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    history = next(
+        item for item in response.json()["fleet_sessions"] if item["is_history"]
+    )
+
+    rejected = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{history['id']}",
+        headers=headers,
+        json={"is_default": True},
+    )
+    assert rejected.status_code == 422, rejected.text
