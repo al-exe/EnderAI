@@ -4,6 +4,11 @@ import shutil
 import subprocess
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -435,26 +440,23 @@ def test_codex_installer_is_idempotent_and_preserves_existing_hooks(
     home = tmp_path / "home"
     codex_dir = home / ".codex"
     codex_dir.mkdir(parents=True)
-    hooks_file = codex_dir / "hooks.json"
+    settings_file = codex_dir / "config.toml"
     external_command = "/existing/session-start.sh"
-    hooks_file.write_text(
-        json.dumps(
-            {
-                "hooks": {
-                    "SessionStart": [
-                        {
-                            "matcher": "startup",
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": external_command,
-                                    "timeout": 3,
-                                }
-                            ],
-                        }
-                    ]
-                }
-            }
+    settings_file.write_text(
+        "\n".join(
+            [
+                "[features]",
+                "hooks = false",
+                "",
+                "[[hooks.SessionStart]]",
+                'matcher = "startup"',
+                "",
+                "[[hooks.SessionStart.hooks]]",
+                'type = "command"',
+                f'command = "{external_command}"',
+                "timeout = 3",
+                "",
+            ]
         )
     )
 
@@ -469,7 +471,9 @@ def test_codex_installer_is_idempotent_and_preserves_existing_hooks(
             capture_output=True,
         )
 
-    hooks = json.loads(hooks_file.read_text())["hooks"]
+    parsed = tomllib.loads(settings_file.read_text())
+    assert parsed["features"]["hooks"] is True
+    hooks = parsed["hooks"]
     assert hooks["SessionStart"][0]["hooks"][0]["command"] == external_command
     for source_name, target_name, hook_name, matcher, timeout, _ in CODEX_HOOKS:
         installed_path = codex_dir / "hooks" / target_name
@@ -522,11 +526,18 @@ while (($#)); do
             shift
             output_file="$1"
             ;;
+        http*)
+            url="$1"
+            ;;
     esac
     shift
 done
 if [[ "$output_file" != "/dev/null" ]]; then
-    printf '%s' "$CURL_RESPONSE" > "$output_file"
+    if [[ "$url" == *taskforce/fleet ]]; then
+        printf '%s' "$CURL_FLEET_RESPONSE" > "$output_file"
+    else
+        printf '%s' "$CURL_RESPONSE" > "$output_file"
+    fi
     printf '200'
 else
     printf '204'
@@ -548,6 +559,37 @@ fi
                         "confidence_band": "high",
                         "summary_markdown": "Use the existing session archive.",
                         "outcome": None,
+                    }
+                ]
+            }
+        ),
+        "CURL_FLEET_RESPONSE": json.dumps(
+            {
+                "fleet_sessions": [
+                    {
+                        "id": "fleet-1",
+                        "name": "Session 1",
+                        "is_history": False,
+                        "agents": [
+                            {
+                                "session_id": "codex-session-1",
+                                "repo": "EnderAI",
+                                "branch": "feature/self",
+                                "status": "running",
+                                "minutes_ago": 0,
+                                "display_name": "Self session",
+                                "summary_markdown": "Current session.",
+                            },
+                            {
+                                "session_id": "sibling-session",
+                                "repo": "EnderAI-frontend",
+                                "branch": "feature/fleet",
+                                "status": "waiting",
+                                "minutes_ago": 2,
+                                "display_name": "Fleet UI polish",
+                                "summary_markdown": "Polishing Sessions grouping.",
+                            },
+                        ],
                     }
                 ]
             }
@@ -594,6 +636,9 @@ fi
     assert discover["prompt"] == "Copy the Fleet behavior"
     assert "Prior decision" in prompt_result.stdout
     assert "Use the existing session archive." in prompt_result.stdout
+    assert "Live sibling agents from Taskforce" in prompt_result.stdout
+    assert "EnderAI-frontend@feature/fleet" in prompt_result.stdout
+    assert "Polishing Sessions grouping." in prompt_result.stdout
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
@@ -603,7 +648,8 @@ def test_codex_observe_hook_posts_structured_session_context(
     home = tmp_path / "home"
     home.mkdir()
     (home / ".taskforce_mcp_token").write_text("test-token")
-    capture_file = tmp_path / "payload.json"
+    observe_file = tmp_path / "observe.json"
+    turn_ended_file = tmp_path / "turn-ended.json"
     transcript = tmp_path / "codex-session.jsonl"
     transcript.write_text(
         "\n".join(
@@ -666,19 +712,30 @@ def test_codex_observe_hook_posts_structured_session_context(
     curl.write_text(
         """#!/usr/bin/env bash
 output_file=""
+url=""
+data=""
 while (($#)); do
     case "$1" in
         --data)
             shift
-            printf '%s' "$1" > "$CAPTURE_FILE"
+            data="$1"
             ;;
         -o)
             shift
             output_file="$1"
             ;;
+        http*)
+            url="$1"
+            ;;
     esac
     shift
 done
+if [[ "$url" == *session/turn-ended* ]]; then
+    printf '%s' "$data" > "$TURN_ENDED_FILE"
+    printf '204'
+    exit 0
+fi
+printf '%s' "$data" > "$OBSERVE_FILE"
 printf '%s' "$CURL_RESPONSE" > "$output_file"
 printf '200'
 """
@@ -689,7 +746,8 @@ printf '200'
         **os.environ,
         "HOME": str(home),
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "CAPTURE_FILE": str(capture_file),
+        "OBSERVE_FILE": str(observe_file),
+        "TURN_ENDED_FILE": str(turn_ended_file),
         "CURL_RESPONSE": json.dumps(
             {
                 "action": "created",
@@ -718,7 +776,7 @@ printf '200'
     )
 
     assert json.loads(result.stdout) == {"continue": True, "suppressOutput": True}
-    observe = json.loads(capture_file.read_text())
+    observe = json.loads(observe_file.read_text())
     assert observe["session_id"] == "codex-session-1"
     assert observe["client"] == "codex"
     assert observe["active_document_id"] is None
@@ -741,6 +799,72 @@ printf '200'
         }
     ]
     assert (home / ".taskforce" / "codex-session-1.active").read_text() == document_id
+    assert json.loads(turn_ended_file.read_text()) == {
+        "session_id": "codex-session-1",
+        "demo": False,
+    }
+
+
+@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+def test_codex_session_end_hook_marks_session_ended(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".taskforce_mcp_token").write_text("test-token")
+    state_dir = home / ".taskforce"
+    state_dir.mkdir()
+    (state_dir / "codex-session-end.active").write_text(
+        "5477ef23-c561-4b1d-8e80-f46f7c193e59"
+    )
+    (state_dir / "codex-session-end.codex-counter").write_text("3")
+
+    capture_file = tmp_path / "payload.json"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(
+        """#!/usr/bin/env bash
+data=""
+while (($#)); do
+    case "$1" in
+        --data)
+            shift
+            data="$1"
+            ;;
+    esac
+    shift
+done
+printf '%s' "$data" > "$CAPTURE_FILE"
+printf '202'
+"""
+    )
+    curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "CAPTURE_FILE": str(capture_file),
+    }
+
+    subprocess.run(
+        ["bash", str(CANONICAL_CODEX_HOOK_DIR / "session-end.sh")],
+        input=json.dumps(
+            {
+                "session_id": "codex-session-end",
+                "cwd": str(tmp_path),
+            }
+        ),
+        text=True,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+    payload = json.loads(capture_file.read_text())
+    assert payload["kind"] == "session_end"
+    assert payload["session_id"] == "codex-session-end"
+    assert payload["client"] == "codex"
+    assert not (state_dir / "codex-session-end.active").exists()
+    assert not (state_dir / "codex-session-end.codex-counter").exists()
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")

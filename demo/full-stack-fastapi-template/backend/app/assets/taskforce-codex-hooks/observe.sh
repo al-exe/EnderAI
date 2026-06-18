@@ -232,3 +232,18 @@ else
 fi
 
 rm -f "$response_file"
+
+if [[ "$hook_event_name" == "Stop" ]]; then
+    turn_status="$(
+        curl -sS \
+            -o /dev/null \
+            -w '%{http_code}' \
+            --max-time 5 \
+            -X POST \
+            -H "Authorization: Bearer ${token}" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -cn --arg sid "$session_id" '{session_id: $sid, demo: false}')" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/session/turn-ended" 2>>"$LOG_FILE"
+    )" || turn_status="curl-failed"
+    log "POST /v2/taskforce/session/turn-ended -> ${turn_status}"
+fi
