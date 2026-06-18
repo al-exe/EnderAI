@@ -173,7 +173,17 @@ Say this if a skeptic asks; keep it the same across both cuts.
 
 ## 5. What must be live to film (dependencies)
 
-Marked: ✅ ships today · 🟡 server/UI surfacing on the Mission-Control roadmap ·
+> **Demo-work build status (2026-06-17).** Three of the gaps below are now built
+> (tagged `[DEMO WORK]`, revert the merge to undo):
+> - **`tf-fleet.sh` — the fleet knowledge bus** + **`tf-capture.sh` — live decision capture**, both as new `/tf` beats: EnderAI PR **#177**.
+> - **Profile pill on the Sessions card**: EnderAI-frontend PR **#340**.
+>
+> To install the updated skill for filming: `bash scripts/taskforce-skill/install.sh`
+> from the PR #177 branch (or after merge). The pill needs sessions whose
+> `specialist_slug` is set; the bus needs the fleet-mates in the same fleet
+> session. Run with `TASKFORCE_DEMO=1` for the seeded library.
+
+Marked: ✅ ships / built · 🟡 server/UI surfacing on the Mission-Control roadmap ·
 🔶 needs the discover directive channel.
 
 | Need | Beat | Status / action |
@@ -183,10 +193,10 @@ Marked: ✅ ships today · 🟡 server/UI surfacing on the Mission-Control roadm
 | Profiles grid + Jensen detail + `/tf` routing line | Profiles, Act 2 | ✅ ships (seed per `taskforce-agents-demo-handoff.md`). |
 | Library doc content + deep-link anchors | Library, Act 3 | ✅ shipped. |
 | **Referenced-by appended live** | 0:40 / Act 3 | ✅ behavior exists (`/reference`); confirm it renders without refresh. |
-| **New nuance captured into a doc live** | Act 3 | ✅ via `/observe` doc patch — confirm the patch is visible on the demo timeline. |
-| **Profile pill on the Sessions card** | Act 1 polish | 🟡 not on the card today (`specialist_slug` is captured, not rendered). *Nice-to-have* — without it, narrate the profile + show it on click-through. |
-| **Collision badge** ("Atlas & Bree both editing billing.py") | Act 1 | 🟡 roadmap. Without it, the two activity lines already show the overlap; narrate it. |
-| **Instant push of a fresh decision to a running agent** | Act 4 / 1:05 | 🔶 the flashy version needs the knowledge-bus / directive channel. **Honest fallback that works today:** stage Bree to send her *next* prompt after Atlas lands the doc; her discover re-pulls the updated doc warm. Latency is one prompt, not instant — film the prompt, don't claim "live telepathy." |
+| **New nuance captured into a doc live** | Act 3 | ✅ **built** — `tf-capture.sh` (`/tf` Beat 7b, PR [#177]) writes the decision into the Library deterministically this turn (cheap `/observe` structured path), instead of waiting on the async summarizer. |
+| **Profile pill on the Sessions card** | Act 1 polish | ✅ **built** — PR [EnderAI-frontend #340] renders `specialist_slug`/name as a violet pill on each agent row. Needs sessions whose `specialist_slug` is populated (the routed-profile demo seed) to appear. |
+| **Collision badge** ("Atlas & Bree both editing billing.py") | Act 1 | 🟡 still roadmap (needs `files_touched` on the fleet response + overlap detection). Without it, the two activity lines already show the overlap; narrate it. |
+| **Fresh decision reaches a fleet-mate** | Act 4 / 1:05 | ✅ **built** — `tf-fleet.sh` (`/tf` Beat 4b, PR [#177]) is a client-side **knowledge bus**: each `/tf` turn pulls your fleet-mates' active docs and surfaces them (🛰). It's a pull per turn (one discover cycle), **not** a realtime push — film Bree's *next* `/tf` after Atlas captures; don't claim "live telepathy." The server push/directive channel stays unbuilt. |
 | Ledger list + cross_boundary filter + per-event provenance | Ledger, Act 5 | ✅ ships (`/v2/ledger` supports `cross_boundary`, `specialist`, `client`, `event_id`). |
 | Cross-tool row in the Ledger (optional) | Act 4/5 | ✅ data-wise — run one agent on **Codex** so a real Claude↔Codex row exists. |
 
