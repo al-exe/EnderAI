@@ -1256,6 +1256,84 @@ def test_observe_always_writes_without_key_or_paid_summarizer(
     assert discover.status_code == 200, discover.text
 
 
+def test_observe_command_only_turn_never_titles_document_with_a_command(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    """A command-only checkpoint (empty prompt, no files, read-only commands)
+    must not title the document with a raw 'Ran: …' shell line — and once a real
+    prompt arrives on a later turn, the placeholder title is repaired in place.
+
+    Regression for the PR #173 follow-up: the free digest's first point on such
+    a turn is a 'Ran: …' line, and the title was frozen at creation, so the
+    Sessions drawer showed a shell one-liner as the document title forever.
+    """
+
+    from app.core.taskforce import observe as observe_mod
+
+    # Free deterministic digest only: no paid summarizer, no managed key.
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "1")
+    monkeypatch.setattr(observe_mod.settings, "ANTHROPIC_API_KEY", "")
+
+    _, headers = _signup(client)
+    session_id = "command-only-title-repair"
+
+    # First turn: no prompt, no files, only read-only commands. Material via the
+    # ≥2-distinct-commands rule, so the doc is created from the free digest.
+    first = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "",
+            "client": "claude-code",
+            "session_id": session_id,
+            "commands_run": [
+                {"cmd": "git log --oneline -1 5555196"},
+                {"cmd": 'for d in */; do echo "$d"; done'},
+            ],
+            "duration_ms": 500,
+        },
+    )
+    assert first.status_code == 202, first.text
+    first_body = first.json()
+    assert first_body["action"] == "created"
+    document_id = first_body["document_id"]
+
+    doc = db.exec(
+        select(V2Document).where(V2Document.id == uuid.UUID(document_id))
+    ).one()
+    assert not doc.title.startswith("Ran: ")
+    assert doc.title == "Taskforce session"
+
+    # Second turn carries a real user prompt and pins the doc → reuses the same
+    # document and repairs the placeholder title.
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "checkpoint",
+            "prompt": "Explain why the session document title is a raw command",
+            "client": "claude-code",
+            "session_id": session_id,
+            "active_document_id": document_id,
+            "duration_ms": 500,
+        },
+    )
+    assert second.status_code == 202, second.text
+    second_body = second.json()
+    assert second_body["action"] == "updated"
+    assert second_body["document_id"] == document_id
+    assert "title" in second_body["patched_fields"]
+
+    db.expire_all()
+    repaired = db.exec(
+        select(V2Document).where(V2Document.id == uuid.UUID(document_id))
+    ).one()
+    assert repaired.title == "Explain why the session document title is a raw command"
+
+
 def test_observe_archive_persisted_before_summarizer_failure(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1396,7 +1474,9 @@ def test_avoided_rediscovery_metric_accumulates_from_consults(
 # ----- TF-225: active-sessions roster ---------------------------------------
 
 
-def test_discover_heartbeat_creates_archive_row(client: TestClient, db: Session) -> None:
+def test_discover_heartbeat_creates_archive_row(
+    client: TestClient, db: Session
+) -> None:
     _, headers = _signup(client)
 
     response = client.post(
