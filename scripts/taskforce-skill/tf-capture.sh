@@ -165,4 +165,16 @@ jq -c \
         reason: (.reason // "")
     }' "$tmp_resp"
 
+# In demo mode, record the doc id we created/patched so the demo reset script
+# can delete exactly these captures (and nothing else) between takes. Off
+# outside demo mode so day-to-day /tf leaves no trace.
+if [[ "$DEMO_FLAG" == "true" ]]; then
+    created_doc_id="$(jq -r '.document_id // empty' "$tmp_resp")"
+    if [[ -n "$created_doc_id" ]]; then
+        capture_log="${TASKFORCE_DEMO_CAPTURE_LOG:-${HOME}/.claude/taskforce-demo-captures.log}"
+        mkdir -p "$(dirname "$capture_log")"
+        printf '%s\n' "$created_doc_id" >> "$capture_log"
+    fi
+fi
+
 log "ok: session_id=${session_id} action=$(jq -r '.action // "?"' "$tmp_resp")"
