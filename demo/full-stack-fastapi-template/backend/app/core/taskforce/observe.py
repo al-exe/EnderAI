@@ -347,6 +347,14 @@ async def observe(
         action = "created"
     else:
         target_doc = document
+        # Repair a title a command-only first turn poisoned: if the existing
+        # title is still a digest/generic line and this turn can produce a real
+        # one, upgrade it. A human-readable title is never overwritten.
+        if _is_digest_title(target_doc.title):
+            better = _document_title(request, summary)
+            if not _is_digest_title(better):
+                update_payload["title"] = better
+                patched_fields = sorted(update_payload.keys())
         update = V2DocumentUpdate(**update_payload)  # type: ignore[arg-type]
         apply_v2_document_update(target_doc, update)
         target_doc.updated_at = _now()
@@ -413,6 +421,42 @@ def _resolve_active_document(
     return get_v2_document_for_actor(session, actor, document_id, demo=demo)
 
 
+# The free digest emits diagnostic lines ("Ran: …", "Touched …") that read fine
+# inside a body but make terrible document titles. The generic fallback is no
+# better. Treat all of these as "not a real title" so we can both avoid picking
+# them at creation and repair them on a later turn.
+_DIGEST_TITLE_PREFIXES = ("Ran: ", "Touched ")
+_GENERIC_TITLE = "Taskforce session"
+
+
+def _is_digest_title(text: str) -> bool:
+    stripped = text.strip()
+    return (
+        not stripped
+        or stripped == _GENERIC_TITLE
+        or stripped.startswith(_DIGEST_TITLE_PREFIXES)
+    )
+
+
+def _document_title(request: TaskforceObserveRequest, summary: SummarizerResult) -> str:
+    """Pick a human-readable title — never a 'Ran: …'/'Touched …' digest line.
+
+    Checkpoint turns arrive with an empty prompt and only read-only commands, so
+    the free digest's first point is a raw shell one-liner. Prefer the
+    originating prompt, then the first prose summary point, before the generic
+    fallback.
+    """
+
+    prompt = request.prompt.strip()
+    if prompt:
+        return prompt[:255]
+    for point in summary.summary_points:
+        candidate = point.strip()
+        if candidate and not _is_digest_title(candidate):
+            return candidate[:255]
+    return _GENERIC_TITLE
+
+
 def _create_document_from_summary(
     session: Session,
     *,
@@ -422,10 +466,7 @@ def _create_document_from_summary(
     request: TaskforceObserveRequest,
     fleet_session_id: uuid_module.UUID | None,
 ) -> V2Document:
-    title = (
-        (summary.summary_points[0] if summary.summary_points else request.prompt)
-        or "Taskforce session"
-    )[:255]
+    title = _document_title(request, summary)
     visibility = (
         request.visibility
         if request.visibility == "private" or actor.organization_id is not None
@@ -437,7 +478,7 @@ def _create_document_from_summary(
         visibility=visibility,
         produced_by_client=request.client,
         fleet_session_id=fleet_session_id,
-        title=title.strip() or "Taskforce session",
+        title=title,
         description=request.prompt.strip()[:500],
         human_summary="",
         ai_generated_summary=" ".join(summary.summary_points)[:600],
