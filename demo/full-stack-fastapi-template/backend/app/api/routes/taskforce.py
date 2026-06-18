@@ -552,7 +552,7 @@ def session_activity_route(
     session: SessionDep,
     current_user: CurrentUser,
     session_id: str = Query(..., min_length=1, max_length=128),
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=200, ge=1, le=200),
 ) -> Any:
     """Return the canonical full session timeline, newest-first and owner-scoped."""
 

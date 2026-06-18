@@ -233,13 +233,21 @@ def normalized_session_events(
 
     for file_name in request.files_touched:
         file_name = file_name[:1024]
-        checkpoint = str(request.checkpoint_index or "snapshot")
+        # Dedupe edits by file (+ diff), NOT by checkpoint. The PostToolUse hook
+        # re-ships the recently-touched files on every checkpoint with a fresh,
+        # monotonically-increasing checkpoint_index, and the transcript windows
+        # overlap — so keying the source_event_id on checkpoint_index minted a
+        # brand-new "Edited X" event for the same physical edit on every
+        # checkpoint (~12x duplication observed), flooding the timeline and
+        # pushing real history past the activity view's limit. Commands already
+        # dedupe on content alone; edits now match that, collapsing repeated
+        # snapshots of the same file into one event.
         events.append(
             {
                 "source_event_id": _fallback_source_id(
                     "edit",
-                    [checkpoint, file_name, request.diff_summary or ""],
-                    next_occurrence("edit", checkpoint, file_name),
+                    [file_name, request.diff_summary or ""],
+                    next_occurrence("edit", file_name),
                 ),
                 "kind": "edit",
                 "occurred_at": now,
