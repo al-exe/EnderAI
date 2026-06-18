@@ -162,6 +162,46 @@ def test_observe_appends_actual_events_and_dedupes_repeated_snapshots(
     assert command["output"] == "1 passed"
 
 
+def test_observe_dedupes_same_file_across_checkpoints(
+    client: TestClient,
+) -> None:
+    """Re-touching one file across rising checkpoint_index → a single edit event.
+
+    Regression: the PostToolUse hook re-ships recently-edited files on every
+    checkpoint with an incrementing checkpoint_index and overlapping transcript
+    windows. The edit dedup key used to include checkpoint_index, so each
+    checkpoint minted a fresh "Edited X" event for the same physical edit
+    (~12x duplication in the wild). Edits must now dedupe on file alone.
+    """
+
+    _, headers = _signup(client)
+    session_id = f"activity-{uuid.uuid4()}"
+    assert _discover(client, headers, "Edit the same file", session_id).status_code == 200
+
+    for checkpoint in (1, 2, 3, 4, 5):
+        payload = {
+            "kind": "checkpoint",
+            "prompt": "Edit the same file",
+            "client": "activity-test",
+            "session_id": session_id,
+            "transcript": [],
+            "files_touched": ["app/api/routes/billing.py"],
+            "checkpoint_index": checkpoint,
+            "summary_points": ["Touch billing.py"],
+        }
+        observe = client.post(
+            f"{settings.API_V1_STR}/v2/taskforce/observe",
+            headers=headers,
+            json=payload,
+        )
+        assert observe.status_code == 202, observe.text
+
+    body = _activity(client, headers, session_id)
+    edits = [e for e in body["entries"] if e["kind"] == "edit"]
+    assert len(edits) == 1, f"expected 1 edit event, got {len(edits)}"
+    assert edits[0]["file"] == "app/api/routes/billing.py"
+
+
 def test_ledger_href_gated_on_organization(
     client: TestClient,
     db: Session,
