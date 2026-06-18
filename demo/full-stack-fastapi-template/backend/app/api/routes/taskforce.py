@@ -36,6 +36,7 @@ from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     get_or_create_history_fleet_session,
     next_fleet_session_name,
+    set_default_fleet_session,
 )
 from app.core.taskforce.installer import (
     build_codex_hook_installer,
@@ -543,6 +544,16 @@ def fleet_route(
     # No automatic sweep: inactive agents stay in their group (shown gray) until
     # the user archives them. We only ensure the Archive group exists.
     history = get_or_create_history_fleet_session(session, current_user)
+
+    # Guarantee exactly one non-history group is flagged default so the badge —
+    # and "new agents join here" — always has a target (incl. a lone session).
+    non_history = session.exec(
+        select(TaskforceFleetSession)
+        .where(TaskforceFleetSession.actor_id == current_user.id)
+        .where(TaskforceFleetSession.is_history.is_(False))
+    ).all()
+    if non_history and not any(item.is_default for item in non_history):
+        get_or_create_default_fleet_session(session, current_user)
     session.commit()
 
     fleet_sessions = list(
@@ -572,6 +583,7 @@ def fleet_route(
                 id=fleet_session.id,
                 name=fleet_session.name,
                 is_history=fleet_session.is_history,
+                is_default=fleet_session.is_default,
                 created_at=fleet_session.created_at,
                 updated_at=fleet_session.updated_at,
                 agents=agents_by_fleet.get(fleet_session.id, []),
@@ -634,6 +646,7 @@ def create_fleet_session_route(
         id=fleet_session.id,
         name=fleet_session.name,
         is_history=fleet_session.is_history,
+        is_default=fleet_session.is_default,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=[],
@@ -647,7 +660,7 @@ def update_fleet_session_route(
     fleet_session_id: uuid.UUID,
     body: TaskforceFleetSessionUpdate,
 ) -> Any:
-    """Rename one session group owned by the current actor."""
+    """Rename one session group, or mark it the actor's default."""
 
     fleet_session = _fleet_session_for_actor(
         session,
@@ -655,9 +668,14 @@ def update_fleet_session_route(
         fleet_session_id=fleet_session_id,
     )
     if fleet_session.is_history:
+        if body.is_default:
+            raise HTTPException(status_code=422, detail="History cannot be the default")
         raise HTTPException(status_code=422, detail="History cannot be renamed")
     if body.name is not None:
         fleet_session.name = _fleet_name(body.name)
+    if body.is_default:
+        # Exactly one default: this flips the flag here and clears it elsewhere.
+        set_default_fleet_session(session, current_user, fleet_session)
     fleet_session.updated_at = get_datetime_utc()
     session.add(fleet_session)
     session.commit()
@@ -671,6 +689,7 @@ def update_fleet_session_route(
         id=fleet_session.id,
         name=fleet_session.name,
         is_history=fleet_session.is_history,
+        is_default=fleet_session.is_default,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=agents,

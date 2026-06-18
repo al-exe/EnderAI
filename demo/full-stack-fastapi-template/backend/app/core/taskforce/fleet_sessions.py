@@ -89,7 +89,13 @@ def get_or_create_default_fleet_session(
     *,
     exclude_id: uuid.UUID | None = None,
 ) -> TaskforceFleetSession:
-    """Return the actor's named default, otherwise their oldest non-history session."""
+    """Return the actor's default session group.
+
+    Prefers the session explicitly flagged ``is_default``. When none is flagged
+    (e.g. legacy actors, or a brand-new single session), it falls back to the
+    conventionally-named default, then the oldest non-history session, and
+    *persists* the flag onto that pick so exactly one group is always marked.
+    """
 
     fleet_sessions = fleet_sessions_for_actor(
         session,
@@ -97,6 +103,14 @@ def get_or_create_default_fleet_session(
         exclude_id=exclude_id,
         include_history=False,
     )
+
+    flagged = next(
+        (fleet_session for fleet_session in fleet_sessions if fleet_session.is_default),
+        None,
+    )
+    if flagged is not None:
+        return flagged
+
     default = next(
         (
             fleet_session
@@ -105,20 +119,50 @@ def get_or_create_default_fleet_session(
         ),
         fleet_sessions[0] if fleet_sessions else None,
     )
-    if default is not None:
-        return default
 
     now = get_datetime_utc()
-    default = TaskforceFleetSession(
-        actor_id=actor.id,
-        organization_id=actor.organization_id,
-        name=DEFAULT_SESSION_NAME,
-        created_at=now,
-        updated_at=now,
-    )
+    if default is None:
+        default = TaskforceFleetSession(
+            actor_id=actor.id,
+            organization_id=actor.organization_id,
+            name=DEFAULT_SESSION_NAME,
+            is_default=True,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(default)
+        session.flush()
+        return default
+
+    # No session was flagged yet — mark the heuristic pick so the badge always
+    # points at exactly one group (and a lone session is always the default).
+    default.is_default = True
+    default.updated_at = now
     session.add(default)
     session.flush()
     return default
+
+
+def set_default_fleet_session(
+    session: Session,
+    actor: User,
+    target: TaskforceFleetSession,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Mark ``target`` as the actor's sole default, clearing the flag elsewhere."""
+
+    now = now or get_datetime_utc()
+    for fleet_session in fleet_sessions_for_actor(
+        session, actor, include_history=False
+    ):
+        should_be_default = fleet_session.id == target.id
+        if fleet_session.is_default == should_be_default:
+            continue
+        fleet_session.is_default = should_be_default
+        fleet_session.updated_at = now
+        session.add(fleet_session)
+    session.flush()
 
 
 def next_fleet_session_name(session: Session, actor: User) -> str:
