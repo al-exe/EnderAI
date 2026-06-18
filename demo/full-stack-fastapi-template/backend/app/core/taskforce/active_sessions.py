@@ -22,7 +22,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc
+from sqlalchemy import and_, desc, not_
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
@@ -58,6 +58,15 @@ MAX_AGE = timedelta(hours=8)
 
 # Bounds the roster size regardless of how many sessions a user accumulates.
 ROSTER_LIMIT = 5
+
+# Grace period before a session that has shown no sign of life is treated as a
+# ghost registration and hidden from the roster. A real agent gets a title from
+# its first prompt (and usually a document) within seconds of registering; a
+# bare heartbeat that, past this window, still has no title, no document, and
+# never ended a turn is a sub-process / subagent / dead terminal that registered
+# but never became a session. Short enough to clear phantoms quickly, long
+# enough not to flicker a genuinely just-spawned agent before its first prompt.
+GHOST_GRACE = timedelta(minutes=15)
 
 # Sessions reports a server-derived state so clients do not duplicate freshness
 # heuristics. Waiting and paused remain reserved until ingestion captures them.
@@ -238,12 +247,30 @@ def _active_session_rows(
 
     now = now or _now()
     cutoff = now - max_age
+    ghost_cutoff = now - GHOST_GRACE
 
     statement = (
         select(TaskforceSessionArchive)
         .where(TaskforceSessionArchive.actor_id == actor.id)
         .where(TaskforceSessionArchive.organization_id == actor.organization_id)
         .where(TaskforceSessionArchive.last_seen_at.is_not(None))
+        # Hide ghost registrations: a session that, past GHOST_GRACE, never
+        # received a prompt (no title), never produced a document, and never
+        # ended a turn is a bare heartbeat (sub-process / subagent / dead
+        # terminal), not a real agent. Keep it out of the roster entirely —
+        # even under include_inactive — so it never surfaces as a phantom
+        # "Running in this terminal" row. Real agents always pick up a title
+        # from their first prompt within seconds, so they are never caught.
+        .where(
+            not_(
+                and_(
+                    TaskforceSessionArchive.title.is_(None),
+                    TaskforceSessionArchive.active_document_id.is_(None),
+                    TaskforceSessionArchive.last_turn_ended_at.is_(None),
+                    TaskforceSessionArchive.last_seen_at < ghost_cutoff,
+                )
+            )
+        )
     )
     if not include_inactive:
         statement = statement.where(TaskforceSessionArchive.ended_at.is_(None)).where(

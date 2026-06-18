@@ -1417,3 +1417,89 @@ def test_history_cannot_be_made_default(client: TestClient) -> None:
         json={"is_default": True},
     )
     assert rejected.status_code == 422, rejected.text
+
+
+def _ghost_archive(
+    db: Session,
+    *,
+    user: User,
+    session_id: str,
+    fleet_session_id: uuid.UUID,
+    age: timedelta,
+) -> None:
+    """A bare registration: no title, no document, no turn ever ended."""
+    seen = datetime.now(timezone.utc) - age
+    db.add(
+        TaskforceSessionArchive(
+            session_id=session_id,
+            actor_id=user.id,
+            organization_id=user.organization_id,
+            fleet_session_id=fleet_session_id,
+            title=None,
+            active_document_id=None,
+            last_turn_ended_at=None,
+            client=None,
+            model_id=None,
+            started_at=seen,
+            imported_at=seen,
+            last_seen_at=seen,
+        )
+    )
+    db.commit()
+
+
+def test_fleet_hides_ghost_registrations(
+    client: TestClient,
+    db: Session,
+) -> None:
+    """Stale bare registrations (sub-processes/dead terminals) drop off the roster.
+
+    A real agent picks up a title from its first prompt within seconds, so it is
+    never mistaken for a ghost. A ghost still inside the grace window stays
+    visible (it might be a genuinely just-spawned agent before its first prompt).
+    """
+
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Ghosts")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    # Real session — has a title from its first prompt.
+    _create_archive(
+        db,
+        user=user,
+        session_id="real-agent",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+    )
+    # Stale ghost — empty and last seen 30m ago (past the 15m grace).
+    _ghost_archive(
+        db,
+        user=user,
+        session_id="ghost-stale",
+        fleet_session_id=fleet_id,
+        age=timedelta(minutes=30),
+    )
+    # Fresh ghost — empty but only 2m old, still within grace.
+    _ghost_archive(
+        db,
+        user=user,
+        session_id="ghost-fresh",
+        fleet_session_id=fleet_id,
+        age=timedelta(minutes=2),
+    )
+
+    body = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    ).json()
+    session_ids = {
+        agent["session_id"]
+        for group in body["fleet_sessions"]
+        for agent in group["agents"]
+    }
+
+    assert "real-agent" in session_ids
+    assert "ghost-fresh" in session_ids
+    assert "ghost-stale" not in session_ids
