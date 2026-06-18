@@ -8,9 +8,11 @@ The skill installs identically into every supported harness — `~/.claude/skill
 
 1. `/tf <task>` → POST `/v2/taskforce/session/start`
 2. Skill prints the matched specialist (when one routes above the medium band) and the top documents with 3-line anchor previews + deep links to `taskforce.tools/v2/library/<id>#<anchor>`
-3. Claude reads the full anchor content as context (invisibly), then does the task normally
-4. On completion: POST `/v2/taskforce/reference` → each consulted doc gets a "Referenced by" row appended
-5. Final line: a markdown link reporting `Taskforce saved you N tokens (~$X)` that opens the metrics page filtered to this session
+3. **Fleet knowledge bus** → GET `/v2/taskforce/fleet` + each live sibling's active doc, surfacing what your fleet-mates just figured out (skipped silently for solo sessions)
+4. Claude reads the full anchor + sibling context (invisibly), then does the task normally
+5. On completion: POST `/v2/taskforce/reference` → each consulted doc gets a "Referenced by" row appended
+6. **Live capture** (only when the session produced something new) → POST `/v2/taskforce/observe` with structured fields, writing a fresh decision straight into the Library — the doc a teammate's bus will surface next
+7. Final line: a markdown link reporting `Taskforce saved you N tokens (~$X)` that opens the metrics page filtered to this session
 
 ## Install
 
@@ -47,7 +49,7 @@ Recommended for demos: set `TASKFORCE_HOOKS_DISABLED=1` so only the skill emits 
 
 ```bash
 ls ~/.claude/skills/tf
-# SKILL.md  tf-discover.sh  tf-reference.sh  tf-savings.sh
+# SKILL.md  tf-discover.sh  tf-fleet.sh  tf-reference.sh  tf-capture.sh  tf-savings.sh
 
 # Token present:
 test -r ~/.taskforce_mcp_token && echo "token ok" || echo "token missing"
@@ -62,6 +64,8 @@ tail -f ~/.claude/taskforce-skill.log
 - **Backend down / 5xx** → skill prints `⚠️ Taskforce unavailable (http_5xx). Continuing without prior work.` and proceeds.
 - **No matches** → skill prints `No related prior work in Taskforce yet — proceeding from scratch.` and proceeds.
 - **No specialist matched** → skill silently skips the routing banner; document matches still render.
+- **Solo session / no live fleet-mates** → the knowledge-bus beat is skipped silently (no `🛰` banner).
+- **Nothing new to capture** → the live-capture beat is skipped; applying already-documented decisions is the norm and writes nothing.
 
 In every failure path the user gets a working session — Taskforce never blocks the work.
 

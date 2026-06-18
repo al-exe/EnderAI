@@ -64,7 +64,9 @@ install_into() {
     mkdir -p "$skill_dir"
     install_file "SKILL.md"        "${skill_dir}/SKILL.md"        0644
     install_file "tf-discover.sh"  "${skill_dir}/tf-discover.sh"  0755
+    install_file "tf-fleet.sh"     "${skill_dir}/tf-fleet.sh"     0755
     install_file "tf-reference.sh" "${skill_dir}/tf-reference.sh" 0755
+    install_file "tf-capture.sh"   "${skill_dir}/tf-capture.sh"   0755
     install_file "tf-savings.sh"   "${skill_dir}/tf-savings.sh"   0755
 }
 
