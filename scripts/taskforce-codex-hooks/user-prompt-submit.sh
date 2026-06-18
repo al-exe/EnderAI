@@ -20,8 +20,10 @@ log() {
 }
 
 response_file=""
+fleet_response_file=""
 cleanup() {
     [[ -n "$response_file" ]] && rm -f "$response_file"
+    [[ -n "$fleet_response_file" ]] && rm -f "$fleet_response_file"
 }
 trap 'cleanup; exit 0' EXIT
 
@@ -93,32 +95,80 @@ if [[ -n "$session_active_doc" ]]; then
 fi
 
 match_count="$(jq '.matches | length' "$response_file" 2>/dev/null || echo 0)"
-if [[ "$match_count" == "0" ]]; then
-    log "no matches"
-    exit 0
+discover_block=""
+if [[ "$match_count" != "0" ]]; then
+    preamble_text="$(jq -r --argjson budget_chars "$((TOKEN_BUDGET * 4))" '
+        .matches as $matches
+        | reduce range(0; ($matches | length)) as $i ([0, ""];
+            .[1] as $acc
+            | .[0] as $used
+            | $matches[$i] as $m
+            | ($m.title + " - score " + ($m.score | tostring) + " - " + ($m.summary_markdown // "")) as $entry
+            | ($used + ($entry | length)) as $next
+            | if $next > $budget_chars then .
+              else [$next, $acc + "\n[" + $m.title + "] (" + $m.confidence_band + ", " + ($m.score | tostring) + ")\n" + ($m.summary_markdown // "(no summary)") + (if $m.outcome then "\nOutcome: " + $m.outcome else "" end) + "\n"]
+              end
+          )
+        | .[1]
+    ' "$response_file" 2>/dev/null)"
+
+    if [[ -n "$preamble_text" ]]; then
+        discover_block="Related prior work from Taskforce:
+${preamble_text}
+Use this as prior context when it is relevant to the user's request."
+    fi
 fi
 
-preamble_text="$(jq -r --argjson budget_chars "$((TOKEN_BUDGET * 4))" '
-    .matches as $matches
-    | reduce range(0; ($matches | length)) as $i ([0, ""];
-        .[1] as $acc
-        | .[0] as $used
-        | $matches[$i] as $m
-        | ($m.title + " - score " + ($m.score | tostring) + " - " + ($m.summary_markdown // "")) as $entry
-        | ($used + ($entry | length)) as $next
-        | if $next > $budget_chars then .
-          else [$next, $acc + "\n[" + $m.title + "] (" + $m.confidence_band + ", " + ($m.score | tostring) + ")\n" + ($m.summary_markdown // "(no summary)") + (if $m.outcome then "\nOutcome: " + $m.outcome else "" end) + "\n"]
-          end
-      )
-    | .[1]
-' "$response_file" 2>/dev/null)"
+fleet_block=""
+if [[ "${TASKFORCE_FLEET_INJECT:-1}" != "0" ]]; then
+    fleet_response_file="$(mktemp)"
+    fleet_status="$(
+        curl -sS \
+            -o "$fleet_response_file" \
+            -w '%{http_code}' \
+            --max-time 4 \
+            -H "Authorization: Bearer ${token}" \
+            "${BACKEND_URL}/api/v1/v2/taskforce/fleet" 2>>"$LOG_FILE"
+    )" || fleet_status=""
 
-[[ -z "$preamble_text" ]] && { log "skip: preamble empty after budget"; exit 0; }
+    if [[ "$fleet_status" == "200" ]]; then
+        sib_filter='[ .fleet_sessions[]? | select(.is_history | not) | .agents[]?
+            | select(.session_id != $self)
+            | select((.minutes_ago // 99999) <= $maxmin)
+            | select(((.status // "") == "running") or ((.status // "") == "waiting") or ((.status // "") == "active")) ]'
+        sib_text="$(jq -r --arg self "$session_id" --argjson maxmin "${TASKFORCE_FLEET_MAX_MIN:-480}" "
+            ${sib_filter}
+            | map(
+                ((.summary_markdown // \"\") | gsub(\"\n\";\" \")) as \$sum
+                | ((.title // \"\") | gsub(\"\n\";\" \")) as \$title
+                | ((.display_name // \"untitled\") | gsub(\"\n\";\" \")) as \$name
+                | (if \$sum != \"\" then (\$sum | .[0:240])
+                   elif \$title != \"\" then \$title
+                   else (\$name | .[0:90]) + \"  (just started - no work summary yet)\" end) as \$desc
+                | \"- \" + (.repo // \"?\") + (if .branch then \"@\"+.branch else \"\" end)
+                  + \" (\" + (.status // \"?\") + \", \" + ((.minutes_ago // 0)|tostring) + \"m ago)\"
+                  + \"\n    \" + \$desc )
+            | .[0:6] | join(\"\n\")
+        " "$fleet_response_file" 2>/dev/null)"
 
-cat <<EOF
-Related prior work from Taskforce:
-${preamble_text}
-Use this as prior context when it is relevant to the user's request.
-EOF
+        if [[ -n "$sib_text" ]]; then
+            sib_count="$(jq -r --arg self "$session_id" --argjson maxmin "${TASKFORCE_FLEET_MAX_MIN:-480}" "${sib_filter} | length" "$fleet_response_file" 2>/dev/null || echo 0)"
+            fleet_block="Live sibling agents from Taskforce:
+${sib_text}
+Use this as current coordination context when it is relevant to the user's request."
+            log "fleet: ${sib_count} live siblings injected"
+        else
+            log "fleet: no live siblings"
+        fi
+    else
+        log "fleet: status ${fleet_status:-none}"
+    fi
+fi
 
-log "ok: ${match_count} matches injected"
+if [[ -n "$discover_block" || -n "$fleet_block" ]]; then
+    [[ -n "$discover_block" ]] && printf '%s\n' "$discover_block"
+    [[ -n "$fleet_block" ]] && printf '%s\n' "$fleet_block"
+    log "ok: discover=${match_count} fleet=$([[ -n "$fleet_block" ]] && echo yes || echo no)"
+else
+    log "no context to inject"
+fi
