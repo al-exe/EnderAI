@@ -7,13 +7,15 @@ description: Explicit, visible Taskforce flow — discover prior work, do the ta
 
 You were invoked because the user typed `/tf` followed by a task description. Your job is to run the Taskforce flow **visibly** — every step the user sees should make it obvious that Taskforce is in the loop, distinct from your own reasoning.
 
-There are three wrapper scripts in this skill's directory — `~/.claude/skills/tf/` (Claude Code), `~/.cursor/skills-cursor/tf/` (Cursor), or `~/.codex/skills/tf/` (Codex). The skill and scripts are byte-identical across harnesses; only the install location differs.
+There are five wrapper scripts in this skill's directory — `~/.claude/skills/tf/` (Claude Code), `~/.cursor/skills-cursor/tf/` (Cursor), or `~/.codex/skills/tf/` (Codex). The skill and scripts are byte-identical across harnesses; only the install location differs.
 
 1. `tf-discover.sh` — POSTs `/v2/taskforce/session/start`, returns matched specialist + matched documents (with 3-line previews and full anchor content).
-2. `tf-reference.sh` — POSTs `/v2/taskforce/reference`, appends a "Referenced by:" row to the consulted documents.
-3. `tf-savings.sh` — GETs `/v2/taskforce/session-savings`, returns the net tokens / USD this session saved.
+2. `tf-fleet.sh` — GETs `/v2/taskforce/fleet` + the active doc of each live sibling, returns what your **fleet-mates just figured out** (the knowledge bus). Read-only.
+3. `tf-reference.sh` — POSTs `/v2/taskforce/reference`, appends a "Referenced by:" row to the consulted documents.
+4. `tf-capture.sh` — POSTs `/v2/taskforce/observe` with structured fields, writing a fresh **decision** straight into the Library this turn (no waiting for the passive summarizer).
+5. `tf-savings.sh` — GETs `/v2/taskforce/session-savings`, returns the net tokens / USD this session saved.
 
-All three return a single JSON envelope on stdout. They always exit 0; check `.ok` and degrade gracefully.
+All five return a single JSON envelope on stdout. They always exit 0; check `.ok` and degrade gracefully.
 
 ## Beyond the demo flow — the live Taskforce surface
 
@@ -45,9 +47,13 @@ curl -sS --max-time 20 -H "Authorization: Bearer ${tok}" \
 | **Inspect a session** | `GET /session-log`, `GET /session-activity` | What a given agent discovered/reused and its per-turn activity. |
 | **ROI ledger** | `GET /ledger`, `GET /ledger/{session_id}`, `GET /ledger/{session_id}/raw-transcript`, `GET /documents/{id}/sessions` | Per-session savings rollup + transcript. |
 
-### What is *not* wired yet (don't promise it)
+### The fleet knowledge bus — what is and isn't wired
 
-Cross-agent sharing today is **pull-based and topical**: agent A writes a doc, agent B only gets it if B's *own* `/discover` prompt semantically matches it. There is **no push channel** — nothing injects a sibling's context into a running agent, and `/fleet` membership does **not** change what `/discover` returns. The **Sessions knowledge bus** and **directive channel** (`docs/planning/taskforce-fleet-mission-control.md` + `taskforce-fleet-knowledge-bus.md`) that would make "pull from another agent" real are **designed but unshipped**. If a user remembers context "automatically" arriving from a sibling, that was topical `/discover` overlap, not a live handoff.
+`/tf` now runs a **client-side knowledge bus** (Beat 4b via `tf-fleet.sh`): on each invocation it reads `/fleet`, finds your live fleet-mates, and pulls their *active document* so a sibling's fresh decision lands in your session — "pull from another agent," made real. Be precise about its shape so you don't over-promise:
+
+- It is a **pull on each `/tf` turn**, not a server **push**. Latency is one discover cycle: a fleet-mate's decision reaches you the next time you run `/tf`, not the instant they make it. There is still no channel that injects context into an *already-mid-turn* agent.
+- It is scoped to your **own fleet session** (or same `cwd`), and only surfaces siblings that have an `active_document_id` and were active recently. `/discover` topical matching is unchanged and independent.
+- The fuller server-side **push / directive channel** (`docs/planning/taskforce-fleet-mission-control.md` + `taskforce-fleet-knowledge-bus.md`) — broadcast steering, pause/stop, true realtime — is still **designed, not shipped**. Don't claim it.
 
 ## Required output sequence
 
@@ -157,6 +163,36 @@ N. **<title>** — Confidence: <confidence_band> (<score, 2 decimals>)
 
 Render exactly `.matches.length` cards. Do not paraphrase the previews; emit them verbatim.
 
+### Beat 4b — Pull live context from your fleet (the knowledge bus)
+
+After the document matches, check whether a **fleet-mate** just figured out something relevant — the "pull from another agent" beat. Run:
+
+```bash
+~/.claude/skills/tf/tf-fleet.sh \
+  --exclude-session "<session_id from discover>" \
+  --cwd "$PWD"
+```
+
+Parse the result. If `.ok == false` **or** `.siblings == []`, **skip this beat silently** — no banner, no apology (a solo session is the common case).
+
+If `.siblings` is non-empty, print a header, pluralizing on count:
+
+```
+🛰 From your fleet — <N> teammate<s> working nearby:
+```
+
+Then one card per sibling (render exactly `.siblings.length`):
+
+```
+N. **<display_name>** (<agent_kind>)<profile suffix> — active <minutes_ago>m ago
+   On: [<title>](<href>)
+<preview as-is — already prefixed with `> `>
+```
+
+`<profile suffix>` is ` · profile <specialist_slug>` when `specialist_slug` is non-null, else empty.
+
+Then read each `sibling.full` as additional reasoning context (like the document anchors — **do not echo `full`**; the 3-line preview is what the user sees). When a fleet-mate's decision applies, build on it explicitly in Beat 5 ("a teammate just landed the route-boundary decision in this same repo — building on it rather than re-deriving"). This is a pull on *this* `/tf` turn, not a realtime push — don't narrate it as live telepathy.
+
 ### Beat 5 — Do the work (your own reasoning, silently using the injected anchors)
 
 Now read each `match.anchor_full` as additional context for your reasoning. **Do not echo `anchor_full` to the user** — that's invisible context. The 3-line preview from Beat 4 is what they see; the full anchor is for you.
@@ -226,6 +262,31 @@ Do **not** collapse these into a summary like "Recorded consultation in N docume
 
 If `.skipped_document_ids` is non-empty, print `(skipped N inaccessible doc(s))` once at the end.
 
+### Beat 7b — Capture what you figured out (only when there's something new)
+
+Sometimes the work produced a **new** decision or gotcha that wasn't already in the consulted documents — the kind of thing the next teammate would want, and exactly what the bus in Beat 4b surfaces. When that's the case (and only then), write it into the Library **now** rather than waiting for the passive Stop-hook summarizer:
+
+```bash
+~/.claude/skills/tf/tf-capture.sh \
+  --session-id "<session_id from discover>" \
+  --decision "<the reusable decision, one sentence>" \
+  --summary-point "<what changed and where, one line>" \
+  --files "<comma-separated files you touched>" \
+  --outcome shipped \
+  --specialist-slug "<matched_specialist.slug, if one routed>" \
+  --branch "$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+```
+
+Pass `--decision` more than once for multiple findings. **Skip this beat entirely** when the work merely applied already-documented decisions — don't manufacture a capture just to have one. (This is gated by Beat 5b like the reference call: only run it after the user confirmed the fix landed.)
+
+On `.ok == true` and `.action != "skipped"`, print one bullet beneath the Beat 7 writes — label it with the gist of your `--decision` since the response carries the link, not a title:
+
+```
+  • [Captured: <one-line gist of the decision>](<href>) — new decision saved to the Library
+```
+
+Use `.href` from the response. This is the document a fleet-mate's `tf-fleet.sh` will surface next — capture here closes the loop the bus opens.
+
 ### Beat 8 — Fetch + render savings
 
 Call:
@@ -248,11 +309,14 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 
 | Scenario | Behavior |
 |---|---|
-| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/5b/6/7/8, do the work normally |
-| `.matches == []` | Skip Beats 4/5b/6/7/8 (nothing to confirm, reference, or score), do the work normally |
+| `tf-discover.sh` returns `ok:false` | Print one-line warning, skip Beats 3/4/4b/5b/6/7/7b/8, do the work normally |
+| `.matches == []` | Skip Beats 4/5b/6/7/7b/8 (nothing to confirm, reference, or score). Still run Beat 4b — fleet context is independent of your own matches — then do the work |
 | `.matched_specialist == null` | Skip Beat 3, keep all other beats |
-| User says no (or anything non-affirmative) at Beat 5b | Skip Beats 6/7/8 entirely; print the "consulted-only mode" line; keep helping the user |
-| `tf-reference.sh` returns `ok:false` (after Beat 5b yes) | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beat 8 |
+| `tf-fleet.sh` returns `ok:false` **or** `.siblings == []` | Skip Beat 4b silently (no banner). The common solo-session case |
+| User says no (or anything non-affirmative) at Beat 5b | Skip Beats 6/7/7b/8 entirely; print the "consulted-only mode" line; keep helping the user |
+| `tf-reference.sh` returns `ok:false` (after Beat 5b yes) | Print `⚠️ Couldn't record reference (<reason>).` and still attempt Beats 7b/8 |
+| Nothing new to record at Beat 7b | Skip Beat 7b silently — applying existing decisions is the norm, not every session captures |
+| `tf-capture.sh` returns `ok:false` or `.action == "skipped"` | Print nothing for the capture bullet; proceed to Beat 8 |
 | `tf-savings.sh` returns `ok:false` (after Beat 5b yes) | Print `💰 (Savings unavailable)` with no link, then stop |
 
 ## Ordering rules — non-negotiable
@@ -260,5 +324,7 @@ Use `model_display` from the `tf-savings.sh` JSON response. If `effort_label` is
 - **Do not** call `tf-reference.sh` before the user explicitly confirms at Beat 5b. The "Referenced by" rows are evidence the consultation was useful; pre-firing them lies about that.
 - **Do not** call `tf-savings.sh` before `tf-reference.sh`. The savings number is computed from consultation events, but the order also matters for the demo recording flow.
 - **Do not** call `tf-discover.sh` more than once per `/tf` invocation. One discover → one session_id → one Beat 5b confirmation → one reference call → one savings call.
-- **Do not** render `match.anchor_full` to the user. That content is for your reasoning only — the user sees the 3-line preview.
+- **Do not** call `tf-capture.sh` before the user confirms at Beat 5b, and only when there's a genuinely new decision (it writes a "shipped" decision into the shared Library — fabricating one pollutes the next teammate's bus).
+- **Do not** call `tf-fleet.sh` more than once per `/tf` invocation, and always pass `--exclude-session` so you never surface your own session back to yourself.
+- **Do not** render `match.anchor_full` or `sibling.full` to the user. That content is for your reasoning only — the user sees the 3-line preview.
 - **Do not** assume yes at Beat 5b. Wait for an explicit reply; "I think that's it" or "looks reasonable" without a yes/no should trigger the clarification prompt, not auto-proceed.
