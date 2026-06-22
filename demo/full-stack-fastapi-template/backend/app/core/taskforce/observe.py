@@ -45,6 +45,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.metrics.events import _build_event, _now
 from app.core.taskforce.archive import upsert_session_archive_from_observe
+from app.core.taskforce.evolution import mark_session_for_evolution
 from app.core.taskforce.materiality import assess_materiality
 from app.core.taskforce.summarizer import (
     PROMPT_VERSION,
@@ -361,13 +362,14 @@ async def observe(
         session.add(target_doc)
         action = "updated"
 
-    upsert_session_archive_from_observe(
+    archive = upsert_session_archive_from_observe(
         session,
         actor=actor,
         request=request,
         demo=demo,
         document_id=target_doc.id,
     )
+    mark_session_for_evolution(archive)
 
     audit = _record_audit(
         session,

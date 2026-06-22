@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app.api.main import api_router
 from app.core.config import settings
 from app.core.search import indexing as search_indexing
+from app.core.taskforce import evolution as taskforce_evolution
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # (the sweep itself no-ops, but we skip scheduling so logs stay
     # quiet during local dev without keys).
     sweeper_task: asyncio.Task[None] | None = None
+    evolution_task: asyncio.Task[None] | None = None
     stop_event = asyncio.Event()
     if settings.OPENAI_API_KEY:
         sweeper_task = asyncio.create_task(
@@ -40,16 +42,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "search indexer started (interval=%ss)",
             settings.SEARCH_INDEX_SWEEP_INTERVAL_SECONDS,
         )
+    if settings.TF_SELF_EVOLVE:
+        evolution_task = asyncio.create_task(
+            taskforce_evolution.run_forever(stop_event=stop_event),
+            name="evolution-sweeper",
+        )
+        log.info(
+            "evolution sweeper started (interval=%ss)",
+            settings.EVOLUTION_SWEEP_INTERVAL_SECONDS,
+        )
     try:
         yield
     finally:
         stop_event.set()
-        if sweeper_task is not None:
-            sweeper_task.cancel()
-            try:
-                await sweeper_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+        for task in (sweeper_task, evolution_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
 
 
 app = FastAPI(

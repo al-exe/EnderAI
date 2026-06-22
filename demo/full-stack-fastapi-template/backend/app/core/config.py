@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     # Cron-sweep cadence for the embedding indexer (seconds between sweeps).
     SEARCH_INDEX_SWEEP_INTERVAL_SECONDS: int = 30
     SEARCH_INDEX_BATCH_SIZE: int = 50
+    # Self-evolving knowledge layer (T0/T7). Off by default until rolled out.
+    TF_SELF_EVOLVE: bool = False
+    EVOLUTION_SWEEP_INTERVAL_SECONDS: int = 60
+    EVOLUTION_SWEEP_BATCH_SIZE: int = 20
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:
