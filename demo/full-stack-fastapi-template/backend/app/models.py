@@ -1005,6 +1005,12 @@ class V2Document(SQLModel, table=True):
         default=None, sa_type=DateTime(timezone=True)
     )  # type: ignore[arg-type]
     index_version: str | None = Field(default=None, max_length=16)
+    auto_created: bool = Field(default=False, nullable=False, index=True)
+    evolution_confidence: float | None = Field(default=None)
+    evolution_provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
 
 
 class V2DocumentCreate(SQLModel):
