@@ -60,6 +60,7 @@ class EvolutionResult:
 class EvolutionSweepReport:
     processed: int
     skipped: int
+    errored: int = 0
 
 
 def mark_session_for_evolution(
@@ -231,8 +232,27 @@ def _pending_archives_statement(limit: int):
     )
 
 
+def _finalize_pending(
+    archive: TaskforceSessionArchive, *, extra: dict[str, Any] | None = None
+) -> None:
+    """Clear the pending flag so the sweeper won't reprocess this archive."""
+
+    metadata = dict(archive.source_metadata or {})
+    metadata[EVOLUTION_PENDING_KEY] = False
+    metadata[EVOLUTION_PROCESSED_AT_KEY] = datetime.now(timezone.utc).isoformat()
+    if extra:
+        metadata.update(extra)
+    archive.source_metadata = metadata
+    archive.updated_at = get_datetime_utc()
+
+
 def sweep_pending_once(session: Session) -> EvolutionSweepReport:
-    """Process a batch of archives flagged by observe."""
+    """Process a batch of archives flagged by observe.
+
+    Each archive is committed independently and isolated by try/except: a single
+    failing (poison) archive is marked done with an error reason and skipped,
+    rather than rolling back the whole batch and being retried forever.
+    """
 
     if not settings.TF_SELF_EVOLVE:
         return EvolutionSweepReport(processed=0, skipped=0)
@@ -247,24 +267,43 @@ def sweep_pending_once(session: Session) -> EvolutionSweepReport:
 
     processed = 0
     skipped = 0
+    errored = 0
     for archive in archives:
-        result = evolve_session(session, archive)
-        if result.skipped:
-            skipped += 1
-            metadata = dict(archive.source_metadata or {})
-            metadata[EVOLUTION_PENDING_KEY] = False
-            metadata[EVOLUTION_PROCESSED_AT_KEY] = datetime.now(
-                timezone.utc
-            ).isoformat()
-            metadata["evolution_skip_reason"] = result.skip_reason
-            archive.source_metadata = metadata
-            archive.updated_at = get_datetime_utc()
-            session.add(archive)
-        else:
-            processed += 1
+        archive_id = archive.id
+        try:
+            result = evolve_session(session, archive)
+            if result.skipped:
+                skipped += 1
+                _finalize_pending(
+                    archive, extra={"evolution_skip_reason": result.skip_reason}
+                )
+                session.add(archive)
+            else:
+                processed += 1
+            session.commit()
+        except Exception as exc:
+            # Poison archive: discard its partial work, then mark it done in a
+            # fresh transaction so the sweeper makes progress instead of wedging.
+            session.rollback()
+            errored += 1
+            log.exception(
+                "evolution failed for archive %s; marking errored", archive_id
+            )
+            try:
+                fresh = session.get(TaskforceSessionArchive, archive_id)
+                if fresh is not None:
+                    _finalize_pending(
+                        fresh, extra={"evolution_error": str(exc)[:500]}
+                    )
+                    session.add(fresh)
+                    session.commit()
+            except Exception:  # pragma: no cover - defensive
+                session.rollback()
+                log.exception("failed to mark errored archive %s", archive_id)
 
-    session.commit()
-    return EvolutionSweepReport(processed=processed, skipped=skipped)
+    return EvolutionSweepReport(
+        processed=processed, skipped=skipped, errored=errored
+    )
 
 
 async def run_forever(stop_event: asyncio.Event | None = None) -> None:
@@ -277,11 +316,12 @@ async def run_forever(stop_event: asyncio.Event | None = None) -> None:
         try:
             with Session(engine) as session:
                 report = sweep_pending_once(session)
-            if report.processed or report.skipped:
+            if report.processed or report.skipped or report.errored:
                 log.info(
-                    "evolution sweep processed=%s skipped=%s",
+                    "evolution sweep processed=%s skipped=%s errored=%s",
                     report.processed,
                     report.skipped,
+                    report.errored,
                 )
         except Exception as exc:  # pragma: no cover - defensive
             log.exception("evolution sweep crashed: %s", exc)
