@@ -22,6 +22,7 @@ class Organization(OrganizationBase, table=True):
     __tablename__ = "organization"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    auto_evolve_enabled: bool = Field(default=True, nullable=False)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -38,10 +39,12 @@ class OrganizationCreate(OrganizationBase):
 
 class OrganizationUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    auto_evolve_enabled: bool | None = None
 
 
 class OrganizationPublic(OrganizationBase):
     id: uuid.UUID
+    auto_evolve_enabled: bool = True
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

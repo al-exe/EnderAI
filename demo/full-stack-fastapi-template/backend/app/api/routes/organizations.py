@@ -136,6 +136,7 @@ def read_my_organization(session: SessionDep, current_user: CurrentUser) -> Any:
     return OrganizationMePublic(
         id=organization.id,
         name=organization.name,
+        auto_evolve_enabled=organization.auto_evolve_enabled,
         created_at=organization.created_at,
         updated_at=organization.updated_at,
         organization_role=current_user.organization_role,
@@ -162,6 +163,8 @@ def update_my_organization(
         name = update["name"].strip()
         _ensure_unique_name(session, name, organization_id=organization.id)
         organization.name = name
+    if "auto_evolve_enabled" in update:
+        organization.auto_evolve_enabled = bool(update["auto_evolve_enabled"])
     organization.updated_at = get_datetime_utc()
     session.add(organization)
     session.commit()

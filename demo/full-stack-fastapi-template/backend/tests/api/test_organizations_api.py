@@ -39,7 +39,30 @@ def test_signup_creates_personal_org_with_admin_role(
     assert organization.json()["id"] == str(user.organization_id)
     assert organization.json()["invitations"] == []
     assert organization.json()["organization_role"] == "admin"
+    assert organization.json()["auto_evolve_enabled"] is True
     assert [member["email"] for member in organization.json()["members"]] == [email]
+
+
+def test_org_admin_can_toggle_auto_evolve_enabled(
+    client: TestClient, db: Session
+) -> None:
+    _, admin_headers = _signup(client, db, full_name="Auto Evolve Admin")
+
+    disabled = client.patch(
+        "/api/v1/organizations/me",
+        headers=admin_headers,
+        json={"auto_evolve_enabled": False},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["auto_evolve_enabled"] is False
+
+    enabled = client.patch(
+        "/api/v1/organizations/me",
+        headers=admin_headers,
+        json={"auto_evolve_enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["auto_evolve_enabled"] is True
 
 
 def test_org_admin_can_update_own_organization_name(
