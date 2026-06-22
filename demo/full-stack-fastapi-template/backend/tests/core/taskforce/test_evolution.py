@@ -147,6 +147,40 @@ def test_sweep_pending_once_processes_flagged_archives(
     assert archive.source_metadata.get(EVOLUTION_PENDING_KEY) is False
 
 
+def test_sweep_pending_once_isolates_poison_archive(
+    db: Session, monkeypatch
+) -> None:
+    """A single failing archive must be finalized + skipped, not wedge the sweep."""
+    monkeypatch.setattr(settings, "TF_SELF_EVOLVE", True)
+    org = _org(db)
+    user = _user(db, org)
+    poison = _archive(db, user, pending=True)
+    healthy = _archive(db, user, pending=True)
+
+    def _synth(session, *, archive):
+        if archive.session_id == poison.session_id:
+            raise RuntimeError("boom")
+        return ([], [])
+
+    with patch(
+        "app.core.taskforce.evolution.synthesize_documents", side_effect=_synth
+    ), patch(
+        "app.core.taskforce.evolution.compound_specialists",
+        return_value={"specialists_seen": 0},
+    ):
+        report = sweep_pending_once(db)
+
+    assert report.errored == 1
+    assert report.processed == 1
+    db.refresh(poison)
+    db.refresh(healthy)
+    # Poison archive finalized with an error reason → not retried forever.
+    assert poison.source_metadata.get(EVOLUTION_PENDING_KEY) is False
+    assert "evolution_error" in poison.source_metadata
+    # Healthy archive still processed despite the poison.
+    assert healthy.source_metadata.get(EVOLUTION_PENDING_KEY) is False
+
+
 def test_mark_session_for_evolution_sets_metadata() -> None:
     archive = TaskforceSessionArchive(
         session_id="mark-test",
