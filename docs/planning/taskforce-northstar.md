@@ -15,16 +15,23 @@ It **supersedes and replaces**:
 
 ## 1. One line
 
-**Taskforce is the vendor-neutral control plane for a company's AI agents** — the
-system of record that sits **above every harness** (Claude Code, Cursor, Codex, and
-whatever comes next), capturing what the agents do and injecting the context and
-systems they need, so the org's AI work is **observable, attributable, and portable.**
+**Taskforce is Mission Control for your company's AI** — the vendor-neutral
+**control plane** that **remembers, observes, and steers** every agent across every
+harness (Claude Code, Cursor, Codex, and whatever comes next), so the org's AI work
+is **observable, attributable, and portable.**
 
-Three registers for three audiences:
+> **"Mission Control" is the hook, not the whole story.** It's the evocative name for
+> the *experience*, and it teaches the guardrail for free — Mission Control observes
+> and radios course-corrections, it **never flies the ship** (§4). But the **moat is
+> "remembers"**: the accruing record/memory (§5), *not* the observability. Never let
+> the dashboard framing eclipse the system-of-record — that's the rest of the north star.
+
+Registers (all true; pick by who's listening):
+- **Hero / experience:** *"Mission Control for your company's AI."*
+- **Category (precise):** *"the vendor-neutral control plane for AI agents."* — harnesses are the execution plane; we are the control plane.
+- **Stickiness / buyer:** *"the system of record for agentic work."*
 - **Vision:** *"the operating system for your company's AI."*
-- **Category (precise):** *"the vendor-neutral control plane for AI agents."*
-- **Stickiness (buyer):** *"the system of record for agentic work."*
-- **Banner:** **Bring your own harness.** Work anywhere; see and steer everything from one place.
+- **Adoption banner:** **Bring your own harness.** Work anywhere; see and steer everything from one place.
 
 ---
 
@@ -171,30 +178,52 @@ overlay; we ship a workspace), it collapses into a capital/distribution race.
 
 ## 11. What this means for the build (near-term bias)
 
-- **Build the identity/permission plane** — the missing kernel piece that makes
-  visibility, cross-person reuse, and audit cohere.
-- **Keep the reuse/provenance ledger compounding** — the accrual moat — even if it
-  is not the headline metric.
-- **Close (or honestly scope) the Cursor control gap** — no stop-hook injection today.
-- **Move profiles seeded → earned** — auto-compounded from real cases is the real
-  differentiator.
-- **Treat feature parity as table stakes** — do it cheaply, don't enter a feature war
-  with a horizontal incumbent.
+**The chosen next build (2026-06-21): the self-evolving knowledge layer.** Profiles
+and documentation that create, ingest, and update *themselves* from captured work —
+self-sufficient and evolving, not hand-seeded. This is the **accrual engine**: it's
+what makes the record (§5) compound *automatically*, so it builds moat, not just a
+feature. Concretely:
+- **Auto profile creation** — cluster captured cases by domain; cross a threshold →
+  auto-propose/compound a specialist (seeded → *earned*).
+- **Auto-ingest** — generate a Library doc from a captured decision when none exists.
+- **Auto-update** — when new work matches an existing doc, patch it (with provenance
+  + a changelog), not just append a Referenced-by.
+- **Guardrails:** curation controls direction (uncurated ingest degrades the record);
+  confidence + **staleness/contradiction** handling; provenance on every auto-change;
+  and the kernel line — we *process the captured stream*, we do **not** dispatch agents.
+
+Detailed design + Cursor-ready tickets live locally at
+`~/dev/docs/self-evolving-knowledge-layer/` (not committed here — implementation plan).
+
+Also true, lower priority:
+- **Keep the reuse/provenance ledger compounding** — the accrual moat — even though
+  it is **not** the headline metric.
+- **The identity/permission plane** remains the deeper "kernel" piece — *after* the
+  self-evolving layer.
+- **Cursor control gap** (no stop-hook injection) — accept view-only for now.
+- **Treat feature parity as table stakes** — don't enter a feature war with a
+  horizontal incumbent.
 
 ---
 
-## 12. Open questions — to nail down with Alex
+## 12. Decisions (resolved 2026-06-21) + remaining open
 
-1. Is `thesis.md` **fully superseded**, or should its competitive analysis live on as
-   a separate "living competitive log" rather than be archived wholesale?
-2. **Primary category term** — lock "control plane," or lead with "system of record"
-   / "operating system" for a given audience?
-3. Is the **identity/permission plane** truly the next build, or does
-   earned-profiles / the Cursor gap come first?
-4. The metric you "backseated" — confirm we **keep the reuse ledger compounding**
-   (accrual moat) even while it is *not* the headline.
-5. **Scope of "control"** — invest to close Cursor steering, or commit to
-   "full control on Claude/Codex, visibility everywhere" and move on?
+**Resolved with Alex:**
+1. **Lead term = "Mission Control for your company's AI"** (hero/experience),
+   anchored by **"control plane"** (category), with **"remembers"** always in the
+   headline so observability never eclipses the record (§1).
+2. **Next build = the self-evolving knowledge layer** (earned profiles + auto-ingest
+   + auto-update docs) — §11.
+3. **Reuse metric** — keep the ledger **compounding** (accrual moat); it is **not**
+   the headline number.
+4. **`thesis.md`** — strategy **fully retired** (archived); **lift the competitor
+   teardowns into `research/`** so the analysis stays discoverable (Letta/Mem0/
+   xMemory already there; add **Macro**).
+
+**Still open (lower priority):**
+- Cursor control gap — invest to close steering, or stay "full control on
+  Claude/Codex, visibility everywhere"? (Leaning: stay, for now.)
+- Identity/permission-plane sequencing — confirmed *after* the self-evolving layer.
 
 ---
 
