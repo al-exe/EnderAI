@@ -13,6 +13,11 @@ import uuid
 
 from sqlmodel import Session
 
+from app.core.taskforce.curation import (
+    evaluate_curation_gate,
+    flag_contradiction_on_document,
+    stamp_freshness,
+)
 from app.core.taskforce.evolution_doc_patch import apply_evolution_patch
 from app.core.taskforce.evolution_summary import (
     StoredEvolutionSummary,
@@ -163,6 +168,35 @@ def synthesize_documents(
     if best is not None and best.score >= TAU_UPDATE:
         if archive.active_document_id == best.document.id:
             return [], []
+        gate = evaluate_curation_gate(
+            action="update",
+            stored=stored,
+            match_score=best.score,
+            document=best.document,
+        )
+        if not gate.allowed:
+            metadata = dict(archive.source_metadata or {})
+            blocked = list(metadata.get("curation_blocked") or [])
+            blocked.append(
+                {
+                    "action": "update",
+                    "document_id": str(best.document.id),
+                    "reason": gate.block_reason,
+                    "confidence": gate.confidence,
+                }
+            )
+            metadata["curation_blocked"] = blocked
+            if gate.contradiction is not None:
+                flag_contradiction_on_document(
+                    best.document,
+                    gate.contradiction,
+                    source_session_id=archive.session_id,
+                )
+                session.add(best.document)
+            archive.source_metadata = metadata
+            session.add(archive)
+            session.flush()
+            return [], []
         summarizer = _to_summarizer_result(stored)
         changelog = apply_evolution_patch(
             session,
@@ -172,6 +206,8 @@ def synthesize_documents(
             stored=stored,
             summary=summarizer,
             match_score=best.score,
+            confidence=gate.confidence,
+            provisional=gate.provisional,
         )
         if changelog is not None:
             return [], [best.document.id]
@@ -191,7 +227,25 @@ def synthesize_documents(
         archive, summary=stored, visibility=visibility
     )
     match_score = best.score if best is not None else 0.0
-    confidence = min(1.0, max(stored.materiality_score, match_score))
+    gate = evaluate_curation_gate(
+        action="create",
+        stored=stored,
+        match_score=match_score,
+    )
+    if not gate.allowed:
+        metadata = dict(archive.source_metadata or {})
+        blocked = list(metadata.get("curation_blocked") or [])
+        blocked.append(
+            {
+                "action": "create",
+                "reason": gate.block_reason,
+                "confidence": gate.confidence,
+            }
+        )
+        metadata["curation_blocked"] = blocked
+        archive.source_metadata = metadata
+        session.add(archive)
+        return [], []
 
     # Lazy import: observe pulls in evolution.mark_session_for_evolution.
     from app.core.taskforce.observe import create_v2_document_from_session_summary
@@ -204,7 +258,7 @@ def synthesize_documents(
         request=observe_request,
         fleet_session_id=archive.fleet_session_id,
         auto_created=True,
-        evolution_confidence=confidence,
+        evolution_confidence=gate.confidence,
         evolution_provenance={
             "source_session_id": archive.session_id,
             "actor_id": str(actor.id),
@@ -214,7 +268,10 @@ def synthesize_documents(
             "model_id": archive.model_id,
             "best_match_score": match_score,
             "tau_create": TAU_CREATE,
+            "provisional": gate.provisional,
         },
     )
+    stamp_freshness(document, confidence=gate.confidence, provisional=gate.provisional)
+    session.add(document)
     session.flush()
     return [document.id], []
