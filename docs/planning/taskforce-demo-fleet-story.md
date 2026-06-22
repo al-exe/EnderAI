@@ -176,7 +176,7 @@ Say this if a skeptic asks; keep it the same across both cuts.
 > **Demo-work build status (2026-06-17).** Three of the gaps below are now built
 > (tagged `[DEMO WORK]`, revert the merge to undo):
 > - **`tf-fleet.sh` — the fleet knowledge bus** + **`tf-capture.sh` — live decision capture**, both as new `/tf` beats: EnderAI PR **#177**.
-> - **Profile pill on the Sessions card**: EnderAI-frontend PR **#340**.
+> - **Profile pill on the Sessions card**: EnderAI-frontend PR **#356** (merged 2026-06-22; supersedes the never-merged #340).
 >
 > To install the updated skill for filming: `bash scripts/taskforce-skill/install.sh`
 > from the PR #177 branch (or after merge). The pill needs sessions whose
@@ -194,7 +194,7 @@ Marked: ✅ ships / built · 🟡 server/UI surfacing on the Mission-Control roa
 | Library doc content + deep-link anchors | Library, Act 3 | ✅ shipped. |
 | **Referenced-by appended live** | 0:40 / Act 3 | ✅ behavior exists (`/reference`); confirm it renders without refresh. |
 | **New nuance captured into a doc live** | Act 3 | ✅ **built** — `tf-capture.sh` (`/tf` Beat 7b, PR [#177]) writes the decision into the Library deterministically this turn (cheap `/observe` structured path), instead of waiting on the async summarizer. |
-| **Profile pill on the Sessions card** | Act 1 polish | ✅ **built** — PR [EnderAI-frontend #340] renders `specialist_slug`/name as a violet pill on each agent row. Needs sessions whose `specialist_slug` is populated (the routed-profile demo seed) to appear. |
+| **Profile pill on the Sessions card** | Act 1 polish | ✅ **shipped (merged)** — PR [EnderAI-frontend #356] renders `specialist_slug`/name as a violet pill on each agent row. Needs sessions whose `specialist_slug` is populated (the routed-profile demo seed) to appear. |
 | **Collision badge** ("Atlas & Bree both editing billing.py") | Act 1 | 🟡 still roadmap (needs `files_touched` on the fleet response + overlap detection). Without it, the two activity lines already show the overlap; narrate it. |
 | **Fresh decision reaches a fleet-mate** | Act 4 / 1:05 | ✅ **built** — `tf-fleet.sh` (`/tf` Beat 4b, PR [#177]) is a client-side **knowledge bus**: each `/tf` turn pulls your fleet-mates' active docs and surfaces them (🛰). It's a pull per turn (one discover cycle), **not** a realtime push — film Bree's *next* `/tf` after Atlas captures; don't claim "live telepathy." The server push/directive channel stays unbuilt. |
 | Ledger list + cross_boundary filter + per-event provenance | Ledger, Act 5 | ✅ ships (`/v2/ledger` supports `cross_boundary`, `specialist`, `client`, `event_id`). |
@@ -218,8 +218,8 @@ agent display names before rolling so the board reads cleanly.
 3. **Act 4 collaboration beat:** build the knowledge-bus push for the instant
    version, or ship with the one-prompt-latency fallback (§5)? *(Impact: high — it's
    the most magical beat; the fallback is honest but less flashy.)*
-4. **Profile pill on Sessions cards:** worth the small FE add before filming so Act
-   1 reads in one glance? *(Impact: medium — pure polish, high visual payoff.)*
+4. **Profile pill on Sessions cards:** ✅ **RESOLVED — shipped & merged (PR #356).**
+   The violet specialist pill renders on each agent row; no FE work left before filming.
 5. **Two tasks vs one:** keep Task B (Cy/Orin) for breadth, or go all-billing so
    the whole fleet shares one brain harder? *(Impact: medium — breadth vs.
    intensity.)*
@@ -301,7 +301,7 @@ cycle), **not** realtime — film Bree's prompt right after Atlas finishes.
 When Atlas finishes, confirm "yes" at its recap so Beats 6/7/7b fire: you'll see
 the `✍️ Referenced by` writes **and** the `Captured: …` decision link land live
 (that's the Library "updating as we go" beat). The profile pill on each Sessions
-card (PR #340) shows which specialist is steering each agent.
+card (PR #356, merged) shows which specialist is steering each agent.
 
 ### 7.3 Reset between takes (one command)
 
