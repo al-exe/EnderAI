@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-06-21 — historical; NOT current product direction.**
+> Superseded by [`../../taskforce-northstar.md`](../../taskforce-northstar.md). Retained for reference only. Future agents: do not treat this as current guidance.
+
 # Taskforce — Core Thesis
 
 *A living document: the core philosophy of Taskforce, evolving over time.*

@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-06-21 — historical; NOT current product direction.**
+> Superseded by [`../../taskforce-northstar.md`](../../taskforce-northstar.md). Retained for reference only. Future agents: do not treat this as current guidance.
+
 # `/tf` demo — speaking notes
 
 Last updated: 2026-05-26

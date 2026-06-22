@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-06-21 — historical; NOT current product direction.**
+> Superseded by [`../../taskforce-northstar.md`](../../taskforce-northstar.md). Retained for reference only. Future agents: do not treat this as current guidance.
+
 # Intern task — reword metric descriptions
 
 Replace three metric descriptions in `demo/full-stack-fastapi-template/backend/app/core/metrics/registry.py` (currently lines 145–185). Keep the `display_name`, `name`, and everything else unchanged — only swap the `description` strings.

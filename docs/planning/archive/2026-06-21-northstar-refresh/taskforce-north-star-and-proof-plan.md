@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-06-21 — historical; NOT current product direction.**
+> Superseded by [`../../taskforce-northstar.md`](../../taskforce-northstar.md). Retained for reference only. Future agents: do not treat this as current guidance.
+
 # Taskforce — North Star & Empty-Cell Proof Plan
 
 *Created 2026-05-30 (PM-4). Derived from thesis **Addendum D** (`thesis.md`). This is the "what to build & demonstrate next" doc. Written while Alex is away — **every demo assumption is flagged in §5 for verification.** Adjust the script once assumptions are checked.*

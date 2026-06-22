@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-06-21 — historical; NOT current product direction.**
+> Superseded by [`../../taskforce-northstar.md`](../../taskforce-northstar.md). Retained for reference only. Future agents: do not treat this as current guidance.
+
 # Taskforce Codebase Audit — cut / add / no-regret essentials
 
 *2026-05-30. Grounds the thesis (`thesis.md`, Addenda A–C) and competitor research (`research/`) against what's actually built. Repos: `~/dev/EnderAI` (backend + MCP), `~/dev/EnderAI-frontend`. Backend lives awkwardly under `EnderAI/demo/full-stack-fastapi-template/backend/` (abbreviated `backend/` below).*
