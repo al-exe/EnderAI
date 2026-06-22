@@ -1,6 +1,6 @@
 """Offline evolution orchestrator (T0).
 
-Fans out doc-synthesis (T1/T2 — stubbed until those tickets land) and profile
+Fans out doc-synthesis (T1 auto-create; T2 auto-update pending) and profile
 compounding after a material session is summarized. Runs only in the background
 sweeper or a CLI entrypoint — never on the observe request path.
 """
@@ -12,7 +12,6 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy import cast, String
 from sqlmodel import Session, col, select
@@ -20,7 +19,12 @@ from sqlmodel import Session, col, select
 from app.core.agents.compounding import compound_specialists
 from app.core.config import settings
 from app.core.db import engine
+from app.core.taskforce.evolution_doc_synthesis import (
+    EVOLUTION_SUMMARY_KEY,
+    synthesize_documents,
+)
 from app.core.taskforce.evolution_gate import can_auto_evolve
+from app.core.taskforce.summarizer import SummarizerResult
 from app.models import TaskforceSessionArchive, get_datetime_utc
 
 log = logging.getLogger(__name__)
@@ -44,12 +48,27 @@ class EvolutionSweepReport:
     skipped: int
 
 
-def mark_session_for_evolution(archive: TaskforceSessionArchive) -> None:
+def mark_session_for_evolution(
+    archive: TaskforceSessionArchive,
+    *,
+    summary: SummarizerResult | None = None,
+    visibility: str | None = None,
+) -> None:
     """Flag a summarized material session for the offline sweeper."""
 
     metadata = dict(archive.source_metadata or {})
     metadata[EVOLUTION_PENDING_KEY] = True
     metadata.pop(EVOLUTION_PROCESSED_AT_KEY, None)
+    if visibility is not None:
+        metadata["visibility"] = visibility
+    if summary is not None:
+        metadata[EVOLUTION_SUMMARY_KEY] = {
+            "summary_points": list(summary.summary_points),
+            "details_sections": list(summary.details_sections),
+            "decisions": list(summary.decisions),
+            "outcome": summary.outcome,
+            "materiality_score": summary.materiality_score,
+        }
     archive.source_metadata = metadata
     archive.updated_at = get_datetime_utc()
 
@@ -59,13 +78,9 @@ def _run_doc_synthesis(
     *,
     archive: TaskforceSessionArchive,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Auto-create / auto-update Library docs from the session (T1/T2).
+    """Auto-create / auto-update Library docs from the session (T1/T2)."""
 
-    Placeholder until doc-synthesis tickets land; returns no ids today.
-    """
-
-    _ = (session, archive)
-    return [], []
+    return synthesize_documents(session, archive=archive)
 
 
 def evolve_session(

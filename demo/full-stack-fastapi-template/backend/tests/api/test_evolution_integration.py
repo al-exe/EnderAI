@@ -45,6 +45,7 @@ def test_material_observe_flags_session_for_offline_evolution(
 ) -> None:
     _, headers = _signup(client)
     session_id = "evolution-pending-flag"
+    summary_point = "Flag me for offline evolution with summary snapshot"
 
     response = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/observe",
@@ -59,6 +60,7 @@ def test_material_observe_flags_session_for_offline_evolution(
             "session_id": session_id,
             "files_touched": ["app/core/taskforce/evolution.py"],
             "duration_ms": 1000,
+            "summary_points": [summary_point],
         },
     )
     assert response.status_code == 202, response.text
@@ -70,6 +72,8 @@ def test_material_observe_flags_session_for_offline_evolution(
     ).first()
     assert archive is not None
     assert archive.source_metadata.get(EVOLUTION_PENDING_KEY) is True
+    stored = archive.source_metadata.get("evolution_summary") or {}
+    assert summary_point in (stored.get("summary_points") or [])
 
 
 def test_skipped_observe_does_not_flag_evolution(client: TestClient, db: Session) -> None:
