@@ -1,260 +1,238 @@
-# Taskforce demo — the live fleet story (2-min & 5-min cuts)
+# Taskforce demo — "Mission control for your AI" (2-min & 5-min cuts)
 
-*Created 2026-06-17. A **new** demo story whose hero is the live multi-agent
-fleet — 2–4 Claudes running at once, each routed to a **Profile**, supported by
-**Library** documents that update as the fleet works, all recorded in the
-**Ledger**. ROI/$ is deliberately banked for now (mentioned, never the headline).*
+*Created 2026-06-17. **Reframed 2026-06-22** to the canonical north star
+(`taskforce-northstar.md`): Taskforce is **Mission control for your AI — the
+vendor-neutral control plane that remembers, observes, and steers every agent across
+every harness.** Beats rebuilt around **observe → remember → steer → the record**,
+and the new **steer-from-web** capability (session inbox) is now a beat. ROI/$ is
+banked — mentioned, never the headline.*
 
 *Companions (reuse their seed + scenario, don't re-invent): the single-thread
 [`taskforce-demo-cuts-1min-3min.md`](./taskforce-demo-cuts-1min-3min.md), the
 specialist/seed brief [`taskforce-agents-demo-handoff.md`](./taskforce-agents-demo-handoff.md),
-the Sessions roadmap [`taskforce-fleet-mission-control.md`](./taskforce-fleet-mission-control.md),
-and the original single-tool [`taskforce-demo-video-plan.md`](./taskforce-demo-video-plan.md).*
+and the Sessions roadmap [`taskforce-fleet-mission-control.md`](./taskforce-fleet-mission-control.md).*
 
 ---
 
-## 0. What this proves (and how it differs from the existing cuts)
+## 0. What this proves
 
-The shipped 1-/3-minute cuts prove **one carryover, counted**: Alice's Codex
-decision lands warm in Bob's Claude Code, one ledger row. Great moat shot, but a
-*single thread*.
+**Without Taskforce: ephemeral agents, siloed per harness.** Your Claude Code memory
+does nothing for your Cursor users; the next great harness drops and the org is back
+to square 0.
 
-This story sells the **product surface as a whole** — the four tabs as one loop:
+**With Taskforce: one control plane above every harness.** The pitch in one line:
 
-> Spin up a small fleet → each agent is **routed to a Profile** that brings the
-> right knowledge → the **Library** docs they lean on update *while they work* →
-> what one agent figures out becomes the next agent's starting point → the
-> **Ledger** is the org-wide record of all of it.
+> **Mission control for your AI** — your agents run wherever you like (Claude Code,
+> Codex, Cursor); Taskforce sits on top and **observes** the whole fleet,
+> **remembers** what each one figures out and routes the right specialist in, lets
+> you **steer** any agent from one screen, and keeps every reuse **on the record.**
+> Bring your own harness; migrate nothing.
 
-The pitch in one line: **Mission Control for a multi-agent team — it observes the
-fleet, routes the right specialist into each session, and remembers across every
-agent, person, and tool.**
+The kernel line (say it if asked): **we never run the agents — the harness does.**
+We observe, remember, and steer; we never take the stick. That's why we can sit
+above every vendor.
 
-| Tab (sidebar) | Route | What it proves on screen |
-|---|---|---|
-| **Sessions** | `/v2/fleet` | 2–4 Claudes live at once — status, tool, branch, and a live activity line of what each is doing. "I can see my whole fleet." |
-| **Profiles** | `/v2/agents` | Each agent is steered by a reusable specialist (Jensen/Billing, Orin/Agent-infra…) built from the team's captured work — not a prompt someone hand-wrote. |
-| **Library** | `/v2/library` | The decision/incident docs the agents lean on are real *and* self-updating (Referenced-by appended; new nuance captured live). |
-| **Ledger** | `/v2/ledger` | One org-wide record of every reuse — who produced it, who consumed it, which specialist, which tool. Filter to cross-boundary to see knowledge crossing people/tools. |
+| Verb | Tab / surface | Route | What it proves on screen |
+|---|---|---|---|
+| **Observe** | **Sessions** (Fleet) | `/v2/fleet` | 3 agents live **across three harnesses** — status, tool chip, branch, live activity line, routed-profile pill. "My whole fleet, every tool, one screen." |
+| **Remember** | **Profiles** + **Library** | `/v2/agents`, `/v2/library` | Each agent is routed to a specialist built from the team's captured work; the docs it leans on are real *and* update as it works (Referenced-by + live capture). |
+| **Steer** | **Session inbox** | `/v2/fleet/:id` | Type a directive to a running agent from the web; its Stop hook picks it up — no touching the terminal. (Claude/Codex; Cursor is observe-only.) |
+| **The record** | **Ledger** | `/v2/ledger` | Every reuse, with provenance — who produced it, who consumed it, which specialist, **which tool.** Filter cross-boundary to watch knowledge cross a person or a harness. |
 
 ---
 
 ## 1. The cast — one shared world both cuts film from
 
-All real seed already specced in `taskforce-agents-demo-handoff.md` (§2–3) and the
-Stripe branch in `taskforce-demo-video-plan.md`. Nothing new to invent.
+Real seed in `taskforce-agents-demo-handoff.md` (§2–3); the Stripe branch is
+pre-built. Nothing new to invent — but the fleet now spans **three harnesses** to
+prove neutrality.
 
 **Repo / branch:** `taskforce-claude` backend · `demo/stripe-double-charge`
-(the pre-built branch where the WAL dedupe is called *after* dispatch — the bug).
+(the pre-built branch where the WAL dedupe runs *after* dispatch — the bug).
 
 **The fleet (Sessions board):**
 
-| Agent (pinned name) | Tool | Profile routed | Task | Editing |
+| Agent | Harness | Profile routed | Task | Steerable? |
 |---|---|---|---|---|
-| **Atlas** | Claude Code · Opus 4.7 | **Jensen — Billing Reliability** | *Task A (hero):* "Stripe is double-charging on plan upgrades — webhook retries get fulfilled twice. Fix it." | `app/api/routes/billing.py` |
-| **Bree** | Claude Code · Opus 4.7 | **Jensen — Billing Reliability** | *Task A companion:* "Lock it down — add the regression test that proves dedupe happens before dispatch on the plan-upgrade path." | `tests/api/routes/test_billing.py` |
-| **Cy** | Claude Code · Opus 4.7 | **Orin — Agent Infrastructure** | *Task B (independent):* "The Stop hook isn't appending Referenced-by entries after sessions — fix it." | `scripts/taskforce-hooks/stop.sh` |
-| *(5-min only)* **Dot** | Claude Code *(or Codex — see Open Decisions)* | **Mira — Search & Retrieval** | *Task B-adjacent:* "Citations are linking to the summary, not the exact anchor — repair it." | `app/core/search/...` |
+| **Atlas** | **Claude Code** | **Jensen — Billing Reliability** | *Hero:* "Stripe double-charges on plan upgrades — webhook retries get fulfilled twice. Fix it." | ✅ |
+| **Bree** | **Codex** | **Jensen — Billing Reliability** | *Companion (delivered via the steer beat):* "Lock it in — add the regression test proving dedupe happens before dispatch." | ✅ |
+| **Cy** | **Cursor** | **Orin — Agent Infrastructure** | *Independent:* "The Stop hook isn't appending Referenced-by entries — fix it." | ❌ observe/capture only |
 
-Two tasks, one repo. Atlas + Bree share the **same Profile and the same docs**
-(that's where collaboration + a collision moment live). Cy (and Dot) run a
-*different* domain so the board reads like a real fleet, not one task cloned — and
-so the **Profiles** grid visibly has more than one specialist in play.
+Three harnesses, one repo. Atlas + Bree share the **same specialist and docs** (the
+collaboration + cross-tool moment). Cy runs a different domain **on Cursor** — proof
+the board is a real cross-vendor fleet *and* an honest note that Cursor we can watch
+and capture from, just not steer yet.
 
 **The Library docs in play** (all seeded, all clickable):
-- `stripe-webhook-idempotency-strategy` — the hero doc: 2026-04-11 incident +
-  the decision *"WAL at the route boundary, before dispatch; handlers are not
-  individually idempotent."* (anchors `decision-wal-table`, `incident-2026-04-11`)
+- `stripe-webhook-idempotency-strategy` — the hero doc: 2026-04-11 incident + the
+  decision *"WAL at the route boundary, before dispatch; handlers are not individually
+  idempotent."* (anchors `decision-wal-table`, `incident-2026-04-11`)
 - `debugging-stripe-webhook-flakes` — Jensen's ops playbook.
 - `stripe-plan-upgrade-regression-coverage` — what Bree's test is built from.
 - `claude-code-taskforce-hook-setup` / `referenced-by-update-policy` — Cy's docs.
 
-**The live document updates** (the "updated as we go" the demo must show):
-1. Atlas consults the idempotency doc → a **Referenced-by** entry appends (Atlas's
-   session). *Shipped behavior.*
-2. Atlas hits the *new* nuance — the demo bug is a dispatch-**order** regression,
-   not the original incident — and that nuance is **captured into the Library**
-   (patches the `targeted-regression-test` anchor / a short new note). *This fresh
-   decision is what Bree starts from.*
+**Live document updates (the "remembers, and keeps getting better" beat):**
+1. Atlas consults the idempotency doc → a **Referenced-by — Atlas** entry appends. *Shipped.*
+2. Atlas hits the *new* nuance — this branch regressed the dispatch **order**, not the
+   original incident — and that nuance is **captured into the Library** live
+   (`tf-capture`). *This fresh decision is what Bree starts from.*
 
 ---
 
-## 2. The 2-minute cut — "A fleet that shares a brain"
+## 2. The 2-minute cut — "Mission control for your AI"
 
-**Goal:** all four tabs, one throughline, two agents. Tight. Atlas + Bree only.
+**Goal:** the four verbs as one motion. Atlas (Claude Code) + Bree (Codex).
 
-| Time | On screen | Tab | Real vs staged |
+| Time | On screen | Verb / surface | Real vs staged |
 |---|---|---|---|
-| 0:00–0:15 | Open on **Sessions**. Two Claude cards live, status dots green, each showing tool chip · Opus 4.7 · `demo/stripe-double-charge` · a live activity line ("editing billing.py…", "writing test_billing.py…"). VO: *"This is my fleet right now — every running agent and what it's touching."* | Sessions | Real roster (`/fleet` poll). Activity line + client chip ship today. |
-| 0:15–0:40 | Click **Atlas → its Profile: Jensen, Billing Reliability**. Show when-to-use, the instruction *"dedupe at the route boundary, before fulfillment"*, and **linked knowledge** (the Stripe docs). VO: *"Atlas didn't start cold — Taskforce routed it to Jensen, a specialist built from our own past billing incidents, and Jensen brings the right decisions in."* | Profiles | Profiles grid/detail ship today. Routing line shown via `/tf`. |
-| 0:40–1:05 | Click Jensen's linked doc → **Library**: real 2026-04-11 incident + the WAL-before-dispatch decision. Cut to Atlas's terminal: it makes the **right** ~6-line fix first try, *citing that decision*. Back to the doc — a new **"Referenced by — Atlas"** entry has appeared. VO: *"The documents aren't static. They update as the fleet uses them."* | Library | Doc content + Referenced-by are real. The fix is the proven Stripe beat. |
-| 1:05–1:30 | **The handoff.** Bree (second Claude, same Jensen profile, writing the test) picks up Atlas's just-captured *dispatch-order* decision — surfaced in her **Shared context** — and writes the test asserting dedupe-before-dispatch **without re-deriving it**. VO: *"What one agent figures out, the next one starts with — automatically."* | Sessions → terminal | See §5: live push to a running agent is the roadmap beat; honest fallback in the dependencies table. |
-| 1:30–1:55 | Cut to **Ledger**. The two rows that just happened: Atlas consulted Jensen's idempotency doc; Bree consulted the same doc **plus Atlas's update**. Hover one → provenance trail (doc → both sessions → why it matched). (Savings sits quietly in the corner; not narrated.) VO: *"And it's all on the record — every reuse, across every agent, in one ledger."* | Ledger | Ledger + provenance ship today. |
-| 1:55–2:00 | Tagline card: *"AGENTS.md captures what you write down. **Taskforce captures what your agents figure out — and shares it across the whole fleet.**"* | Overlay | — |
+| 0:00–0:20 | Open **Mission Control**. Three agent cards live **across three harnesses** — Atlas·Claude Code, Bree·Codex, Cy·Cursor — each with status dot, tool chip, branch `demo/stripe-double-charge`, a live activity line, and a violet **profile pill**. VO: *"This is my whole AI fleet — every agent, every tool, one screen. They run in their own harness; Taskforce sits on top."* | **Observe** · Sessions | Real roster (`/fleet`), activity lines, tool chips, profile pill (PR #356) all ship. |
+| 0:20–0:50 | Click **Atlas → Jensen, Billing Reliability** → its linked **Library** doc: real 2026-04-11 incident + the WAL-before-dispatch decision. Cut to Atlas's terminal: the **right ~6-line fix**, first try, *citing the decision*. Back to the doc — a **Referenced-by — Atlas** entry appears, and the new dispatch-order nuance is **captured** in live. VO: *"Atlas didn't start cold — Taskforce remembered our past billing fix and routed the specialist in. And the doc got better as it worked."* | **Remember** · Profiles→Library | Routing, doc content, Referenced-by, `tf-capture` all real. |
+| 0:50–1:20 | Back on **Sessions**, open **Bree's card → its session inbox**. Type a directive from the web: *"Lock it in — add the regression test asserting dedupe-before-dispatch."* Bree (Codex) picks it up on its next turn, **starting from Atlas's just-captured decision** (the knowledge bus), and writes the test green. VO: *"I steered Bree from right here — without touching its terminal — and it already knew what Atlas figured out."* | **Steer** · Session inbox | Session inbox ships (Claude/Codex). Bus is a pull-per-turn (not realtime) — see §5. |
+| 1:20–1:50 | Cut to the **Ledger**. The reuse rows that just happened; hover one → provenance trail (doc → both sessions → specialist → **tool**). Filter **cross_boundary** → the Claude→Codex reuse crossing a *harness*. (Savings sits quietly; not narrated.) VO: *"Every reuse, on the record — across every agent, person, and tool. No single vendor can show you this."* | **The record** · Ledger | Ledger + `cross_boundary`/provenance ship. |
+| 1:50–2:00 | Tagline card: *"**Mission control for your AI.** It remembers, observes, and steers — across every harness. **Bring your own harness.**"* | Overlay | — |
 
-**Why 2 minutes works:** the viewer touches all four tabs but feels *one* motion —
-fleet → specialist → living doc → the next agent inherits it → the record. Sessions
-and Library do the emotional work; the Ledger closes it as a company asset.
+**Why it works:** observe → remember → steer → record is *one* motion. Sessions and
+the steer beat do the emotional work; the Ledger closes it as a company asset.
 
 ---
 
-## 3. The 5-minute cut — "Mission Control for a multi-agent team"
+## 3. The 5-minute cut — the full control plane
 
-**Goal:** the full loop with breadth. 3 agents (optionally 4), 2 tasks, deeper
-drill-downs, a live doc *capture* (not just Referenced-by), and the Ledger filtered
-to cross-boundary. Five acts, ~1 minute each.
+Five acts, ~1 minute each. 3 agents, 3 harnesses, deeper drill-downs.
 
-### Act 1 — The board (Sessions) · 0:00–1:00
-Open Mission Control with **3 live Claudes across 2 tasks**. Walk the cards:
-status dots, tool chips, `demo/stripe-double-charge`, and the live activity line on
-each (Atlas → billing.py, Bree → test_billing.py, Cy → stop.sh). Note Atlas + Bree
-are in the **same repo on the same files** (the collision/coordination setup). Open
-the **Shared context** drawer so the viewer sees the fleet already has a common
-memory surface. VO: *"Three agents, two jobs, one screen. I can see exactly what
-each one is doing — and they're not working blind to each other."*
+### Act 1 — Observe (Sessions) · 0:00–1:00
+Open Mission Control: **3 agents across Claude Code, Codex, and Cursor.** Walk the
+cards — status, tool chips, branch, activity lines, profile pills. Open the **Shared
+context** drawer (the fleet's common memory). Land the kernel line: *"Three agents,
+three different tools, one screen. They run in their own harness — Taskforce doesn't
+run them, it sits above them."*
 
-### Act 2 — The specialists (Profiles) · 1:00–2:00
-Go to the **Profiles** grid: Jensen, Mira, Orin, Vega, Nia — a populated command
-center, each with domain tags, linked-doc counts, invocation history. Open
-**Jensen**: routing triggers, instructions, **linked knowledge**, recent
-invocations. VO: *"These aren't prompts I wrote. They're specialists built from our
-team's captured work — and Taskforce routes each task to the right one."* Show the
-`/tf` line in Atlas's session: *"Routed to Jensen — Billing Reliability (0.91)."*
+### Act 2 — Remember: the specialists (Profiles) · 1:00–2:00
+The **Profiles** grid: Jensen, Orin, Mira… each with domain tags, linked-doc counts,
+invocation history. Open **Jensen**: routing triggers, instructions, linked knowledge.
+Show the `/tf` line in Atlas's session: *"Routed to Jensen — Billing Reliability
+(0.91)."* VO: *"These aren't prompts someone wrote — they're specialists built from
+our team's captured work, and Taskforce routes the right one in."* (Honest: profiles
+are **seeded** today; auto-**earned** profiles are the next build — see §4.)
 
-### Act 3 — Living documents (Library) · 2:00–3:00
-Open `stripe-webhook-idempotency-strategy`. Real incident + the WAL-before-dispatch
-decision. Cut to Atlas applying the fix, citing `decision-wal-table`. Two updates
-land **on camera**: (1) a **Referenced-by — Atlas** entry; (2) Atlas captures the
-*new* nuance — this branch regressed the **order** (WAL after dispatch) — into the
-Library as a fresh, inspectable note under `targeted-regression-test`. VO: *"The
-knowledge didn't just get used — it got better. The fleet is writing the team's
-memory as it works."* (This is the "self-updating documents" promise made literal.)
+### Act 3 — Remember: living documents (Library) · 2:00–3:00
+Open `stripe-webhook-idempotency-strategy` — real incident + the WAL-before-dispatch
+decision. Cut to Atlas applying the fix, citing `decision-wal-table`. Two updates land
+**on camera**: (1) **Referenced-by — Atlas**; (2) Atlas **captures** the new
+dispatch-order nuance into the doc (`tf-capture`). VO: *"The knowledge didn't just get
+used — it got better. The fleet writes the team's memory as it works."*
 
-### Act 4 — The fleet shares a brain (collaboration) · 3:00–4:00
-**Bree** (same Jensen profile, the test) inherits Atlas's just-captured decision —
-via Shared context / her next discover — and writes
-`test_plan_upgrade_webhook_retry_short_circuits_before_dispatch` that asserts
-dedupe-before-dispatch, *because Atlas already settled it*. Run it: green. Meanwhile
-**Cy** (Orin profile) is fixing the Stop-hook Referenced-by bug **in parallel,
-independently** — proof this is a fleet, not a relay. Optional cross-tool beat: if
-Dot/Cy runs on **Codex**, the same knowledge crosses a *tool* boundary too. VO:
-*"One agent's discovery — one person's, even one tool's — becomes everyone's
-starting point. Nobody re-derived the route-boundary rule. Nobody went confidently
-wrong."*
+### Act 4 — Steer + the handoff (Session inbox + bus) · 3:00–4:00
+From the web, open **Bree's session inbox** and send the regression-test directive —
+**steering a running Codex agent without touching its terminal.** Bree picks it up,
+**inherits Atlas's captured decision** via the knowledge bus, and writes the test
+green — *because Atlas already settled it.* Meanwhile **Cy** is fixing the Stop-hook
+bug **on Cursor, in parallel** (observed + captured, not steered). VO: *"One agent's
+discovery becomes the next one's starting point — across people and across tools.
+And I can steer any of them from one place."*
 
 ### Act 5 — The record (Ledger) · 4:00–5:00
-Cut to the **Ledger** — the org-wide list of everything the fleet just did. Filter
-**cross_boundary = true** → the reuse events that crossed a person or a tool. Drill
-into one event: **produced-by → consumed-by**, the specialist (Jensen), the doc,
-the sessions, why it matched. Pull back to the aggregate; let "tokens saved" sit
-there understated (ROI banked — *"we'll get to the dollars another day"*). Close on
-the north-star line: *"Mission Control that observes the fleet, routes the right
-specialist, and remembers across every agent, person, and tool. That's the company
-brain — and no single vendor can show it to you."*
+The **Ledger** — everything the fleet just did. Filter **cross_boundary = true** → the
+reuse that crossed a person or a harness. Drill one event: **produced-by → consumed-by**,
+the specialist, the doc, the sessions, the **tools** (Claude→Codex). Pull back; let
+"tokens saved" sit understated (*"we'll get to the dollars another day"*). Close:
+*"Mission control for your AI — it remembers, observes, and steers across every agent,
+person, and tool. That's the company's memory, and no single vendor can show it to you."*
 
 ---
 
 ## 4. What's real vs staged (honesty box)
 
-Say this if a skeptic asks; keep it the same across both cuts.
-- **Real:** the Sessions roster + live activity lines; the Library docs and their
-  content; the `/tf` routing to Jensen; the fix and the regression test on the demo
-  branch; the Ledger rows and provenance.
-- **Seeded:** the five **Profile shells** (Jensen et al.) and their historical
-  invocation counts — but each is linked to *real* produced docs.
-- **The one beat to be careful with:** *instant* push of Atlas's fresh decision to
-  Bree's **already-running** session (Act 4 / the 2-min 1:05 beat). See §5 — film it
-  via the honest fallback unless the knowledge-bus push is built.
-- **ROI:** any token/$ number shown is *derived* from doc structure (see
-  `taskforce-session-savings-math`), not asserted — and it is intentionally not the
-  headline here.
+- **Real:** the cross-harness Sessions roster + activity lines + profile pill; the
+  Library docs and their content; `/tf` routing to Jensen; the fix and the regression
+  test on the demo branch; `tf-capture`'s live doc write; **the session-inbox steer
+  (Claude/Codex)**; the Ledger rows and provenance.
+- **Seeded (not yet earned):** the five **Profile shells** and their historical
+  invocation counts — linked to *real* produced docs, but hand-seeded. **Auto-earned /
+  self-evolving profiles + docs are the *next build*** (`~/dev/docs/self-evolving-knowledge-layer/`),
+  **not live** — don't claim auto-evolution; claim capture + Referenced-by + `tf-capture`.
+- **The handoff timing:** Bree inheriting Atlas's fresh decision is a **pull on Bree's
+  next `/tf` turn** (the knowledge bus), **not** realtime telepathy. Film Bree right
+  after Atlas captures.
+- **Harness honesty:** Claude Code + Codex can be **steered** (Stop-hook injection);
+  **Cursor is observe/capture only.** Put the steer beat on Atlas or Bree, never Cy.
+- **ROI:** any token/$ figure is *derived* from doc structure, not asserted — and it
+  is intentionally not the headline.
 
 ---
 
 ## 5. What must be live to film (dependencies)
 
-> **Demo-work build status (2026-06-17).** Three of the gaps below are now built
-> (tagged `[DEMO WORK]`, revert the merge to undo):
-> - **`tf-fleet.sh` — the fleet knowledge bus** + **`tf-capture.sh` — live decision capture**, both as new `/tf` beats: EnderAI PR **#177**.
-> - **Profile pill on the Sessions card**: EnderAI-frontend PR **#356** (merged 2026-06-22; supersedes the never-merged #340).
+> **Build status (2026-06-22).** All core beats now ship on `main`:
+> - **Knowledge bus + live capture** — `tf-fleet.sh` + `tf-capture.sh` (EnderAI PR **#177**, merged).
+> - **Profile pill on Sessions cards** — EnderAI-frontend PR **#356** (merged).
+> - **Steer from the web (session inbox)** — `core/taskforce/inbox.py` + the enqueue box on the session-detail page (merged). Smoke-test the Codex/Claude Stop-hook claim before filming.
 >
-> To install the updated skill for filming: `bash scripts/taskforce-skill/install.sh`
-> from the PR #177 branch (or after merge). The pill needs sessions whose
-> `specialist_slug` is set; the bus needs the fleet-mates in the same fleet
-> session. Run with `TASKFORCE_DEMO=1` for the seeded library.
+> Install the skill for filming: `bash scripts/taskforce-skill/install.sh`. Run with
+> `TASKFORCE_DEMO=1` for the seeded library.
 
-Marked: ✅ ships / built · 🟡 server/UI surfacing on the Mission-Control roadmap ·
-🔶 needs the discover directive channel.
+Marked: ✅ ships · 🟡 roadmap polish.
 
 | Need | Beat | Status / action |
 |---|---|---|
-| Multi-agent roster, status, tool chip, branch, live activity line | Sessions, Act 1 | ✅ `FleetPage` renders all of this today. Pin friendly names (Atlas/Bree/Cy) via rename. |
-| Shared context drawer | Act 1, Act 4 | ✅ exists (`SharedContextDrawer`). Confirm it shows the fleet's recent docs. |
-| Profiles grid + Jensen detail + `/tf` routing line | Profiles, Act 2 | ✅ ships (seed per `taskforce-agents-demo-handoff.md`). |
-| Library doc content + deep-link anchors | Library, Act 3 | ✅ shipped. |
-| **Referenced-by appended live** | 0:40 / Act 3 | ✅ behavior exists (`/reference`); confirm it renders without refresh. |
-| **New nuance captured into a doc live** | Act 3 | ✅ **built** — `tf-capture.sh` (`/tf` Beat 7b, PR [#177]) writes the decision into the Library deterministically this turn (cheap `/observe` structured path), instead of waiting on the async summarizer. |
-| **Profile pill on the Sessions card** | Act 1 polish | ✅ **shipped (merged)** — PR [EnderAI-frontend #356] renders `specialist_slug`/name as a violet pill on each agent row. Needs sessions whose `specialist_slug` is populated (the routed-profile demo seed) to appear. |
-| **Collision badge** ("Atlas & Bree both editing billing.py") | Act 1 | 🟡 still roadmap (needs `files_touched` on the fleet response + overlap detection). Without it, the two activity lines already show the overlap; narrate it. |
-| **Fresh decision reaches a fleet-mate** | Act 4 / 1:05 | ✅ **built** — `tf-fleet.sh` (`/tf` Beat 4b, PR [#177]) is a client-side **knowledge bus**: each `/tf` turn pulls your fleet-mates' active docs and surfaces them (🛰). It's a pull per turn (one discover cycle), **not** a realtime push — film Bree's *next* `/tf` after Atlas captures; don't claim "live telepathy." The server push/directive channel stays unbuilt. |
-| Ledger list + cross_boundary filter + per-event provenance | Ledger, Act 5 | ✅ ships (`/v2/ledger` supports `cross_boundary`, `specialist`, `client`, `event_id`). |
-| Cross-tool row in the Ledger (optional) | Act 4/5 | ✅ data-wise — run one agent on **Codex** so a real Claude↔Codex row exists. |
+| Cross-harness roster, status, tool chip, branch, activity line | Observe / Act 1 | ✅ `FleetPage` renders all of it. Pin friendly names; set one agent each to Claude/Codex/Cursor. |
+| Shared context drawer | Act 1, Act 4 | ✅ `SharedContextDrawer`. |
+| Profiles grid + Jensen detail + `/tf` routing line | Remember / Act 2 | ✅ ships (seed per handoff doc). |
+| Library doc content + anchors + **Referenced-by live** | Remember / Act 3 | ✅ shipped (`/reference`); renders without refresh. |
+| **New nuance captured into a doc live** | Act 3 | ✅ `tf-capture.sh` (`/tf` Beat 7b, PR #177) writes the decision deterministically this turn. |
+| **Profile pill on the Sessions card** | Act 1 polish | ✅ PR #356 (merged). Needs `specialist_slug` populated (the routed-profile seed). |
+| **Steer a running agent from the web** | **Steer / Act 4** | ✅ **shipped** — enqueue to `POST /v2/taskforce/session/:id/inbox`; the agent's Stop hook (**Claude/Codex**) claims + re-injects next turn. **Cursor has no injection surface — observe only.** Smoke-test before rolling. |
+| **Fresh decision reaches a fleet-mate** | Act 4 | ✅ `tf-fleet.sh` knowledge bus — a **pull per `/tf` turn**, *not* realtime push. Film Bree's turn right after Atlas captures; don't claim "live telepathy." |
+| Ledger list + `cross_boundary` filter + per-event provenance | Record / Act 5 | ✅ `/v2/ledger` (`cross_boundary`, `specialist`, `client`, `event_id`). |
+| Cross-tool Ledger row | Act 4/5 | ✅ free — Bree on **Codex** gives a real Claude↔Codex row. |
+| Collision badge ("Atlas & Bree both on billing.py") | Act 1 | 🟡 roadmap; the two activity lines already show the overlap — narrate it. |
 
-**Recording discipline** (from `taskforce-demo-prep-checklist.md`): pre-warm the
-backend; demo + real isolation per `is_demo`; browser ≥110%, terminal ≥16pt; pin
-agent display names before rolling so the board reads cleanly.
+**Recording discipline:** pre-warm the backend; demo/real isolation per `is_demo`;
+browser ≥110%, terminal ≥16pt; pin agent display names before rolling.
 
 ---
 
 ## 6. Open decisions — verify, Alex
 
-1. **Fleet size for the 5-min:** 3 agents (Atlas/Bree/Cy) or add Dot for a fuller
-   board? 3 is cleaner; 4 looks more like a "fleet." *(Impact: low.)*
-2. **Cross-tool seam:** run one agent on **Codex** (lights up the Ledger
-   cross-boundary + cross-tool row, sharpens the moat) vs. all-Claude (simpler,
-   matches "2–4 Claudes"). *Recommend Codex for one agent in the 5-min only.*
-   *(Impact: medium — it's the difference between "my fleet" and "the company
-   brain.")*
-3. **Act 4 collaboration beat:** build the knowledge-bus push for the instant
-   version, or ship with the one-prompt-latency fallback (§5)? *(Impact: high — it's
-   the most magical beat; the fallback is honest but less flashy.)*
-4. **Profile pill on Sessions cards:** ✅ **RESOLVED — shipped & merged (PR #356).**
-   The violet specialist pill renders on each agent row; no FE work left before filming.
-5. **Two tasks vs one:** keep Task B (Cy/Orin) for breadth, or go all-billing so
-   the whole fleet shares one brain harder? *(Impact: medium — breadth vs.
-   intensity.)*
+1. **Harness mix:** Atlas·Claude / Bree·Codex / Cy·Cursor (3 harnesses = strongest
+   neutrality + cross-tool Ledger row). Confirm, or simplify to Claude+Codex only.
+   *(Impact: medium — three harnesses is the whole "bring your own harness" pitch.)*
+2. **The steer beat:** deliver Bree's regression-test task **via the web session
+   inbox** (the "steer" beat) instead of typing into Bree's terminal. *Recommended —
+   it's the new, differentiated moment.* *(Impact: high — it's the "steers" half of the
+   thesis made literal.)*
+3. **Profiles seeded vs earned:** seeded for the demo (fine); narrate earned as
+   "coming" or stay silent? *Recommend a one-line "these are built from captured work,
+   and they'll soon write themselves" — points at the next build without overclaiming.*
+4. **Two tasks vs one:** keep Cy's independent task for fleet breadth, or go
+   all-billing for a tighter shared-brain story? *(Impact: medium.)*
 
 ---
 
 ## 7. How to run it — operator runbook
 
-Everything below is real commands. Two helper scripts live next to this doc:
-[`demo-fleet-seed.sh`](./demo-fleet-seed.sh) (seed it all) and
-[`demo-fleet-reset.sh`](./demo-fleet-reset.sh) (reset between takes). The
-on-screen beats are §2 (2-min) / §3 (5-min); this section is the plumbing.
+Helper scripts live next to this doc: [`demo-fleet-seed.sh`](./demo-fleet-seed.sh)
+(seed) and [`demo-fleet-reset.sh`](./demo-fleet-reset.sh) (reset between takes).
 
 ### 7.0 One-time setup (before the first take)
 
-**A. Install the demo-work `/tf` skill** (the fleet bus + capture; from PR #177
-branch or after merge):
+**A. Install the `/tf` skill** (fleet bus + capture; after PR #177 merge):
 
 ```bash
-cd ~/dev/EnderAI                       # or wherever the repo is checked out
-git fetch origin && git checkout feature/demo-fleet-skill   # skip after merge
+cd ~/dev/EnderAI
 bash scripts/taskforce-skill/install.sh
-ls ~/.claude/skills/tf                 # → SKILL.md tf-discover tf-fleet tf-reference tf-capture tf-savings
+ls ~/.claude/skills/tf            # → SKILL.md tf-discover tf-fleet tf-reference tf-capture tf-savings
 ```
 
-**B. Seed profiles + library + ledger.** In the **Render Shell** on the
-`EnderAI-backend` service (`cd /app/backend`):
+**B. Seed profiles + library + ledger.** In the **Render Shell** on `EnderAI-backend`
+(`cd /app/backend`):
 
 ```bash
 bash /path/to/demo-fleet-seed.sh --email alexlee4190@gmail.com
-# (or paste the three `python -m app.scripts.*` lines it runs)
 ```
 
-Verify on the web app with **Demo mode ON**: Profiles shows 5 cards, Library
-renders the Stripe docs, Ledger has rows. Routing smoke test:
+Verify (Demo mode ON): Profiles = 5 cards, Library = the Stripe docs, Ledger = rows.
+Routing smoke test:
 
 ```bash
 TASKFORCE_DEMO=1 ~/.claude/skills/tf/tf-discover.sh \
@@ -263,67 +241,64 @@ TASKFORCE_DEMO=1 ~/.claude/skills/tf/tf-discover.sh \
 # expect: slug "jensen", band medium/high
 ```
 
-**C. Recording hygiene:** pre-warm the backend (one `/tf` dry run), browser
-zoom ≥110%, terminal ≥16pt, Demo mode ON in the web app.
+**C. Steer smoke test** (do this before rolling — it's the new beat): with a Claude or
+Codex agent running and visible on the Sessions board, open its session-detail page,
+enqueue a one-line directive, and confirm the agent re-injects it on its next Stop.
+**Cursor will not** — keep Cy off the steer beat.
 
-### 7.1 Launch the fleet (one terminal per agent)
+**D. Recording hygiene:** pre-warm the backend; browser ≥110%, terminal ≥16pt, Demo
+mode ON.
 
-Each agent is its own terminal in the demo repo. The shared env makes `/tf` the
-only Taskforce surface (no double-injection) and scopes to the seeded library:
+### 7.1 Launch the fleet (one terminal per agent, one harness each)
 
 ```bash
 cd ~/dev/taskforce-claude                 # the demo backend repo
 git checkout demo/stripe-double-charge    # the pre-built buggy branch
-export TASKFORCE_DEMO=1                    # seeded specialists + docs + captures
+export TASKFORCE_DEMO=1                    # seeded specialists + docs
 export TASKFORCE_HOOKS_DISABLED=1          # /tf is the only injector on camera
-# (optional, the cross-tool agent only:)  export TASKFORCE_CLIENT=codex
-claude                                     # launch; rename the session "Atlas" etc.
+# Atlas: claude          (Claude Code)
+# Bree:  export TASKFORCE_CLIENT=codex  && codex     (Codex — steerable)
+# Cy:    export TASKFORCE_CLIENT=cursor && <cursor>  (Cursor — observe/capture only)
 ```
 
-New sessions auto-join the **Default** fleet session, so they see each other on
-the **Sessions** board and the knowledge bus is in-scope. Rename each from the
-Sessions roster (Atlas / Bree / Cy) before rolling so the board reads cleanly.
+New sessions auto-join the **Default** fleet session (so they see each other + the bus
+is in scope). Rename each from the Sessions roster (Atlas / Bree / Cy) before rolling.
 
-### 7.2 The prompts, in order (order matters for the bus)
+### 7.2 The run, in order
 
-| # | Agent · profile | Type into the agent |
-|---|---|---|
-| 1 | **Atlas** · Jensen | `/tf Stripe is double-charging some users on plan upgrades — looks like webhook retries are getting fulfilled twice. Can you fix it?` |
-| 2 | **Cy** · Orin *(parallel, any time)* | `/tf The Stop hook isn't appending "Referenced by" entries after sessions — fix it.` |
-| 3 | **Bree** · Jensen *(AFTER Atlas confirms)* | `/tf Lock in the fix — add the regression test proving the plan-upgrade webhook dedupe happens before dispatch (test_plan_upgrade_webhook_retry_short_circuits_before_dispatch).` |
+| # | Agent · harness | Delivered how | Content |
+|---|---|---|---|
+| 1 | **Atlas** · Claude Code | type in terminal | `/tf Stripe is double-charging some users on plan upgrades — webhook retries are getting fulfilled twice. Fix it?` |
+| 2 | **Cy** · Cursor *(parallel)* | type in terminal | `/tf The Stop hook isn't appending "Referenced by" entries after sessions — fix it.` |
+| 3 | **Bree** · Codex *(AFTER Atlas confirms)* | **from the web — the steer beat** | enqueue to Bree's session inbox: `Lock in the fix — add the regression test proving the plan-upgrade webhook dedupe happens before dispatch.` |
 
-**Why the order:** Atlas must reach Beat 5b ("yes") so its Beat 7b **capture**
-writes the decision into the Library *before* Bree runs `/tf`. Bree's Beat 4b
-(`tf-fleet.sh`) then pulls Atlas's fresh doc and surfaces it (🛰) — that's the
-"fleet shares a brain" handoff. It's a pull on Bree's `/tf` turn (one discover
-cycle), **not** realtime — film Bree's prompt right after Atlas finishes.
+**Why the order:** Atlas must confirm "yes" so its `tf-capture` writes the decision
+into the Library *before* Bree runs. Then **steer Bree from the web** (step 3) — its
+next turn pulls Atlas's fresh doc via `tf-fleet` (🛰) and writes the test. It's a pull
+on Bree's turn, not realtime — enqueue right after Atlas finishes.
 
-When Atlas finishes, confirm "yes" at its recap so Beats 6/7/7b fire: you'll see
-the `✍️ Referenced by` writes **and** the `Captured: …` decision link land live
-(that's the Library "updating as we go" beat). The profile pill on each Sessions
-card (PR #356, merged) shows which specialist is steering each agent.
+When Atlas finishes, confirm "yes" so the `✍️ Referenced by` writes **and** the
+`Captured: …` link land live. The profile pill (PR #356) shows the routed specialist
+on each card.
 
-### 7.3 Reset between takes (one command)
+### 7.3 Reset between takes
 
 ```bash
 # Easy / token-only — clears just this take's captured docs:
 bash /path/to/demo-fleet-reset.sh
 
-# Full reset (also consult events + Referenced-by + code edits):
+# Full reset (also consult events + Referenced-by + code + session-inbox messages):
 DATABASE_URL='postgresql://…' \
   TASKFORCE_DEMO_REPO=~/dev/taskforce-claude \
   TASKFORCE_DEMO_BRANCH=demo/stripe-double-charge \
   bash /path/to/demo-fleet-reset.sh
 ```
 
-It deletes the docs `tf-capture.sh` wrote this take (ids logged at
-`~/.claude/taskforce-demo-captures.log`, deleted via `?demo=true`), then — if
-`DATABASE_URL` + `psql` are present — removes non-seeded consult events, strips
-the appended "Referenced by" sections, and git-resets the demo branch. The
-seeded baseline (profiles, library, ledger history) is left intact, so you do
-**not** re-seed every take. After it runs: quit each agent (Ctrl-D), relaunch,
-pre-warm, roll the next take.
+Deletes this take's captured docs (ids in `~/.claude/taskforce-demo-captures.log`),
+and — with `DATABASE_URL` + `psql` — removes non-seeded consult events, strips the
+appended "Referenced by" sections, clears pending session-inbox messages, and
+git-resets the demo branch. The seeded baseline (profiles, library, ledger history) is
+left intact. After it runs: quit each agent, relaunch, pre-warm, roll the next take.
 
-> `DATABASE_URL`: Render → Postgres → "External Database URL". No local `psql`?
-> Run steps 2–3 from the Render-shell Python fallback at the bottom of
-> [`reset-between-takes.sh`](./reset-between-takes.sh).
+> `DATABASE_URL`: Render → Postgres → "External Database URL". No local `psql`? Use the
+> Render-shell Python fallback in [`reset-between-takes.sh`](./reset-between-takes.sh).

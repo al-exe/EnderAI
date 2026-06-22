@@ -3,71 +3,30 @@
 T1: when a material session summary matches no existing Library doc above
 ``TAU_CREATE``, auto-create a V2 document with provenance stamps.
 
-T2 will add auto-update when match ≥ ``TAU_UPDATE`` (not implemented here).
+T2: when match ≥ ``TAU_UPDATE``, append-merge new nuance into the matched doc
+with a revertable changelog entry.
 """
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from typing import Any
 
 from sqlmodel import Session
 
+from app.core.taskforce.evolution_doc_patch import apply_evolution_patch
+from app.core.taskforce.evolution_summary import (
+    StoredEvolutionSummary,
+    stored_summary_from_metadata,
+    summary_has_content,
+)
 from app.core.taskforce.scoring import DiscoveryRequest, ScoredCandidate, score_document
 from app.core.v2_documents import get_v2_document_for_actor, list_v2_documents_for_actor
 from app.core.taskforce.summarizer import SummarizerResult
 from app.models import TaskforceObserveRequest, TaskforceSessionArchive, User, V2Document
 
-# Conservative starting threshold — tune from real consultation data.
+# Conservative starting thresholds — tune from real consultation data.
 TAU_CREATE = 0.45
-
-EVOLUTION_SUMMARY_KEY = "evolution_summary"
-
-
-@dataclass(frozen=True)
-class StoredEvolutionSummary:
-    summary_points: list[str]
-    details_sections: list[dict[str, str]]
-    decisions: list[str]
-    outcome: str | None
-    materiality_score: float
-
-
-def _stored_summary_from_metadata(
-    metadata: dict[str, Any] | None,
-) -> StoredEvolutionSummary | None:
-    raw = (metadata or {}).get(EVOLUTION_SUMMARY_KEY)
-    if not isinstance(raw, dict):
-        return None
-    return StoredEvolutionSummary(
-        summary_points=[
-            str(point).strip()
-            for point in raw.get("summary_points") or []
-            if str(point).strip()
-        ],
-        details_sections=[
-            section
-            for section in raw.get("details_sections") or []
-            if isinstance(section, dict)
-        ],
-        decisions=[
-            str(item).strip()
-            for item in raw.get("decisions") or []
-            if str(item).strip()
-        ],
-        outcome=str(raw["outcome"]).strip() if raw.get("outcome") else None,
-        materiality_score=float(raw.get("materiality_score") or 1.0),
-    )
-
-
-def _summary_has_content(summary: StoredEvolutionSummary) -> bool:
-    return bool(
-        summary.summary_points
-        or summary.details_sections
-        or summary.decisions
-        or summary.outcome
-    )
+TAU_UPDATE = 0.45
 
 
 def _to_summarizer_result(summary: StoredEvolutionSummary) -> SummarizerResult:
@@ -187,14 +146,35 @@ def synthesize_documents(
     *,
     archive: TaskforceSessionArchive,
 ) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Run T1 auto-create (T2 auto-update returns empty until implemented)."""
+    """Run T1 auto-create and T2 auto-update for one archived session."""
 
     actor = session.get(User, archive.actor_id)
     if actor is None:
         return [], []
 
-    stored = _stored_summary_from_metadata(archive.source_metadata)
-    if stored is None or not _summary_has_content(stored):
+    stored = stored_summary_from_metadata(archive.source_metadata)
+    if stored is None or not summary_has_content(stored):
+        return [], []
+
+    best = find_best_document_match(
+        session, actor=actor, archive=archive, summary=stored
+    )
+
+    if best is not None and best.score >= TAU_UPDATE:
+        if archive.active_document_id == best.document.id:
+            return [], []
+        summarizer = _to_summarizer_result(stored)
+        changelog = apply_evolution_patch(
+            session,
+            actor=actor,
+            document=best.document,
+            archive=archive,
+            stored=stored,
+            summary=summarizer,
+            match_score=best.score,
+        )
+        if changelog is not None:
+            return [], [best.document.id]
         return [], []
 
     if _active_session_doc_covers_summary(
@@ -202,9 +182,6 @@ def synthesize_documents(
     ):
         return [], []
 
-    best = find_best_document_match(
-        session, actor=actor, archive=archive, summary=stored
-    )
     if best is not None and best.score >= TAU_CREATE:
         return [], []
 

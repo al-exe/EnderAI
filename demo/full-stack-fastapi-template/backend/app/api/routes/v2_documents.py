@@ -11,6 +11,10 @@ from app.core.metrics import (
     record_document_updated,
     record_usage,
 )
+from app.core.taskforce.evolution_doc_patch import (
+    list_evolution_changelogs,
+    revert_evolution_changelog,
+)
 from app.core.v2_documents import (
     apply_v2_document_update,
     build_v2_document_folder_public,
@@ -32,6 +36,7 @@ from app.models import (
     User,
     V2Document,
     V2DocumentCreate,
+    V2DocumentEvolutionChangelogPublic,
     V2DocumentFavorite,
     V2DocumentFolder,
     V2DocumentFolderCreate,
@@ -563,6 +568,84 @@ def update_v2_document(
     session.refresh(document)
     return build_v2_document_public(
         document, session=session, actor=current_user, demo=demo
+    )
+
+
+@router.get(
+    "/{document_id}/evolution-changelog",
+    response_model=list[V2DocumentEvolutionChangelogPublic],
+)
+def read_v2_document_evolution_changelog(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    rows = list_evolution_changelogs(session, document_id=document.id)
+    return [
+        V2DocumentEvolutionChangelogPublic(
+            id=row.id,
+            document_id=row.document_id,
+            source_session_id=row.source_session_id,
+            confidence=row.confidence,
+            summary_snapshot=dict(row.summary_snapshot or {}),
+            diff_or_section=dict(row.diff_or_section or {}),
+            created_at=row.created_at,
+            reverted_at=row.reverted_at,
+        )
+        for row in rows
+    ]
+
+
+@router.post(
+    "/{document_id}/evolution-changelog/{changelog_id}/revert",
+    response_model=V2DocumentPublic,
+)
+def revert_v2_document_evolution_changelog(
+    session: SessionDep,
+    current_user: CurrentUser,
+    document_id: uuid.UUID,
+    changelog_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> Any:
+    document = get_v2_document_for_actor(session, current_user, document_id, demo=demo)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not can_update_v2_document(session, document, current_user, demo=demo):
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have edit access to this document",
+        )
+    try:
+        restored = revert_evolution_changelog(
+            session,
+            actor=current_user,
+            document_id=document_id,
+            changelog_id=changelog_id,
+            demo=demo,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == "document_not_found":
+            raise HTTPException(status_code=404, detail="Document not found") from exc
+        if detail == "changelog_not_found":
+            raise HTTPException(status_code=404, detail="Changelog entry not found") from exc
+        if detail == "changelog_already_reverted":
+            raise HTTPException(
+                status_code=409, detail="Changelog entry already reverted"
+            ) from exc
+        raise HTTPException(status_code=400, detail=detail) from exc
+
+    record_document_updated(
+        session, user=current_user, document=restored, usage=None, is_demo=demo
+    )
+    session.commit()
+    session.refresh(restored)
+    return build_v2_document_public(
+        restored, session=session, actor=current_user, demo=demo
     )
 
 
