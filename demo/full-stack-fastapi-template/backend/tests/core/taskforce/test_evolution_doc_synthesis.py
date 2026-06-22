@@ -6,12 +6,12 @@ from unittest.mock import patch
 from sqlmodel import Session, select
 
 from app.core.taskforce.evolution_doc_synthesis import (
-    EVOLUTION_SUMMARY_KEY,
     TAU_CREATE,
-    StoredEvolutionSummary,
+    TAU_UPDATE,
     find_best_document_match,
     synthesize_documents,
 )
+from app.core.taskforce.evolution_summary import EVOLUTION_SUMMARY_KEY, StoredEvolutionSummary
 from app.core.taskforce.scoring import ScoredCandidate
 from app.models import Organization, TaskforceSessionArchive, User, V2Document
 from tests.utils.user import create_random_user
@@ -113,20 +113,26 @@ def test_synthesize_creates_doc_when_no_match(db: Session) -> None:
     assert document.organization_id == org.id
 
 
-def test_synthesize_skips_when_best_match_above_tau_create(db: Session) -> None:
+def test_synthesize_updates_when_best_match_above_tau_update(db: Session) -> None:
     org = _org(db)
     user = _user(db, org)
     novel_summary = ["Stripe webhook idempotency for duplicate refund events"]
     archive = _archive(db, user, summary_points=novel_summary)
-    _library_doc(
+    matched = _library_doc(
         db,
         user,
         title="Stripe webhook idempotency for duplicate refund events",
-        body="Stripe webhook idempotency for duplicate refund events",
+        body="Stripe webhook idempotency baseline",
     )
+    original_body_len = len(matched.main_body or [])
 
-    created, _ = synthesize_documents(db, archive=archive)
+    created, updated = synthesize_documents(db, archive=archive)
     assert created == []
+    assert updated == [matched.id]
+
+    db.refresh(matched)
+    assert len(matched.main_body or []) >= original_body_len
+    assert matched.evolution_confidence is not None
 
 
 def test_synthesize_honors_private_visibility(db: Session) -> None:

@@ -1,8 +1,8 @@
 """Offline evolution orchestrator (T0).
 
-Fans out doc-synthesis (T1 auto-create; T2 auto-update pending) and profile
-compounding after a material session is summarized. Runs only in the background
-sweeper or a CLI entrypoint — never on the observe request path.
+Fans out doc-synthesis (T1 auto-create; T2 auto-update) and profile compounding
+after a material session is summarized. Runs only in the background sweeper or
+a CLI entrypoint — never on the observe request path.
 """
 
 from __future__ import annotations
@@ -19,11 +19,9 @@ from sqlmodel import Session, col, select
 from app.core.agents.compounding import compound_specialists
 from app.core.config import settings
 from app.core.db import engine
-from app.core.taskforce.evolution_doc_synthesis import (
-    EVOLUTION_SUMMARY_KEY,
-    synthesize_documents,
-)
+from app.core.taskforce.evolution_doc_synthesis import synthesize_documents
 from app.core.taskforce.evolution_gate import can_auto_evolve
+from app.core.taskforce.evolution_summary import EVOLUTION_SUMMARY_KEY
 from app.core.taskforce.summarizer import SummarizerResult
 from app.models import TaskforceSessionArchive, get_datetime_utc
 
