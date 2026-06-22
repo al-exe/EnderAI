@@ -369,7 +369,11 @@ async def observe(
         demo=demo,
         document_id=target_doc.id,
     )
-    mark_session_for_evolution(archive)
+    mark_session_for_evolution(
+        archive,
+        summary=summary,
+        visibility=request.visibility,
+    )
 
     audit = _record_audit(
         session,
@@ -467,6 +471,9 @@ def _create_document_from_summary(
     is_demo: bool,
     request: TaskforceObserveRequest,
     fleet_session_id: uuid_module.UUID | None,
+    auto_created: bool = False,
+    evolution_confidence: float | None = None,
+    evolution_provenance: dict[str, Any] | None = None,
 ) -> V2Document:
     title = _document_title(request, summary)
     visibility = (
@@ -489,11 +496,41 @@ def _create_document_from_summary(
         details_file_name="taskforce.details.md",
         details_markdown_sections=summary.details_sections,
         is_demo=is_demo,
+        auto_created=auto_created,
+        evolution_confidence=evolution_confidence,
+        evolution_provenance=dict(evolution_provenance or {}),
     )
     refresh_v2_document_token_counts(document)
     session.add(document)
     session.flush()
     return document
+
+
+def create_v2_document_from_session_summary(
+    session: Session,
+    *,
+    actor: User,
+    summary: SummarizerResult,
+    is_demo: bool,
+    request: TaskforceObserveRequest,
+    fleet_session_id: uuid_module.UUID | None,
+    auto_created: bool = False,
+    evolution_confidence: float | None = None,
+    evolution_provenance: dict[str, Any] | None = None,
+) -> V2Document:
+    """Public doc-create entry shared by observe and offline evolution (T1)."""
+
+    return _create_document_from_summary(
+        session,
+        actor=actor,
+        summary=summary,
+        is_demo=is_demo,
+        request=request,
+        fleet_session_id=fleet_session_id,
+        auto_created=auto_created,
+        evolution_confidence=evolution_confidence,
+        evolution_provenance=evolution_provenance,
+    )
 
 
 def _build_update_payload(summary: SummarizerResult) -> dict[str, Any]:

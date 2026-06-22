@@ -1005,6 +1005,69 @@ class V2Document(SQLModel, table=True):
         default=None, sa_type=DateTime(timezone=True)
     )  # type: ignore[arg-type]
     index_version: str | None = Field(default=None, max_length=16)
+    auto_created: bool = Field(default=False, nullable=False, index=True)
+    evolution_confidence: float | None = Field(default=None)
+    evolution_provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
+    last_verified_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    evolution_stale: bool = Field(default=False, nullable=False, index=True)
+
+
+class V2DocumentEvolutionChangelog(SQLModel, table=True):
+    """Revertable auto-evolution patch record for a Library document (T2)."""
+
+    __tablename__ = "v2_document_evolution_changelog"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    document_id: uuid.UUID = Field(
+        foreign_key="v2_document.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    actor_id: uuid.UUID = Field(
+        foreign_key="user.id",
+        nullable=False,
+        index=True,
+        ondelete="CASCADE",
+    )
+    source_session_id: str = Field(min_length=1, max_length=128, index=True)
+    confidence: float = Field(ge=0, le=1)
+    summary_snapshot: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
+    diff_or_section: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
+    revertable_to: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+    reverted_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),  # type: ignore
+    )
+
+
+class V2DocumentEvolutionChangelogPublic(SQLModel):
+    id: uuid.UUID
+    document_id: uuid.UUID
+    source_session_id: str
+    confidence: float
+    summary_snapshot: dict[str, Any] = Field(default_factory=dict)
+    diff_or_section: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    reverted_at: datetime | None = None
 
 
 class V2DocumentCreate(SQLModel):
@@ -1122,6 +1185,10 @@ class V2DocumentPublic(SQLModel):
     # redo this investigation from scratch". Surfaced on the public model
     # so the methodology / document UI can show users a defensible number.
     rediscovery_cost_tokens: int = 0
+    auto_created: bool = False
+    evolution_confidence: float | None = None
+    evolution_stale: bool = False
+    last_verified_at: datetime | None = None
     created_at: datetime | None
     updated_at: datetime | None
 
