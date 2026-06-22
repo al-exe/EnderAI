@@ -1226,6 +1226,10 @@ class AgentSpecialist(SQLModel, table=True):
     negative_triggers: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     instructions: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     created_from: str = Field(default="seeded", max_length=32)
+    evolution_provenance: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_type=JSONB,  # type: ignore[arg-type]
+    )
     is_demo: bool = Field(default=False, index=True)
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
@@ -1277,7 +1281,7 @@ class AgentSpecialistSummary(SQLModel):
     role: str
     short_description: str
     domain_tags: list[str] = Field(default_factory=list)
-    status: Literal["active", "draft", "archived"]
+    status: Literal["active", "draft", "archived", "proposed"]
     created_from: str = "seeded"
     linked_docs_count: int = Field(default=0, ge=0)
     invocations_count: int = Field(default=0, ge=0)
@@ -1303,7 +1307,7 @@ class AgentSpecialistUpdate(SQLModel):
     role: str | None = Field(default=None, min_length=1, max_length=160)
     short_description: str | None = Field(default=None, max_length=240)
     domain_tags: list[str] | None = None
-    status: Literal["active", "draft", "archived"] | None = None
+    status: Literal["active", "draft", "archived", "proposed"] | None = None
 
 
 class AgentSpecialistLinkedDoc(SQLModel):
@@ -1339,7 +1343,7 @@ class AgentSpecialistDetail(SQLModel):
     slug: str
     name: str
     role: str
-    status: Literal["active", "draft", "archived"]
+    status: Literal["active", "draft", "archived", "proposed"]
     short_description: str = ""
     description: str
     created_from: str = "seeded"
@@ -1352,6 +1356,30 @@ class AgentSpecialistDetail(SQLModel):
         default_factory=list
     )
     stats: AgentSpecialistStats
+
+
+class EvolutionReviewSpecialist(SQLModel):
+    id: str
+    slug: str
+    name: str
+    role: str
+    short_description: str = ""
+    evolution_provenance: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+class EvolutionReviewDocument(SQLModel):
+    id: str
+    title: str
+    evolution_stale: bool = False
+    evolution_confidence: float | None = None
+    curation_contradiction: dict[str, Any] | None = None
+    updated_at: datetime | None = None
+
+
+class EvolutionReviewResponse(SQLModel):
+    proposed_specialists: list[EvolutionReviewSpecialist] = Field(default_factory=list)
+    flagged_documents: list[EvolutionReviewDocument] = Field(default_factory=list)
 
 
 class Message(SQLModel):
@@ -1770,6 +1798,10 @@ METRICS_EVENT_TOKENS_SAVED_CACHE = "tokens.saved.cache"
 METRICS_EVENT_TOKENS_SAVED_SUMMARY_ONLY = "tokens.saved.summary_only"
 METRICS_EVENT_TOKENS_SAVED_REUSE = "tokens.saved.reuse"
 METRICS_EVENT_TASKFORCE_OBSERVED = "taskforce.observed"
+METRICS_EVENT_DOC_AUTO_CREATED = "document.auto_created"
+METRICS_EVENT_DOC_AUTO_UPDATED = "document.auto_updated"
+METRICS_EVENT_SPECIALIST_EVOLVED = "specialist.evolved"
+METRICS_EVENT_SPECIALIST_PROPOSED = "specialist.proposed"
 
 
 class TaskforceUsagePayload(SQLModel):

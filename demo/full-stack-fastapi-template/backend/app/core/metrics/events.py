@@ -35,6 +35,10 @@ from app.models import (
     METRICS_EVENT_DOCUMENT_FINISHED,
     METRICS_EVENT_DOCUMENT_REUSED,
     METRICS_EVENT_DOCUMENT_UPDATED,
+    METRICS_EVENT_DOC_AUTO_CREATED,
+    METRICS_EVENT_DOC_AUTO_UPDATED,
+    METRICS_EVENT_SPECIALIST_EVOLVED,
+    METRICS_EVENT_SPECIALIST_PROPOSED,
     METRICS_EVENT_TOKENS_CONSUMED,
     METRICS_EVENT_TOKENS_SAVED_CACHE,
     METRICS_EVENT_TOKENS_SAVED_REUSE,
@@ -524,6 +528,118 @@ def record_document_consulted(
         input_tokens=net_saved_tokens or None,
         usd_amount=usd_amount if usd_amount and usd_amount > 0 else None,
         payload=payload,
+    )
+    session.add(event)
+    return event
+
+
+def record_doc_auto_created(
+    session: Session,
+    *,
+    user: User,
+    document: V2Document,
+    is_demo: bool,
+    source_session_id: str,
+    confidence: float | None,
+    auto_created: bool = True,
+) -> MetricsEvent:
+    event = _build_event(
+        kind=METRICS_EVENT_DOC_AUTO_CREATED,
+        user=user,
+        document=document,
+        occurred_at=_now(),
+        is_demo=is_demo,
+        payload={
+            "source_session_id": source_session_id,
+            "confidence": confidence,
+            "auto_created": auto_created,
+        },
+    )
+    session.add(event)
+    return event
+
+
+def record_doc_auto_updated(
+    session: Session,
+    *,
+    user: User,
+    document: V2Document,
+    is_demo: bool,
+    source_session_id: str,
+    confidence: float | None,
+    changelog_id: uuid_module.UUID | None = None,
+) -> MetricsEvent:
+    payload: dict[str, Any] = {
+        "source_session_id": source_session_id,
+        "confidence": confidence,
+    }
+    if changelog_id is not None:
+        payload["changelog_id"] = str(changelog_id)
+    event = _build_event(
+        kind=METRICS_EVENT_DOC_AUTO_UPDATED,
+        user=user,
+        document=document,
+        occurred_at=_now(),
+        is_demo=is_demo,
+        payload=payload,
+    )
+    session.add(event)
+    return event
+
+
+def record_specialist_evolved(
+    session: Session,
+    *,
+    user: User,
+    is_demo: bool,
+    specialist_slug: str,
+    source_session_id: str,
+    confidence: float | None,
+    links_created: int = 0,
+    links_updated: int = 0,
+    instructions_added: int = 0,
+) -> MetricsEvent:
+    event = _build_event(
+        kind=METRICS_EVENT_SPECIALIST_EVOLVED,
+        user=user,
+        document=None,
+        occurred_at=_now(),
+        is_demo=is_demo,
+        payload={
+            "specialist_slug": specialist_slug,
+            "source_session_id": source_session_id,
+            "confidence": confidence,
+            "links_created": links_created,
+            "links_updated": links_updated,
+            "instructions_added": instructions_added,
+        },
+    )
+    session.add(event)
+    return event
+
+
+def record_specialist_proposed(
+    session: Session,
+    *,
+    user: User,
+    is_demo: bool,
+    specialist_slug: str,
+    cluster_key: str,
+    source_session_ids: list[str],
+    confidence: float | None,
+) -> MetricsEvent:
+    event = _build_event(
+        kind=METRICS_EVENT_SPECIALIST_PROPOSED,
+        user=user,
+        document=None,
+        occurred_at=_now(),
+        is_demo=is_demo,
+        payload={
+            "specialist_slug": specialist_slug,
+            "cluster_key": cluster_key,
+            "source_session_ids": source_session_ids,
+            "confidence": confidence,
+        },
     )
     session.add(event)
     return event

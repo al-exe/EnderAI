@@ -12,18 +12,32 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import cast, String
 from sqlmodel import Session, col, select
 
 from app.core.agents.compounding import compound_specialists
+from app.core.agents.profile_evolution import (
+    evolve_profile_from_session,
+    propose_specialists_from_orphans,
+)
 from app.core.config import settings
 from app.core.db import engine
+from app.core.metrics.events import (
+    record_doc_auto_created,
+    record_doc_auto_updated,
+    record_specialist_evolved,
+    record_specialist_proposed,
+)
 from app.core.taskforce.evolution_doc_synthesis import synthesize_documents
 from app.core.taskforce.evolution_gate import can_auto_evolve
-from app.core.taskforce.evolution_summary import EVOLUTION_SUMMARY_KEY
+from app.core.taskforce.evolution_summary import (
+    EVOLUTION_SUMMARY_KEY,
+    stored_summary_from_metadata,
+)
 from app.core.taskforce.summarizer import SummarizerResult
-from app.models import TaskforceSessionArchive, get_datetime_utc
+from app.models import AgentSpecialist, TaskforceSessionArchive, User, V2Document, get_datetime_utc
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +52,8 @@ class EvolutionResult:
     docs_created: list[uuid.UUID] = field(default_factory=list)
     docs_updated: list[uuid.UUID] = field(default_factory=list)
     compounding: dict[str, int] = field(default_factory=dict)
+    profile_evolution: dict[str, Any] = field(default_factory=dict)
+    orphan_proposals: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -81,6 +97,40 @@ def _run_doc_synthesis(
     return synthesize_documents(session, archive=archive)
 
 
+def _record_doc_evolution_events(
+    session: Session,
+    *,
+    archive: TaskforceSessionArchive,
+    actor: User,
+    docs_created: list[uuid.UUID],
+    docs_updated: list[uuid.UUID],
+) -> None:
+    for document_id in docs_created:
+        document = session.get(V2Document, document_id)
+        if document is None:
+            continue
+        record_doc_auto_created(
+            session,
+            user=actor,
+            document=document,
+            is_demo=archive.is_demo,
+            source_session_id=archive.session_id,
+            confidence=document.evolution_confidence,
+        )
+    for document_id in docs_updated:
+        document = session.get(V2Document, document_id)
+        if document is None:
+            continue
+        record_doc_auto_updated(
+            session,
+            user=actor,
+            document=document,
+            is_demo=archive.is_demo,
+            source_session_id=archive.session_id,
+            confidence=document.evolution_confidence,
+        )
+
+
 def evolve_session(
     session: Session,
     archive: TaskforceSessionArchive,
@@ -95,6 +145,56 @@ def evolve_session(
         )
 
     docs_created, docs_updated = _run_doc_synthesis(session, archive=archive)
+    actor = session.get(User, archive.actor_id)
+    stored = stored_summary_from_metadata(archive.source_metadata)
+
+    profile_report: dict[str, Any] = {}
+    orphan_report: dict[str, Any] = {}
+    if stored is not None and actor is not None:
+        _record_doc_evolution_events(
+            session,
+            archive=archive,
+            actor=actor,
+            docs_created=docs_created,
+            docs_updated=docs_updated,
+        )
+        profile_report = evolve_profile_from_session(
+            session,
+            archive=archive,
+            stored=stored,
+            docs_created=docs_created,
+            docs_updated=docs_updated,
+        )
+        if not profile_report.get("skipped") and archive.specialist_slug:
+            record_specialist_evolved(
+                session,
+                user=actor,
+                is_demo=archive.is_demo,
+                specialist_slug=archive.specialist_slug,
+                source_session_id=archive.session_id,
+                confidence=stored.materiality_score,
+                links_created=int(profile_report.get("links_created") or 0),
+                links_updated=int(profile_report.get("links_updated") or 0),
+                instructions_added=int(profile_report.get("instructions_added") or 0),
+            )
+        orphan_report = propose_specialists_from_orphans(
+            session, organization_id=archive.organization_id
+        )
+        for specialist_id in orphan_report.get("proposed_ids") or []:
+            specialist = session.get(AgentSpecialist, uuid.UUID(str(specialist_id)))
+            if specialist is None:
+                continue
+            provenance = specialist.evolution_provenance or {}
+            record_specialist_proposed(
+                session,
+                user=actor,
+                is_demo=archive.is_demo,
+                specialist_slug=specialist.slug,
+                cluster_key=str(provenance.get("cluster_key") or ""),
+                source_session_ids=list(provenance.get("source_session_ids") or []),
+                confidence=provenance.get("confidence"),
+            )
+
     compounding = compound_specialists(
         session,
         organization_id=archive.organization_id,
@@ -113,6 +213,8 @@ def evolve_session(
         docs_created=docs_created,
         docs_updated=docs_updated,
         compounding=compounding,
+        profile_evolution=profile_report,
+        orphan_proposals=orphan_report,
     )
 
 

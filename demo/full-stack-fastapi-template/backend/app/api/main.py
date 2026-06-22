@@ -6,6 +6,7 @@ from app.api.routes import (
     billing,
     cases,
     context_packs,
+    evolution_review,
     login,
     organizations,
     private,
@@ -27,6 +28,7 @@ api_router.include_router(login.router)
 api_router.include_router(users.router)
 api_router.include_router(organizations.router)
 api_router.include_router(agents.router)
+api_router.include_router(evolution_review.router)
 api_router.include_router(agent_credentials.router)
 api_router.include_router(billing.router)
 api_router.include_router(topics.router)

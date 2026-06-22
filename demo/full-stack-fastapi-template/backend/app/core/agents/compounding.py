@@ -222,6 +222,50 @@ def _has_earned_link(links: Iterable[AgentSpecialistDocumentLink]) -> bool:
     return any((link.reason or "").startswith("earned:") for link in links)
 
 
+def link_document_to_specialist(
+    session: Session,
+    specialist: AgentSpecialist,
+    document: V2Document,
+    *,
+    anchor_id: str | None,
+    reason: str,
+    weight: float,
+) -> tuple[bool, bool]:
+    """Upsert one doc link on a specialist. Returns (created, updated)."""
+
+    existing = session.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id,
+            AgentSpecialistDocumentLink.document_id == document.id,
+        )
+    ).first()
+    if existing is None:
+        session.add(
+            AgentSpecialistDocumentLink(
+                specialist_id=specialist.id,
+                document_id=document.id,
+                anchor_id=anchor_id,
+                reason=reason,
+                weight=weight,
+                is_pinned=False,
+            )
+        )
+        return True, False
+    if existing.is_pinned:
+        return False, False
+    if _link_would_change(
+        existing,
+        anchor_id=anchor_id or existing.anchor_id,
+        reason=reason,
+        weight=weight,
+    ):
+        existing.anchor_id = anchor_id
+        existing.reason = reason
+        existing.weight = weight
+        return False, True
+    return False, False
+
+
 def compound_specialists(
     session: Session,
     *,
