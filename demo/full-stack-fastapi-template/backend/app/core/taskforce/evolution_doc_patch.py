@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlmodel import Session, col, select
 
+from app.core.taskforce.curation import stamp_freshness
 from app.core.v2_documents import apply_v2_document_update, get_v2_document_for_actor
 from app.core.taskforce.evolution_summary import (
     EVOLUTION_SUMMARY_KEY,
@@ -207,6 +208,8 @@ def apply_evolution_patch(
     stored: StoredEvolutionSummary,
     summary: SummarizerResult,
     match_score: float,
+    confidence: float | None = None,
+    provisional: bool = False,
 ) -> V2DocumentEvolutionChangelog | None:
     """Patch a matched document and record a revertable changelog row."""
 
@@ -218,13 +221,18 @@ def apply_evolution_patch(
 
     revertable_to = snapshot_document_content(document)
     apply_v2_document_update(document, update)
-    confidence = min(1.0, max(stored.materiality_score, match_score))
-    document.evolution_confidence = confidence
+    resolved_confidence = confidence
+    if resolved_confidence is None:
+        resolved_confidence = min(1.0, max(stored.materiality_score, match_score))
+    stamp_freshness(
+        document, confidence=resolved_confidence, provisional=provisional
+    )
     provenance = dict(document.evolution_provenance or {})
     provenance["last_auto_update"] = {
         "source_session_id": archive.session_id,
         "match_score": match_score,
-        "confidence": confidence,
+        "confidence": resolved_confidence,
+        "provisional": provisional,
     }
     document.evolution_provenance = provenance
     session.add(document)
@@ -233,7 +241,7 @@ def apply_evolution_patch(
         document_id=document.id,
         actor_id=actor.id,
         source_session_id=archive.session_id,
-        confidence=confidence,
+        confidence=resolved_confidence,
         summary_snapshot={
             "summary_points": list(stored.summary_points),
             "details_sections": list(stored.details_sections),

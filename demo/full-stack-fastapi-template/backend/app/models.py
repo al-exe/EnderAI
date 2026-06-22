@@ -1011,6 +1011,10 @@ class V2Document(SQLModel, table=True):
         default_factory=dict,
         sa_type=JSONB,  # type: ignore[arg-type]
     )
+    last_verified_at: datetime | None = Field(
+        default=None, sa_type=DateTime(timezone=True)
+    )  # type: ignore[arg-type]
+    evolution_stale: bool = Field(default=False, nullable=False, index=True)
 
 
 class V2DocumentEvolutionChangelog(SQLModel, table=True):
@@ -1181,6 +1185,10 @@ class V2DocumentPublic(SQLModel):
     # redo this investigation from scratch". Surfaced on the public model
     # so the methodology / document UI can show users a defensible number.
     rediscovery_cost_tokens: int = 0
+    auto_created: bool = False
+    evolution_confidence: float | None = None
+    evolution_stale: bool = False
+    last_verified_at: datetime | None = None
     created_at: datetime | None
     updated_at: datetime | None
 
