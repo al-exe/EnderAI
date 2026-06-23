@@ -2,16 +2,25 @@
 
 The Sessions roster shows a stable conversation label — not the rolling last
 prompt. We capture it once when the session first speaks and never overwrite
-it unless the user renames the session explicitly.
+it unless the user renames the session explicitly, or the haiku summarizer
+returns a tighter ``session_label`` after the first material observe.
 """
 
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
-_MAX_LEN = 120
+if TYPE_CHECKING:
+    from app.core.taskforce.summarizer import SummarizerResult
+    from app.models import TaskforceSessionArchive
+
+_MAX_LEN = 80
 
 _PREFIX_PATTERNS = (
+    r"^hi[,!]?\s+",
+    r"^hey[,!]?\s+",
+    r"^hello[,!]?\s+",
     r"^please\s+",
     r"^can you\s+",
     r"^could you\s+",
@@ -37,6 +46,17 @@ _IMPERATIVE_GERUNDS: dict[str, str] = {
     "write": "Writing",
 }
 
+_DIGEST_PREFIXES = ("Ran: ", "Touched ")
+
+
+def _normalize_label(text: str) -> str:
+    cleaned = " ".join(text.split()).strip().rstrip(".,!?")
+    if not cleaned:
+        return ""
+    if len(cleaned) > _MAX_LEN:
+        cleaned = f"{cleaned[: _MAX_LEN - 1].rstrip()}…"
+    return cleaned
+
 
 def summarize_opening_prompt(prompt: str) -> str:
     """Turn the first user prompt into a short, stable session label."""
@@ -46,13 +66,17 @@ def summarize_opening_prompt(prompt: str) -> str:
         return ""
 
     lowered = text.lower()
-    for pattern in _PREFIX_PATTERNS:
-        if re.match(pattern, lowered):
-            text = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
-            lowered = text.lower()
-            break
+    stripped = True
+    while stripped:
+        stripped = False
+        for pattern in _PREFIX_PATTERNS:
+            if re.match(pattern, lowered):
+                text = re.sub(pattern, "", text, count=1, flags=re.IGNORECASE).strip()
+                lowered = text.lower()
+                stripped = True
+                break
 
-    for separator in (". ", "? ", "! ", "\n"):
+    for separator in (". ", "? ", "! ", ", and ", "\n"):
         if separator in text:
             text = text.split(separator, 1)[0].strip()
             break
@@ -68,7 +92,71 @@ def summarize_opening_prompt(prompt: str) -> str:
     if text:
         text = text[0].upper() + text[1:]
 
-    text = text.rstrip(".,!?")
-    if len(text) > _MAX_LEN:
-        text = f"{text[: _MAX_LEN - 1].rstrip()}…"
-    return text
+    return _normalize_label(text)
+
+
+def _is_digest_line(text: str) -> bool:
+    stripped = text.strip()
+    return not stripped or stripped.startswith(_DIGEST_PREFIXES)
+
+
+def resolve_session_label(
+    summary: SummarizerResult,
+    *,
+    prompt: str = "",
+) -> str:
+    """Pick the best short roster label from a summarizer result."""
+
+    if summary.session_label:
+        return summary.session_label
+
+    for point in summary.summary_points:
+        candidate = _normalize_label(point.strip())
+        if candidate and not _is_digest_line(candidate):
+            return candidate
+
+    return summarize_opening_prompt(prompt)
+
+
+def _looks_like_verbatim_prompt(label: str, prompt: str) -> bool:
+    if not label or not prompt:
+        return False
+    normalized_label = " ".join(label.split()).lower()
+    normalized_prompt = " ".join(prompt.split()).lower()
+    if normalized_label == normalized_prompt[: len(normalized_label)]:
+        return True
+    if len(label) > 72:
+        return True
+    return bool(re.match(r"^(hi|hey|hello)[,!]?\s", normalized_label))
+
+
+def apply_conversation_summary_from_summary(
+    archive: TaskforceSessionArchive,
+    summary: SummarizerResult,
+    *,
+    prompt: str = "",
+) -> None:
+    """Refresh ``conversation_summary`` when the summarizer has a better label.
+
+    User-renamed sessions (``display_name`` set) are left alone. Haiku
+    ``session_label`` values replace heuristic first-pass labels; otherwise we
+    only fill in when nothing was captured yet.
+    """
+
+    if archive.display_name:
+        return
+
+    label = resolve_session_label(summary, prompt=prompt)
+    if not label:
+        return
+
+    if archive.conversation_summary is None:
+        archive.conversation_summary = label
+        return
+
+    if summary.session_label:
+        archive.conversation_summary = label
+        return
+
+    if _looks_like_verbatim_prompt(archive.conversation_summary, prompt):
+        archive.conversation_summary = label

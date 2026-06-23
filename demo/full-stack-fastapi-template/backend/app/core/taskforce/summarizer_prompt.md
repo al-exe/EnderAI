@@ -20,6 +20,7 @@ fabricate.
 ```json
 {
   "materiality_score": 0.0-1.0,
+  "session_label": "…",               // one short sentence (≤80 chars) for the Sessions roster — what this chat is about, not the user's verbatim prompt
   "summary_points": ["…"],            // 0–6 short claim sentences
   "details_sections": [               // 0–4 sections, max 800 chars each
     {"anchor_id": "investigation", "markdown": "…"}
@@ -31,6 +32,10 @@ fabricate.
   "open_questions": ["…"]             // 0–4 unresolved threads
 }
 ```
+
+`session_label` is shown as the agent's display name in Fleet. Write it like a
+task title ("Mobile-friendly landing page for iPhone 15/17 Pro"), not a paste
+of the opening prompt.
 
 ## Anchor IDs
 
