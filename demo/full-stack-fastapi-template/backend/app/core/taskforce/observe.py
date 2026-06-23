@@ -47,6 +47,9 @@ from app.core.metrics.events import _build_event, _now
 from app.core.taskforce.archive import upsert_session_archive_from_observe
 from app.core.taskforce.evolution import mark_session_for_evolution
 from app.core.taskforce.materiality import assess_materiality
+from app.core.taskforce.conversation_summary import (
+    apply_conversation_summary_from_summary,
+)
 from app.core.taskforce.summarizer import (
     PROMPT_VERSION,
     SUMMARIZER_MODEL,
@@ -369,6 +372,13 @@ async def observe(
         demo=demo,
         document_id=target_doc.id,
     )
+    if archive is not None:
+        apply_conversation_summary_from_summary(
+            archive,
+            summary,
+            prompt=request.prompt,
+        )
+        session.add(archive)
     mark_session_for_evolution(
         archive,
         summary=summary,

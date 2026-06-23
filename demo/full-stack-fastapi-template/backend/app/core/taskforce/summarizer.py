@@ -47,6 +47,7 @@ class SummarizerResult:
     decisions: list[str]
     outcome: str | None
     open_questions: list[str]
+    session_label: str | None = None
     raw_text: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -83,6 +84,17 @@ def _render_transcript(transcript: Sequence[TaskforceTranscriptTurn]) -> str:
     return "(transcript truncated)\n" + joined[excess:]
 
 
+def _normalize_session_label(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    label = " ".join(value.split()).strip().rstrip(".,!?")
+    if not label:
+        return None
+    if len(label) > 80:
+        label = f"{label[:79].rstrip()}…"
+    return label
+
+
 def _empty_result() -> SummarizerResult:
     return SummarizerResult(
         materiality_score=0.0,
@@ -93,6 +105,7 @@ def _empty_result() -> SummarizerResult:
         decisions=[],
         outcome=None,
         open_questions=[],
+        session_label=None,
     )
 
 
@@ -156,6 +169,7 @@ async def summarize(
             decisions=list(parsed.get("decisions") or [])[:4],
             outcome=parsed.get("outcome"),
             open_questions=list(parsed.get("open_questions") or [])[:4],
+            session_label=_normalize_session_label(parsed.get("session_label")),
         )
     result.raw_text = text
     result.input_tokens = int(input_tokens)
