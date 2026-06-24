@@ -1,4 +1,4 @@
-"""One-line Sessions labels from the opening user prompt.
+"""Sessions labels from the opening user prompt.
 
 The Sessions roster shows a stable conversation label — not the rolling last
 prompt. We capture it once when the session first speaks and never overwrite
@@ -11,11 +11,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from app.core.taskforce.summarizer import SummarizerResult
-    from app.models import TaskforceSessionArchive
+from app.core.taskforce.summarizer import SESSION_LABEL_MAX_LEN, SummarizerResult
 
-_MAX_LEN = 80
+if TYPE_CHECKING:
+    from app.models import TaskforceSessionArchive
 
 _PREFIX_PATTERNS = (
     r"^hi[,!]?\s+",
@@ -50,11 +49,11 @@ _DIGEST_PREFIXES = ("Ran: ", "Touched ")
 
 
 def _normalize_label(text: str) -> str:
-    cleaned = " ".join(text.split()).strip().rstrip(".,!?")
+    cleaned = " ".join(text.split()).strip()
     if not cleaned:
         return ""
-    if len(cleaned) > _MAX_LEN:
-        cleaned = f"{cleaned[: _MAX_LEN - 1].rstrip()}…"
+    if len(cleaned) > SESSION_LABEL_MAX_LEN:
+        cleaned = cleaned[:SESSION_LABEL_MAX_LEN].rstrip()
     return cleaned
 
 
@@ -125,7 +124,7 @@ def _looks_like_verbatim_prompt(label: str, prompt: str) -> bool:
     normalized_prompt = " ".join(prompt.split()).lower()
     if normalized_label == normalized_prompt[: len(normalized_label)]:
         return True
-    if len(label) > 72:
+    if len(label) > 200:
         return True
     return bool(re.match(r"^(hi|hey|hello)[,!]?\s", normalized_label))
 
