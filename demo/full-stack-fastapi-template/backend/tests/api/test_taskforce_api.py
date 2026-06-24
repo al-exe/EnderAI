@@ -634,7 +634,7 @@ def test_session_start_returns_session_id_and_matches(client: TestClient) -> Non
         ms = body["matched_specialist"]
         assert ms["slug"]
         assert ms["band"] in {"high", "medium", "low"}
-        assert ms["href"] == f"/v2/agents/{ms['slug']}"
+        assert ms["href"] == f"/v2/profiles/{ms['slug']}"
 
 
 def test_session_start_hydrates_org_visible_teammate_document(
@@ -783,7 +783,7 @@ def test_session_start_routes_to_seeded_specialist(
     assert matched["confidence"] > 0
     assert matched["reasons"]
     # The skill uses href to build a clickable link to the Agents page.
-    assert matched["href"] == "/v2/agents/jensen-test"
+    assert matched["href"] == "/v2/profiles/jensen-test"
 
     # Every document.consulted event the discover call emitted must
     # carry the routed specialist_slug so the Agents page can derive

@@ -2470,7 +2470,7 @@ class MatchedSpecialist(SQLModel):
     role: str = Field(max_length=160)
     confidence: float = Field(ge=0, le=1)
     band: Literal["high", "medium", "low"]
-    href: str  # f"/v2/agents/{slug}"
+    href: str  # f"/v2/profiles/{slug}"
     reasons: list[str] = Field(default_factory=list)
     linked_documents: list[MatchedSpecialistLinkedDoc] = Field(default_factory=list)
 
