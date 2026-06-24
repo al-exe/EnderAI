@@ -18,7 +18,17 @@ from app.models import (
     V2Document,
 )
 from tests.utils.user import user_authentication_headers
-from tests.utils.utils import random_email, random_lower_string
+from tests.utils.utils import random_email, random_lower_string, session_id_for
+
+
+def _sid(label: str) -> str:
+    """Deterministic UUID session id for a readable label.
+
+    The fleet roster only surfaces sessions whose id is a real (UUID) session id
+    (see ``active_sessions._is_real_session_id``), so tests mint a stable UUID
+    per readable label instead of using slug ids.
+    """
+    return session_id_for(label)
 
 
 def _signup(client: TestClient) -> tuple[str, dict[str, str]]:
@@ -172,7 +182,7 @@ def test_fleet_keeps_inactive_agents_in_their_group(
         archive = _create_archive(
             db,
             user=user,
-            session_id=f"recent-{index}",
+            session_id=_sid(f"recent-{index}"),
             # 0-2 stay fresh (active/running); 3-5 age past the 8h live window.
             # Aged-out sessions are NOT swept anywhere — they stay in this group
             # and report the gray "Inactive" state.
@@ -193,7 +203,7 @@ def test_fleet_keeps_inactive_agents_in_their_group(
     _create_archive(
         db,
         user=user,
-        session_id="ended",
+        session_id=_sid("ended"),
         imported_at=now,
         ended_at=now,
         fleet_session_id=fleet_id,
@@ -215,26 +225,26 @@ def test_fleet_keeps_inactive_agents_in_their_group(
     assert "unassigned" not in body
     # Every session stays in its group — nothing is auto-moved to Archive.
     assert set(status_by_id) == {
-        "recent-0",
-        "recent-1",
-        "recent-2",
-        "recent-3",
-        "recent-4",
-        "recent-5",
-        "ended",
+        _sid("recent-0"),
+        _sid("recent-1"),
+        _sid("recent-2"),
+        _sid("recent-3"),
+        _sid("recent-4"),
+        _sid("recent-5"),
+        _sid("ended"),
     }
     history = next(item for item in body["fleet_sessions"] if item["is_history"])
     assert history["agents"] == []
     # Fresh sessions run; aged-out and ended sessions are Inactive in place.
-    assert status_by_id["recent-0"] == "running"
-    assert status_by_id["recent-1"] == "running"
-    assert status_by_id["recent-2"] == "running"
-    assert status_by_id["recent-3"] == "inactive"
-    assert status_by_id["recent-4"] == "inactive"
-    assert status_by_id["recent-5"] == "inactive"
-    assert status_by_id["ended"] == "inactive"
+    assert status_by_id[_sid("recent-0")] == "running"
+    assert status_by_id[_sid("recent-1")] == "running"
+    assert status_by_id[_sid("recent-2")] == "running"
+    assert status_by_id[_sid("recent-3")] == "inactive"
+    assert status_by_id[_sid("recent-4")] == "inactive"
+    assert status_by_id[_sid("recent-5")] == "inactive"
+    assert status_by_id[_sid("ended")] == "inactive"
 
-    fresh = next(a for a in grouped["agents"] if a["session_id"] == "recent-0")
+    fresh = next(a for a in grouped["agents"] if a["session_id"] == _sid("recent-0"))
     assert fresh["active_document_id"] == str(document.id)
     assert fresh["title"] == "Fleet document"
     assert "implemented the Fleet backend" in fresh["summary_markdown"]
@@ -258,13 +268,13 @@ def test_fleet_agent_kind_classifies_driving_tool(
     now = datetime.now(timezone.utc)
 
     cases = {
-        "agent-claude": ("claude-code", None, "claude-opus-4-8", "claude"),
-        "agent-codex": ("codex", None, "gpt-5.4", "codex"),
-        "agent-cursor": ("cursor", None, "claude-sonnet-4-6", "cursor"),
+        _sid("agent-claude"): ("claude-code", None, "claude-opus-4-8", "claude"),
+        _sid("agent-codex"): ("codex", None, "gpt-5.4", "codex"),
+        _sid("agent-cursor"): ("cursor", None, "claude-sonnet-4-6", "cursor"),
         # Cursor/Codex hooks always send client; harness_label is the backup.
-        "agent-cursor-label": (None, "cursor", "claude-sonnet-4-6", "cursor"),
+        _sid("agent-cursor-label"): (None, "cursor", "claude-sonnet-4-6", "cursor"),
         # claude-* models are shared by Cursor and Claude Code — never infer.
-        "agent-claude-model-ambiguous": (None, None, "claude-sonnet-4-6", "other"),
+        _sid("agent-claude-model-ambiguous"): (None, None, "claude-sonnet-4-6", "other"),
     }
     for index, (session_id, (client_value, harness_label, model_id, _)) in enumerate(
         cases.items()
@@ -314,7 +324,7 @@ def test_fleet_cursor_chip_stays_cursor_when_provenance_fields_diverged(
     _create_archive(
         db,
         user=user,
-        session_id="cursor-diverged",
+        session_id=_sid("cursor-diverged"),
         imported_at=now,
         fleet_session_id=fleet_id,
         client="claude-code",
@@ -329,7 +339,7 @@ def test_fleet_cursor_chip_stays_cursor_when_provenance_fields_diverged(
             "kind": "checkpoint",
             "prompt": "Continue fleet chip work",
             "client": "claude-code",
-            "session_id": "cursor-diverged",
+            "session_id": _sid("cursor-diverged"),
             "duration_ms": 100,
             "harness": {
                 "model_id": "claude-opus-4-8",
@@ -344,7 +354,7 @@ def test_fleet_cursor_chip_stays_cursor_when_provenance_fields_diverged(
 
     archive = db.exec(
         select(TaskforceSessionArchive).where(
-            TaskforceSessionArchive.session_id == "cursor-diverged"
+            TaskforceSessionArchive.session_id == _sid("cursor-diverged")
         )
     ).one()
     assert archive.client == "cursor"
@@ -361,7 +371,7 @@ def test_fleet_cursor_chip_stays_cursor_when_provenance_fields_diverged(
         if item["id"] == str(fleet_id)
     )
     agent = next(
-        item for item in grouped["agents"] if item["session_id"] == "cursor-diverged"
+        item for item in grouped["agents"] if item["session_id"] == _sid("cursor-diverged")
     )
     assert agent["agent_kind"] == "cursor"
 
@@ -379,7 +389,7 @@ def test_reassign_and_delete_move_agent_without_ending_session(
     archive = _create_archive(
         db,
         user=user,
-        session_id="assignable",
+        session_id=_sid("assignable"),
         imported_at=datetime.now(timezone.utc),
         fleet_session_id=default_fleet_id,
     )
@@ -426,7 +436,7 @@ def test_assignment_rejects_another_actors_fleet(
     archive = _create_archive(
         db,
         user=owner,
-        session_id="owner-session",
+        session_id=_sid("owner-session"),
         imported_at=datetime.now(timezone.utc),
     )
 
@@ -453,7 +463,7 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
         headers=headers,
         json={
             "prompt": "Implement the fleet session defaults",
-            "session_id": "default-session-agent",
+            "session_id": _sid("default-session-agent"),
             "min_score": 0.0,
         },
     )
@@ -462,7 +472,7 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
     archive = db.exec(
         select(TaskforceSessionArchive).where(
             TaskforceSessionArchive.actor_id == user.id,
-            TaskforceSessionArchive.session_id == "default-session-agent",
+            TaskforceSessionArchive.session_id == _sid("default-session-agent"),
         )
     ).one()
     fleet_session = db.get(TaskforceFleetSession, archive.fleet_session_id)
@@ -480,7 +490,7 @@ def test_first_agent_gets_session_one_and_provisional_current_work(
         item for item in body["fleet_sessions"] if not item["is_history"]
     )
     agent = default_fleet["agents"][0]
-    assert agent["session_id"] == "default-session-agent"
+    assert agent["session_id"] == _sid("default-session-agent")
     assert agent["display_name"] == "Implementing the fleet session defaults"
     assert agent["summary_markdown"] == ""
 
@@ -496,7 +506,7 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
         f"{settings.API_V1_STR}/v2/taskforce/session/heartbeat",
         headers=headers,
         json={
-            "session_id": "codex-startup-session",
+            "session_id": _sid("codex-startup-session"),
             "cwd": "/workspace/EnderAI",
             "git_branch": "feature/codex-fleet",
             "client": "codex",
@@ -509,7 +519,7 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
     archive = db.exec(
         select(TaskforceSessionArchive).where(
             TaskforceSessionArchive.actor_id == user.id,
-            TaskforceSessionArchive.session_id == "codex-startup-session",
+            TaskforceSessionArchive.session_id == _sid("codex-startup-session"),
         )
     ).one()
     assert archive.client == "codex"
@@ -527,7 +537,7 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
         agent for item in fleet.json()["fleet_sessions"] for agent in item["agents"]
     ]
     agent = next(
-        item for item in agents if item["session_id"] == "codex-startup-session"
+        item for item in agents if item["session_id"] == _sid("codex-startup-session")
     )
     assert agent["model_id"] == "gpt-5.4"
     assert agent["display_name"] == "GPT 5.4"
@@ -601,21 +611,21 @@ def test_session_turn_ended_marks_agent_awaiting_prompt(
         headers=headers,
         json={
             "prompt": "Wire up the fleet turn state",
-            "session_id": "turn-state-session",
+            "session_id": _sid("turn-state-session"),
             "min_score": 0.0,
         },
     )
     assert discover.status_code == 200, discover.text
-    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "running"
+    assert _agent_in_fleet(client, headers, _sid("turn-state-session"))["status"] == "running"
 
     # The Stop hook fires: the agent finished its turn and awaits a prompt.
     turn_ended = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/session/turn-ended",
         headers=headers,
-        json={"session_id": "turn-state-session"},
+        json={"session_id": _sid("turn-state-session")},
     )
     assert turn_ended.status_code == 204, turn_ended.text
-    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "waiting"
+    assert _agent_in_fleet(client, headers, _sid("turn-state-session"))["status"] == "waiting"
 
     # A new prompt flips it back to running.
     discover_again = client.post(
@@ -623,12 +633,12 @@ def test_session_turn_ended_marks_agent_awaiting_prompt(
         headers=headers,
         json={
             "prompt": "Keep going",
-            "session_id": "turn-state-session",
+            "session_id": _sid("turn-state-session"),
             "min_score": 0.0,
         },
     )
     assert discover_again.status_code == 200, discover_again.text
-    assert _agent_in_fleet(client, headers, "turn-state-session")["status"] == "running"
+    assert _agent_in_fleet(client, headers, _sid("turn-state-session"))["status"] == "running"
 
 
 def test_checkpoint_observe_after_turn_ended_stays_waiting(
@@ -637,7 +647,7 @@ def test_checkpoint_observe_after_turn_ended_stays_waiting(
 ) -> None:
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "1")
     _, headers = _signup(client)
-    session_id = "turn-state-observe-session"
+    session_id = _sid("turn-state-observe-session")
 
     discover = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -677,7 +687,7 @@ def test_session_turn_ended_is_noop_without_archive(client: TestClient) -> None:
     response = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/session/turn-ended",
         headers=headers,
-        json={"session_id": "never-seen-session"},
+        json={"session_id": _sid("never-seen-session")},
     )
     assert response.status_code == 204, response.text
 
@@ -694,14 +704,14 @@ def test_fleet_agent_display_name_can_be_renamed(
         headers=headers,
         json={
             "prompt": "Implement the fleet session defaults",
-            "session_id": "renameable-session",
+            "session_id": _sid("renameable-session"),
             "min_score": 0.0,
         },
     )
     assert discover.status_code == 200, discover.text
 
     renamed = client.patch(
-        f"{settings.API_V1_STR}/v2/taskforce/session/renameable-session",
+        f"{settings.API_V1_STR}/v2/taskforce/session/{_sid('renameable-session')}",
         headers=headers,
         json={"display_name": "Fleet defaults rollout"},
     )
@@ -711,7 +721,7 @@ def test_fleet_agent_display_name_can_be_renamed(
     archive = db.exec(
         select(TaskforceSessionArchive).where(
             TaskforceSessionArchive.actor_id == user.id,
-            TaskforceSessionArchive.session_id == "renameable-session",
+            TaskforceSessionArchive.session_id == _sid("renameable-session"),
         )
     ).one()
     assert archive.display_name == "Fleet defaults rollout"
@@ -736,7 +746,7 @@ def test_discovery_document_pool_flips_after_agent_reassignment(
 ) -> None:
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "pool-flip-agent"
+    session_id = _sid("pool-flip-agent")
 
     initial_discover = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -835,7 +845,7 @@ def test_observe_stamps_future_documents_without_moving_past_documents(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "authoring-reassignment"
+    session_id = _sid("authoring-reassignment")
 
     first = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/observe",
@@ -923,21 +933,21 @@ def test_fleet_keeps_recent_inactive_agents_out_of_archive(
     active = _create_archive(
         db,
         user=user,
-        session_id="still-running",
+        session_id=_sid("still-running"),
         imported_at=now,
         fleet_session_id=fleet_id,
     )
     idle = _create_archive(
         db,
         user=user,
-        session_id="went-idle",
+        session_id=_sid("went-idle"),
         imported_at=now - timedelta(hours=9),
         fleet_session_id=fleet_id,
     )
     ended = _create_archive(
         db,
         user=user,
-        session_id="was-ended",
+        session_id=_sid("was-ended"),
         imported_at=now - timedelta(minutes=2),
         ended_at=now - timedelta(minutes=2),
         fleet_session_id=fleet_id,
@@ -963,9 +973,9 @@ def test_fleet_keeps_recent_inactive_agents_out_of_archive(
         agent["session_id"]: agent["status"] for agent in active_fleet["agents"]
     }
     assert status_by_id == {
-        "still-running": "running",
-        "went-idle": "inactive",
-        "was-ended": "inactive",
+        _sid("still-running"): "running",
+        _sid("went-idle"): "inactive",
+        _sid("was-ended"): "inactive",
     }
 
     # Membership is unchanged in the database.
@@ -990,14 +1000,14 @@ def test_fleet_auto_archives_agents_older_than_72_hours(
     recent = _create_archive(
         db,
         user=user,
-        session_id="still-recent",
+        session_id=_sid("still-recent"),
         imported_at=now - timedelta(hours=71),
         fleet_session_id=fleet_id,
     )
     stale = _create_archive(
         db,
         user=user,
-        session_id="went-stale",
+        session_id=_sid("went-stale"),
         imported_at=now - timedelta(hours=73),
         fleet_session_id=fleet_id,
     )
@@ -1016,9 +1026,9 @@ def test_fleet_auto_archives_agents_older_than_72_hours(
     )
 
     assert {agent["session_id"] for agent in active_fleet["agents"]} == {
-        "still-recent"
+        _sid("still-recent")
     }
-    assert {agent["session_id"] for agent in history["agents"]} == {"went-stale"}
+    assert {agent["session_id"] for agent in history["agents"]} == {_sid("went-stale")}
     assert all(agent["status"] == "inactive" for agent in history["agents"])
 
     db.refresh(recent)
@@ -1040,7 +1050,7 @@ def test_ended_session_stays_in_place_on_observe(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "inactive-on-end"
+    session_id = _sid("inactive-on-end")
 
     discover = client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -1083,7 +1093,7 @@ def test_typing_resurrects_inactive_agent_in_place(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "resurrect-in-place"
+    session_id = _sid("resurrect-in-place")
 
     client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -1137,7 +1147,7 @@ def test_typing_resurrects_archived_agent_back_to_default(
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
-    session_id = "resurrect-from-archive"
+    session_id = _sid("resurrect-from-archive")
 
     client.post(
         f"{settings.API_V1_STR}/v2/taskforce/discover",
@@ -1194,7 +1204,7 @@ def test_fleet_agent_surfaces_recent_activity_newest_first(
 ) -> None:
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     _, headers = _signup(client)
-    session_id = "recent-activity"
+    session_id = _sid("recent-activity")
 
     for prompt in ("First task: scaffold the API", "Second task: add the tests"):
         resp = client.post(
@@ -1316,7 +1326,7 @@ def test_fleet_session_context_follows_agents_currently_in_group(
     _create_archive(
         db,
         user=user,
-        session_id="agent-older",
+        session_id=_sid("agent-older"),
         imported_at=now,
         fleet_session_id=fleet_id,
         referenced_document_ids=[str(older.id)],
@@ -1324,7 +1334,7 @@ def test_fleet_session_context_follows_agents_currently_in_group(
     _create_archive(
         db,
         user=user,
-        session_id="agent-newer",
+        session_id=_sid("agent-newer"),
         imported_at=now,
         fleet_session_id=fleet_id,
         referenced_document_ids=[str(newer.id)],
@@ -1333,7 +1343,7 @@ def test_fleet_session_context_follows_agents_currently_in_group(
     _create_archive(
         db,
         user=user,
-        session_id="agent-moved",
+        session_id=_sid("agent-moved"),
         imported_at=now,
         fleet_session_id=other_id,
         referenced_document_ids=[str(moved_away.id)],
@@ -1527,7 +1537,7 @@ def test_fleet_hides_ghost_registrations(
     _create_archive(
         db,
         user=user,
-        session_id="real-agent",
+        session_id=_sid("real-agent"),
         imported_at=now,
         fleet_session_id=fleet_id,
     )
@@ -1535,7 +1545,7 @@ def test_fleet_hides_ghost_registrations(
     _ghost_archive(
         db,
         user=user,
-        session_id="ghost-stale",
+        session_id=_sid("ghost-stale"),
         fleet_session_id=fleet_id,
         age=timedelta(minutes=30),
     )
@@ -1543,7 +1553,7 @@ def test_fleet_hides_ghost_registrations(
     _ghost_archive(
         db,
         user=user,
-        session_id="ghost-fresh",
+        session_id=_sid("ghost-fresh"),
         fleet_session_id=fleet_id,
         age=timedelta(minutes=2),
     )
@@ -1558,6 +1568,68 @@ def test_fleet_hides_ghost_registrations(
         for agent in group["agents"]
     }
 
-    assert "real-agent" in session_ids
-    assert "ghost-fresh" in session_ids
-    assert "ghost-stale" not in session_ids
+    assert _sid("real-agent") in session_ids
+    assert _sid("ghost-fresh") in session_ids
+    assert _sid("ghost-stale") not in session_ids
+
+
+def test_is_real_session_id_accepts_only_uuids() -> None:
+    from app.core.taskforce.active_sessions import _is_real_session_id
+
+    assert _is_real_session_id(str(uuid.uuid4())) is True
+    # UUIDv7 (the shape newer harnesses emit) is accepted too.
+    assert _is_real_session_id("019ef88a-2a02-7eb2-9f1e-558fb2182fda") is True
+    assert _is_real_session_id("outbox-e2e-2533628") is False
+    assert _is_real_session_id("diag-probe") is False
+    assert _is_real_session_id("demowork-log-test-1781759234") is False
+    assert _is_real_session_id("") is False
+    assert _is_real_session_id(None) is False
+
+
+def test_fleet_hides_synthetic_non_uuid_sessions(
+    client: TestClient,
+    db: Session,
+) -> None:
+    """Only genuine (UUID) sessions surface in the real roster.
+
+    Ad-hoc scripts/tests/probes POST /observe with slug session ids, which the
+    backend would otherwise turn into bogus fleet rows. They must not surface;
+    demo sessions keep their seeded slug ids.
+    """
+
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Guard")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    real_uuid = str(uuid.uuid4())
+    for sid in (real_uuid, "diag-probe", "outbox-selftest-123"):
+        _create_archive(
+            db, user=user, session_id=sid, imported_at=now, fleet_session_id=fleet_id
+        )
+    # A demo session keeps its slug id and stays visible (demo fleet seeds these).
+    demo_archive = _create_archive(
+        db,
+        user=user,
+        session_id="demowork-seed",
+        imported_at=now,
+        fleet_session_id=fleet_id,
+    )
+    demo_archive.is_demo = True
+    db.add(demo_archive)
+    db.commit()
+
+    body = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet", headers=headers
+    ).json()
+    session_ids = {
+        agent["session_id"]
+        for group in body["fleet_sessions"]
+        for agent in group["agents"]
+    }
+
+    assert real_uuid in session_ids  # genuine session surfaces
+    assert "demowork-seed" in session_ids  # demo slug session is exempt
+    assert "diag-probe" not in session_ids  # synthetic ids are hidden
+    assert "outbox-selftest-123" not in session_ids

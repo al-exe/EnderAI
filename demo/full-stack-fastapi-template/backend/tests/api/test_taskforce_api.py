@@ -28,7 +28,7 @@ from app.models import (
     User,
     V2Document,
 )
-from tests.utils.utils import random_email, random_lower_string
+from tests.utils.utils import random_email, random_lower_string, session_id_for
 
 REFERENCE_SESSION_ID = "123e4567-e89b-12d3-a456-426614174000"
 REFERENCE_OCCURRED_AT = "2026-05-23T19:00:01Z"
@@ -1484,7 +1484,7 @@ def test_discover_heartbeat_creates_archive_row(
         headers=headers,
         json={
             "prompt": "set up the roster",
-            "session_id": "tf225-alpha",
+            "session_id": session_id_for("tf225-alpha"),
             "cwd": "/home/alexlee/dev/EnderAI",
             "git_branch": "main",
             "min_score": 0.0,
@@ -1495,7 +1495,7 @@ def test_discover_heartbeat_creates_archive_row(
 
     archive = db.exec(
         select(TaskforceSessionArchive).where(
-            TaskforceSessionArchive.session_id == "tf225-alpha"
+            TaskforceSessionArchive.session_id == session_id_for("tf225-alpha")
         )
     ).one()
     assert archive.last_seen_at is not None
@@ -1513,7 +1513,7 @@ def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -
         headers=headers,
         json={
             "prompt": "working on the frontend",
-            "session_id": "tf225-sibling-alpha",
+            "session_id": session_id_for("tf225-sibling-alpha"),
             "cwd": "/home/alexlee/dev/EnderAI-frontend",
             "git_branch": "feature/checkout",
             "min_score": 0.0,
@@ -1528,7 +1528,7 @@ def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -
         headers=headers,
         json={
             "prompt": "working on the backend",
-            "session_id": "tf225-sibling-beta",
+            "session_id": session_id_for("tf225-sibling-beta"),
             "cwd": "/home/alexlee/dev/EnderAI-backend",
             "git_branch": "main",
             "min_score": 0.0,
@@ -1538,7 +1538,7 @@ def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -
     siblings = beta.json()["active_sessions"]
     assert len(siblings) == 1
     sibling = siblings[0]
-    assert sibling["session_id"] == "tf225-sibling-alpha"
+    assert sibling["session_id"] == session_id_for("tf225-sibling-alpha")
     assert sibling["cwd"] == "/home/alexlee/dev/EnderAI-frontend"
     assert sibling["active_document_id"] is None
     assert sibling["minutes_ago"] == 0
@@ -1550,13 +1550,13 @@ def test_discover_active_sessions_surfaces_sibling_session(client: TestClient) -
         headers=headers,
         json={
             "prompt": "still working on the frontend",
-            "session_id": "tf225-sibling-alpha",
+            "session_id": session_id_for("tf225-sibling-alpha"),
             "min_score": 0.0,
         },
     )
     assert alpha_again.status_code == 200, alpha_again.text
     siblings_for_alpha = alpha_again.json()["active_sessions"]
-    assert [s["session_id"] for s in siblings_for_alpha] == ["tf225-sibling-beta"]
+    assert [s["session_id"] for s in siblings_for_alpha] == [session_id_for("tf225-sibling-beta")]
 
 
 def test_discover_active_sessions_excludes_ended_sessions(
@@ -1570,7 +1570,7 @@ def test_discover_active_sessions_excludes_ended_sessions(
         headers=headers,
         json={
             "prompt": "ending this session",
-            "session_id": "tf225-ended",
+            "session_id": session_id_for("tf225-ended"),
             "min_score": 0.0,
         },
     )
@@ -1582,7 +1582,7 @@ def test_discover_active_sessions_excludes_ended_sessions(
         json={
             "kind": "final",
             "prompt": "wrapping up",
-            "session_id": "tf225-ended",
+            "session_id": session_id_for("tf225-ended"),
             "summary_points": ["Wrapped up the roster work."],
             "outcome": "shipped",
             "duration_ms": 1000,
@@ -1595,7 +1595,7 @@ def test_discover_active_sessions_excludes_ended_sessions(
         headers=headers,
         json={
             "prompt": "another session",
-            "session_id": "tf225-other",
+            "session_id": session_id_for("tf225-other"),
             "min_score": 0.0,
         },
     )
@@ -1614,7 +1614,7 @@ def test_observe_checkpoint_does_not_end_session(
         headers=headers,
         json={
             "prompt": "idle between turns",
-            "session_id": "tf228-checkpoint",
+            "session_id": session_id_for("tf228-checkpoint"),
             "min_score": 0.0,
         },
     )
@@ -1627,7 +1627,7 @@ def test_observe_checkpoint_does_not_end_session(
         json={
             "kind": "checkpoint",
             "prompt": "still thinking",
-            "session_id": "tf228-checkpoint",
+            "session_id": session_id_for("tf228-checkpoint"),
             "duration_ms": 1000,
         },
     )
@@ -1635,7 +1635,7 @@ def test_observe_checkpoint_does_not_end_session(
 
     archive = db.exec(
         select(TaskforceSessionArchive).where(
-            TaskforceSessionArchive.session_id == "tf228-checkpoint"
+            TaskforceSessionArchive.session_id == session_id_for("tf228-checkpoint")
         )
     ).one()
     assert archive.ended_at is None
@@ -1645,13 +1645,13 @@ def test_observe_checkpoint_does_not_end_session(
         headers=headers,
         json={
             "prompt": "another session",
-            "session_id": "tf228-checkpoint-other",
+            "session_id": session_id_for("tf228-checkpoint-other"),
             "min_score": 0.0,
         },
     )
     assert other.status_code == 200, other.text
     assert [s["session_id"] for s in other.json()["active_sessions"]] == [
-        "tf228-checkpoint"
+        session_id_for("tf228-checkpoint")
     ]
 
 
@@ -1666,7 +1666,7 @@ def test_observe_session_end_marks_session_ended(
         headers=headers,
         json={
             "prompt": "starting up",
-            "session_id": "tf228-session-end",
+            "session_id": session_id_for("tf228-session-end"),
             "min_score": 0.0,
         },
     )
@@ -1679,14 +1679,14 @@ def test_observe_session_end_marks_session_ended(
         json={
             "kind": "session_end",
             "prompt": "",
-            "session_id": "tf228-session-end",
+            "session_id": session_id_for("tf228-session-end"),
         },
     )
     assert observe.status_code == 202, observe.text
 
     archive = db.exec(
         select(TaskforceSessionArchive).where(
-            TaskforceSessionArchive.session_id == "tf228-session-end"
+            TaskforceSessionArchive.session_id == session_id_for("tf228-session-end")
         )
     ).one()
     assert archive.ended_at is not None
@@ -1696,7 +1696,7 @@ def test_observe_session_end_marks_session_ended(
         headers=headers,
         json={
             "prompt": "another session",
-            "session_id": "tf228-session-end-other",
+            "session_id": session_id_for("tf228-session-end-other"),
             "min_score": 0.0,
         },
     )
@@ -1717,7 +1717,7 @@ def test_discover_active_sessions_includes_document_summary(
             "kind": "checkpoint",
             "prompt": "Capture Postgres rotation notes",
             "client": "claude-code",
-            "session_id": "tf225-doc-session",
+            "session_id": session_id_for("tf225-doc-session"),
             "cwd": "/home/alexlee/dev/EnderAI-backend",
             "checkpoint_index": 1,
             "summary_points": ["Documented the Postgres rotation runbook."],
@@ -1743,7 +1743,7 @@ def test_discover_active_sessions_includes_document_summary(
         headers=headers,
         json={
             "prompt": "another terminal",
-            "session_id": "tf225-doc-sibling",
+            "session_id": session_id_for("tf225-doc-sibling"),
             "min_score": 0.0,
         },
     )
@@ -1751,7 +1751,7 @@ def test_discover_active_sessions_includes_document_summary(
     siblings = sibling.json()["active_sessions"]
     assert len(siblings) == 1
     entry = siblings[0]
-    assert entry["session_id"] == "tf225-doc-session"
+    assert entry["session_id"] == session_id_for("tf225-doc-session")
     assert entry["active_document_id"] == document_id
     assert entry["title"]
     assert entry["summary_markdown"]
@@ -1765,7 +1765,7 @@ def test_active_sessions_endpoint_returns_roster(client: TestClient) -> None:
         headers=headers,
         json={
             "prompt": "terminal one",
-            "session_id": "tf225-rail-one",
+            "session_id": session_id_for("tf225-rail-one"),
             "cwd": "/home/alexlee/dev/EnderAI",
             "min_score": 0.0,
         },
@@ -1775,7 +1775,7 @@ def test_active_sessions_endpoint_returns_roster(client: TestClient) -> None:
         headers=headers,
         json={
             "prompt": "terminal two",
-            "session_id": "tf225-rail-two",
+            "session_id": session_id_for("tf225-rail-two"),
             "cwd": "/home/alexlee/dev/EnderAI-frontend",
             "min_score": 0.0,
         },
@@ -1784,11 +1784,11 @@ def test_active_sessions_endpoint_returns_roster(client: TestClient) -> None:
     response = client.get(
         f"{settings.API_V1_STR}/v2/taskforce/active-sessions",
         headers=headers,
-        params={"session_id": "tf225-rail-two"},
+        params={"session_id": session_id_for("tf225-rail-two")},
     )
     assert response.status_code == 200, response.text
     sessions = response.json()["active_sessions"]
-    assert [s["session_id"] for s in sessions] == ["tf225-rail-one"]
+    assert [s["session_id"] for s in sessions] == [session_id_for("tf225-rail-one")]
 
 
 def test_active_sessions_scoped_per_actor(client: TestClient) -> None:
@@ -1800,7 +1800,7 @@ def test_active_sessions_scoped_per_actor(client: TestClient) -> None:
         headers=headers_a,
         json={
             "prompt": "user a session",
-            "session_id": "tf225-actor-a",
+            "session_id": session_id_for("tf225-actor-a"),
             "min_score": 0.0,
         },
     )

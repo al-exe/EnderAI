@@ -308,6 +308,10 @@ def get_active_sessions(
         limit=limit,
         max_age=max_age,
     )
+    # Never surface synthetic (non-UUID) sessions in the real roster; the demo
+    # space keeps its seeded slug-id rows. See _is_real_session_id.
+    if not demo:
+        rows = [row for row in rows if _is_real_session_id(row.session_id)]
     if not rows:
         return []
 
@@ -353,6 +357,28 @@ def _uuid_values(values: list[str]) -> list[uuid.UUID]:
         except (TypeError, ValueError):
             continue
     return result
+
+
+def _is_real_session_id(session_id: str | None) -> bool:
+    """True only for genuine harness session ids, which are UUIDs.
+
+    Real Claude Code / Cursor / Codex instances always identify a session with a
+    UUID. Ad-hoc scripts, tests, and probes use human-readable slugs
+    (``outbox-e2e-123``, ``diag-probe``, ``reset-e2e-...``). Each ``/observe``
+    POST auto-creates a session archive for whatever ``session_id`` it carries,
+    so those synthetic ids would otherwise surface as bogus roster rows. Gating
+    the *non-demo* roster on UUID-shaped ids keeps the invariant the product
+    promises: one real agent instance == one fleet row. Demo sessions are
+    exempt (the demo fleet intentionally seeds slug-id rows).
+    """
+
+    if not session_id:
+        return False
+    try:
+        uuid.UUID(str(session_id))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return True
 
 
 def _minutes_ago(now: datetime, value: datetime) -> int:
@@ -552,6 +578,14 @@ def _fleet_agent_public_from_archive(
     now_utc: datetime,
     force_inactive: bool = False,
 ) -> list[TaskforceFleetAgentPublic]:
+    # Drop synthetic (non-UUID) sessions so test/script ids never surface as
+    # roster rows; demo sessions keep their seeded slug ids. See
+    # _is_real_session_id. This covers both the active and Archive rosters.
+    archives = [
+        archive
+        for archive in archives
+        if archive.is_demo or _is_real_session_id(archive.session_id)
+    ]
     recent_activity_by_session = _recent_activity_by_session(
         session,
         actor=actor,

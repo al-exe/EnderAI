@@ -1,9 +1,23 @@
 import random
 import string
+import uuid
 
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+
+
+def session_id_for(label: str) -> str:
+    """Deterministic UUID session id for a readable label.
+
+    The fleet/active-session rosters only surface sessions whose id is a real
+    (UUID) session id (see ``active_sessions._is_real_session_id``), because the
+    backend mints a row for any ``session_id`` that hits ``/observe`` and we do
+    not want test/script slug ids to surface. Tests therefore derive a stable
+    UUID per readable label instead of using raw slugs.
+    """
+
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"tf-test/{label}"))
 
 
 def random_lower_string() -> str:
