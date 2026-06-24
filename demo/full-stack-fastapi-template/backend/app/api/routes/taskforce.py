@@ -37,6 +37,7 @@ from app.core.taskforce.fleet_sessions import (
     get_or_create_history_fleet_session,
     next_fleet_session_name,
     set_default_fleet_session,
+    sweep_stale_archives_to_history,
 )
 from app.core.taskforce.inbox import (
     claim_inbox_message,
@@ -647,9 +648,9 @@ def fleet_route(
 ) -> Any:
     """Group the current actor's active-session roster into session groups."""
 
-    # No automatic sweep: inactive agents stay in their group (shown gray) until
-    # the user archives them. We only ensure the Archive group exists.
+    # Auto-archive session agents whose last activity is older than 72 hours.
     history = get_or_create_history_fleet_session(session, current_user)
+    sweep_stale_archives_to_history(session, current_user)
 
     # Guarantee exactly one non-history group is flagged default so the badge —
     # and "new agents join here" — always has a target (incl. a lone session).

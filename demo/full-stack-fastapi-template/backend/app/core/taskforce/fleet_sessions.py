@@ -16,18 +16,21 @@ from app.models import (
 )
 
 DEFAULT_SESSION_NAME = "Session 1"
-# The user-controlled "Archive" bucket. Agents are never swept here
-# automatically — archiving is a deliberate, user-initiated drag (TF). The
-# ``is_history`` column name predates the rename and is kept for schema
-# stability; the display name is "Archive".
+# The user-controlled "Archive" bucket. Agents older than ``ARCHIVE_AFTER_HOURS``
+# are swept here automatically on ``GET /fleet``; users can still drag agents
+# into Archive sooner. The ``is_history`` column name predates the rename and
+# is kept for schema stability; the display name is "Archive".
 HISTORY_SESSION_NAME = "Archive"
 _SESSION_NUMBER = re.compile(r"^Session ([1-9][0-9]*)$")
 
 # How long an agent's last heartbeat can age before it is considered inactive
-# (gray "Inactive" state). Inactive agents stay put in their group — they are
-# not moved anywhere — until the user archives them. Matches MAX_AGE so an
-# agent stays live for a full working session before flipping to Inactive.
+# (gray "Inactive" state). Inactive agents stay in their group until they pass
+# ``ARCHIVE_AFTER_HOURS``, then the fleet sweep relocates them to Archive.
 INACTIVE_WINDOW_MINUTES = 8 * 60
+
+# Stale session agents are auto-archived once their last activity is this old.
+ARCHIVE_AFTER_HOURS = 72
+ARCHIVE_AFTER_MINUTES = ARCHIVE_AFTER_HOURS * 60
 
 
 def fleet_sessions_for_actor(
@@ -198,6 +201,61 @@ def archive_is_inactive(
     if last_seen_at is None:
         return True
     return _minutes_ago(now, last_seen_at) >= INACTIVE_WINDOW_MINUTES
+
+
+def _archive_reference_at(archive: TaskforceSessionArchive) -> datetime | None:
+    return (
+        archive.last_seen_at
+        or archive.ended_at
+        or archive.started_at
+        or archive.imported_at
+    )
+
+
+def archive_is_archivable(
+    archive: TaskforceSessionArchive,
+    *,
+    history_fleet_id: uuid.UUID,
+    now: datetime,
+) -> bool:
+    if archive.fleet_session_id == history_fleet_id:
+        return False
+    reference = _archive_reference_at(archive)
+    if reference is None:
+        return False
+    return _minutes_ago(now, reference) >= ARCHIVE_AFTER_MINUTES
+
+
+def sweep_stale_archives_to_history(
+    session: Session,
+    actor: User,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Move session agents idle for ``ARCHIVE_AFTER_HOURS`` into Archive.
+
+    Called from ``GET /fleet`` so the roster self-tidies without a background
+    job. Returns how many archives were relocated.
+    """
+
+    now = now or get_datetime_utc()
+    history = get_or_create_history_fleet_session(session, actor)
+    archives = list(
+        session.exec(
+            select(TaskforceSessionArchive)
+            .where(TaskforceSessionArchive.actor_id == actor.id)
+            .where(TaskforceSessionArchive.fleet_session_id != history.id)
+        ).all()
+    )
+    moved = 0
+    for archive in archives:
+        if not archive_is_archivable(
+            archive, history_fleet_id=history.id, now=now
+        ):
+            continue
+        move_archive_to_history(session, archive, actor, now=now)
+        moved += 1
+    return moved
 
 
 def move_archive_to_history(

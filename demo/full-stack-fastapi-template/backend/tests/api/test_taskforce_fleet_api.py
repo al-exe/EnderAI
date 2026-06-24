@@ -907,11 +907,12 @@ def test_observe_stamps_future_documents_without_moving_past_documents(
     assert legacy_global_doc.fleet_session_id is None
 
 
-def test_fleet_never_auto_moves_inactive_agents_to_archive(
+def test_fleet_keeps_recent_inactive_agents_out_of_archive(
     client: TestClient,
     db: Session,
     monkeypatch,
 ) -> None:
+    """Sub-72h inactive agents stay in their working group."""
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
@@ -955,7 +956,7 @@ def test_fleet_never_auto_moves_inactive_agents_to_archive(
         item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
     )
 
-    # The Archive group is renamed and stays empty — nothing is swept into it.
+    # The Archive group stays empty for agents younger than 72 hours.
     assert history["name"] == "Archive"
     assert history["agents"] == []
     status_by_id = {
@@ -972,6 +973,63 @@ def test_fleet_never_auto_moves_inactive_agents_to_archive(
     db.refresh(ended)
     assert idle.fleet_session_id == fleet_id
     assert ended.fleet_session_id == fleet_id
+
+
+def test_fleet_auto_archives_agents_older_than_72_hours(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Active sprint")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    recent = _create_archive(
+        db,
+        user=user,
+        session_id="still-recent",
+        imported_at=now - timedelta(hours=71),
+        fleet_session_id=fleet_id,
+    )
+    stale = _create_archive(
+        db,
+        user=user,
+        session_id="went-stale",
+        imported_at=now - timedelta(hours=73),
+        fleet_session_id=fleet_id,
+    )
+    db.add_all([recent, stale])
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    history = next(item for item in body["fleet_sessions"] if item["is_history"])
+    active_fleet = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
+    )
+
+    assert {agent["session_id"] for agent in active_fleet["agents"]} == {
+        "still-recent"
+    }
+    assert {agent["session_id"] for agent in history["agents"]} == {"went-stale"}
+    assert all(agent["status"] == "inactive" for agent in history["agents"])
+
+    db.refresh(recent)
+    db.refresh(stale)
+    assert recent.fleet_session_id == fleet_id
+    history_fleet = db.exec(
+        select(TaskforceFleetSession)
+        .where(TaskforceFleetSession.actor_id == user.id)
+        .where(TaskforceFleetSession.is_history.is_(True))
+    ).one()
+    assert stale.fleet_session_id == history_fleet.id
 
 
 def test_ended_session_stays_in_place_on_observe(
