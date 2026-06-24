@@ -138,8 +138,8 @@ def _search_profiles(
                 subtitle=row.role,
                 excerpt=match[1] or row.short_description,
                 updated_at=row.updated_at,
-                route="/v2/agents/$slug",
-                href=f"/v2/agents/{quote(row.slug, safe='')}",
+                route="/v2/profiles/$slug",
+                href=f"/v2/profiles/{quote(row.slug, safe='')}",
                 route_search=SearchRouteSearch(slug=row.slug),
             )
             for match, row in scored[:limit]

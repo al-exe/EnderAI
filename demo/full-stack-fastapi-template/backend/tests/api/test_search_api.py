@@ -164,7 +164,7 @@ def test_global_search_returns_taskforce_profiles_documents_and_sessions(
     body = search_res.json()
 
     assert body["profiles"][0]["title"] == "Quartz Reliability"
-    assert body["profiles"][0]["href"].startswith("/v2/agents/")
+    assert body["profiles"][0]["href"].startswith("/v2/profiles/")
     assert body["documents"][0]["title"] == "Quartz queue recovery"
     assert body["documents"][0]["href"].startswith("/v2/library/")
     assert body["sessions"][0]["href"].startswith("/v2/sessions/")

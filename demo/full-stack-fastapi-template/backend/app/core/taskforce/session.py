@@ -59,7 +59,7 @@ def _build_matched_specialist(routed: SpecialistScore) -> MatchedSpecialist:
         role=routed.specialist.role,
         confidence=round(routed.score, 4),
         band=routed.band if routed.band in {"high", "medium", "low"} else "low",
-        href=f"/v2/agents/{routed.specialist.slug}",
+        href=f"/v2/profiles/{routed.specialist.slug}",
         reasons=routed.reasons,
         linked_documents=linked_documents,
     )

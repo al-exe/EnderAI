@@ -957,7 +957,7 @@ def _ledger_row_public(row: Any) -> LedgerSessionRowPublic:
         specialist_slug=row.specialist_slug,
         specialist_name=row.specialist_name,
         specialist_href=(
-            f"/v2/agents/{row.specialist_slug}" if row.specialist_slug else None
+            f"/v2/profiles/{row.specialist_slug}" if row.specialist_slug else None
         ),
         documents=[
             LedgerDocRefPublic(
