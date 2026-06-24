@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.demo import ensure_demo_workspace
-from app.core.search import search_topics_and_cases
+from app.core.search import search_global
 from app.models import SearchResultsPublic
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -27,10 +27,10 @@ def search_route(
             detail="q must be at least 2 non-space characters",
         )
 
-    return search_topics_and_cases(
+    return search_global(
         session,
         q,
-        owner_id=current_user.id,
+        actor=current_user,
         demo=demo,
         limit_per_kind=limit_per_kind,
     )

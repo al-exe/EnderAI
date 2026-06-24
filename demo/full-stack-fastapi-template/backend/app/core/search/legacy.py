@@ -120,7 +120,9 @@ def _sort_hits(hits: list[_ScoredHit]) -> None:
     hits.sort(
         key=lambda scored: (
             -scored.score,
-            -(scored.hit.updated_at or datetime.min.replace(tzinfo=timezone.utc)).timestamp(),
+            -(
+                scored.hit.updated_at or datetime.min.replace(tzinfo=timezone.utc)
+            ).timestamp(),
             scored.hit.title.casefold(),
         )
     )
@@ -154,12 +156,13 @@ def _score_topic_hit(topic: TopicPublic, query: str) -> _ScoredHit | None:
         score=score,
         hit=SearchHitPublic(
             kind="topic",
-            id=topic.id,
+            id=str(topic.id),
             title=topic.title,
             subtitle=topic.workflow_key,
             excerpt=excerpt,
             updated_at=topic.updated_at or topic.last_used_at,
             route="/topics",
+            href=f"/topics?topicId={topic.id}",
             route_search=SearchRouteSearch(topicId=str(topic.id)),
         ),
     )
@@ -239,12 +242,13 @@ def _score_case_hit(case: CasePublic, query: str) -> _ScoredHit | None:
         score=score,
         hit=SearchHitPublic(
             kind="case",
-            id=case.id,
+            id=str(case.id),
             title=case.title,
             subtitle=case.topic_title,
             excerpt=excerpt,
             updated_at=case.updated_at,
             route="/cases",
+            href=f"/cases?caseId={case.id}",
             route_search=SearchRouteSearch(caseId=str(case.id)),
         ),
     )
@@ -273,12 +277,13 @@ def _score_skill_hit(skill: SkillPublic, query: str) -> _ScoredHit | None:
         score=score,
         hit=SearchHitPublic(
             kind="skill",
-            id=skill.id,
+            id=str(skill.id),
             title=skill.title,
             subtitle=_skill_subtitle(skill),
             excerpt=excerpt,
             updated_at=skill.updated_at or skill.created_at,
             route="/skills",
+            href=f"/skills?skillId={skill.id}",
             route_search=SearchRouteSearch(skillId=str(skill.id)),
         ),
     )
@@ -322,7 +327,9 @@ def _weighted_text_score(value: str | None, query: str, weight: int) -> int:
 
 
 def _match_joined(values: Iterable[str]) -> str | None:
-    filtered = [value.strip() for value in values if isinstance(value, str) and value.strip()]
+    filtered = [
+        value.strip() for value in values if isinstance(value, str) and value.strip()
+    ]
     if not filtered:
         return None
     return "\n".join(filtered)
