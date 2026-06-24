@@ -267,6 +267,7 @@ def _summary_for(
             current_user_id=current_user.id,
             demo=demo,
         ),
+        created_at=specialist.created_at,
     )
 
 
@@ -366,8 +367,7 @@ def list_agents(
     ]
     items.sort(
         key=lambda item: (
-            item.last_invoked_at is None,
-            -(item.last_invoked_at.timestamp() if item.last_invoked_at else 0),
+            -(item.created_at.timestamp() if item.created_at else 0),
             item.name.lower(),
         )
     )

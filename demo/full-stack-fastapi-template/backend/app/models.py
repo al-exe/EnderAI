@@ -1307,6 +1307,8 @@ class AgentSpecialistSummary(SQLModel):
     invocations_count: int = Field(default=0, ge=0)
     tokens_saved: int = Field(default=0, ge=0)
     last_invoked_at: datetime | None = None
+    created_at: datetime | None = None
+    created_at: datetime | None = None
 
 
 class AgentsListResponse(SQLModel):
