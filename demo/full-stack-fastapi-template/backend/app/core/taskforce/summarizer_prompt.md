@@ -20,7 +20,7 @@ fabricate.
 ```json
 {
   "materiality_score": 0.0-1.0,
-  "session_label": "…",               // one short sentence (≤80 chars) for the Sessions roster — what this chat is about, not the user's verbatim prompt
+  "session_label": "…",               // one complete sentence (≤255 chars) for the Sessions roster — what this chat is about, not the user's verbatim prompt
   "summary_points": ["…"],            // 0–6 short claim sentences
   "details_sections": [               // 0–4 sections, max 800 chars each
     {"anchor_id": "investigation", "markdown": "…"}
@@ -33,9 +33,9 @@ fabricate.
 }
 ```
 
-`session_label` is shown as the agent's display name in Fleet. Write it like a
-task title ("Mobile-friendly landing page for iPhone 15/17 Pro"), not a paste
-of the opening prompt.
+`session_label` is shown as the agent's display name in Fleet. Write one complete
+sentence that states what the session is working on. Do not truncate with an
+ellipsis — keep it under 255 characters. Do not paste the opening prompt verbatim.
 
 ## Anchor IDs
 

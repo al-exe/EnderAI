@@ -1607,7 +1607,7 @@ class TaskforceSessionArchive(SQLModel, table=True):
     branch: str | None = Field(default=None, max_length=255)
     cwd: str | None = Field(default=None, max_length=1024)
     title: str | None = Field(default=None, max_length=255)
-    conversation_summary: str | None = Field(default=None, max_length=120)
+    conversation_summary: str | None = Field(default=None, max_length=255)
     display_name: str | None = Field(default=None, max_length=120)
     started_at: datetime | None = Field(
         default=None,

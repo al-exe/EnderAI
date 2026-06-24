@@ -24,7 +24,8 @@ from app.models import TaskforceTranscriptTurn
 logger = logging.getLogger(__name__)
 
 SUMMARIZER_MODEL = "claude-haiku-4-5"
-PROMPT_VERSION = "2026-05-21.1"
+PROMPT_VERSION = "2026-06-24.1"
+SESSION_LABEL_MAX_LEN = 255
 
 # Pricing snapshot we charge against the user when ``record_usage`` lands a
 # ``tokens.consumed.taskforce_summarizer`` event. Falls back to a known-good
@@ -87,11 +88,11 @@ def _render_transcript(transcript: Sequence[TaskforceTranscriptTurn]) -> str:
 def _normalize_session_label(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    label = " ".join(value.split()).strip().rstrip(".,!?")
+    label = " ".join(value.split()).strip()
     if not label:
         return None
-    if len(label) > 80:
-        label = f"{label[:79].rstrip()}…"
+    if len(label) > SESSION_LABEL_MAX_LEN:
+        label = label[:SESSION_LABEL_MAX_LEN].rstrip()
     return label
 
 

@@ -25,7 +25,7 @@ def _summary(**kwargs: object) -> SummarizerResult:
 def test_summarize_opening_prompt_strips_polite_prefixes() -> None:
     assert (
         summarize_opening_prompt("Can you fix the checkout bug?")
-        == "Fixing the checkout bug"
+        == "Fixing the checkout bug?"
     )
 
 
@@ -50,6 +50,17 @@ def test_summarize_opening_prompt_keeps_first_sentence_only() -> None:
         summarize_opening_prompt("Wire automatic tax. Then add tests.")
         == "Wiring automatic tax"
     )
+
+
+def test_summarize_opening_prompt_preserves_long_first_sentence_without_ellipsis() -> None:
+    prompt = (
+        "There's a handoff doc between cursor and you for the demo, "
+        "what do I need to do before we walk through the checkout flow?"
+    )
+    label = summarize_opening_prompt(prompt)
+    assert "…" not in label
+    assert label.endswith("?")
+    assert "checkout flow" in label
 
 
 def test_resolve_session_label_prefers_haiku_session_label() -> None:
