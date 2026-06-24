@@ -10,6 +10,7 @@ and shadowed it. We re-export the V1 entrypoint at the package root
 so existing callers (``app/api/routes/search.py``) don't have to
 change their imports."""
 
+from app.core.search.global_search import search_global  # noqa: F401
 from app.core.search.legacy import search_topics_and_cases  # noqa: F401
 
-__all__ = ["search_topics_and_cases"]
+__all__ = ["search_global", "search_topics_and_cases"]

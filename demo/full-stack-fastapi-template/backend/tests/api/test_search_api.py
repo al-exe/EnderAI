@@ -115,3 +115,56 @@ def test_global_search_rejects_short_queries(client, normal_user_token_headers) 
         params={"q": " "},
     )
     assert response.status_code == 422, response.text
+
+
+def test_global_search_returns_taskforce_profiles_documents_and_sessions(
+    client,
+    normal_user_token_headers,
+) -> None:
+    profile_res = client.post(
+        "/api/v1/v2/agents",
+        headers=normal_user_token_headers,
+        json={
+            "name": "Quartz Reliability",
+            "role": "Distributed systems specialist",
+            "short_description": "Diagnoses quartz queue failures.",
+            "domain_tags": ["quartz", "queues"],
+        },
+    )
+    assert profile_res.status_code == 201, profile_res.text
+
+    document_res = client.post(
+        "/api/v1/v2/documents/",
+        headers=normal_user_token_headers,
+        json={
+            "title": "Quartz queue recovery",
+            "description": "Runbook for restoring quartz workers.",
+            "human_summary": "Quartz workers recover after lease rotation.",
+        },
+    )
+    assert document_res.status_code == 201, document_res.text
+
+    session_res = client.post(
+        "/api/v1/v2/taskforce/session/start",
+        headers=normal_user_token_headers,
+        json={
+            "prompt": "Investigate the quartz queue stall",
+            "cwd": "/workspace/quartz-service",
+            "client": "codex",
+        },
+    )
+    assert session_res.status_code == 201, session_res.text
+
+    search_res = client.get(
+        "/api/v1/search/",
+        headers=normal_user_token_headers,
+        params={"q": "quartz"},
+    )
+    assert search_res.status_code == 200, search_res.text
+    body = search_res.json()
+
+    assert body["profiles"][0]["title"] == "Quartz Reliability"
+    assert body["profiles"][0]["href"].startswith("/v2/agents/")
+    assert body["documents"][0]["title"] == "Quartz queue recovery"
+    assert body["documents"][0]["href"].startswith("/v2/library/")
+    assert body["sessions"][0]["href"].startswith("/v2/sessions/")

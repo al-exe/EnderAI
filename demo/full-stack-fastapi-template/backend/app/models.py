@@ -622,16 +622,28 @@ class SearchRouteSearch(SQLModel):
     topicId: str | None = None
     caseId: str | None = None
     skillId: str | None = None
+    sessionId: str | None = None
+    documentId: str | None = None
+    slug: str | None = None
 
 
 class SearchHitPublic(SQLModel):
-    kind: Literal["topic", "case", "skill"]
-    id: uuid.UUID
+    kind: Literal[
+        "topic",
+        "case",
+        "skill",
+        "session",
+        "profile",
+        "document",
+        "ledger",
+    ]
+    id: str
     title: str
     subtitle: str | None = None
     excerpt: str | None = None
     updated_at: datetime | None = None
-    route: Literal["/topics", "/cases", "/skills"]
+    route: str
+    href: str
     route_search: SearchRouteSearch = Field(default_factory=SearchRouteSearch)
 
 
@@ -639,9 +651,17 @@ class SearchResultsPublic(SQLModel):
     topics: list[SearchHitPublic] = Field(default_factory=list)
     cases: list[SearchHitPublic] = Field(default_factory=list)
     skills: list[SearchHitPublic] = Field(default_factory=list)
+    sessions: list[SearchHitPublic] = Field(default_factory=list)
+    profiles: list[SearchHitPublic] = Field(default_factory=list)
+    documents: list[SearchHitPublic] = Field(default_factory=list)
+    ledger: list[SearchHitPublic] = Field(default_factory=list)
     topic_count: int = 0
     case_count: int = 0
     skill_count: int = 0
+    session_count: int = 0
+    profile_count: int = 0
+    document_count: int = 0
+    ledger_count: int = 0
 
 
 class CaseCreate(SQLModel):
