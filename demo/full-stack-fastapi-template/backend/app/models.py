@@ -1737,6 +1737,7 @@ class TaskforceFleetSession(SQLModel, table=True):
     name: str = Field(min_length=1, max_length=120)
     is_history: bool = Field(default=False, nullable=False, index=True)
     is_default: bool = Field(default=False, nullable=False, index=True)
+    auto_archive_disabled: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),  # type: ignore
@@ -2076,6 +2077,7 @@ class TaskforceFleetSessionCreate(SQLModel):
 class TaskforceFleetSessionUpdate(SQLModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     is_default: bool | None = None
+    auto_archive_disabled: bool | None = None
 
 
 class TaskforceFleetSessionAssignment(SQLModel):
@@ -2088,6 +2090,7 @@ class TaskforceFleetSessionPublic(SQLModel):
     name: str
     is_history: bool = False
     is_default: bool = False
+    auto_archive_disabled: bool = False
     created_at: datetime
     updated_at: datetime
     agents: list[TaskforceFleetAgentPublic] = Field(default_factory=list)

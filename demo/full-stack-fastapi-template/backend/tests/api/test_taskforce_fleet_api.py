@@ -922,7 +922,7 @@ def test_fleet_keeps_recent_inactive_agents_out_of_archive(
     db: Session,
     monkeypatch,
 ) -> None:
-    """Sub-72h inactive agents stay in their working group."""
+    """Sub-24h inactive agents stay in their working group."""
     monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
     email, headers = _signup(client)
     user = _user_by_email(db, email)
@@ -966,7 +966,7 @@ def test_fleet_keeps_recent_inactive_agents_out_of_archive(
         item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
     )
 
-    # The Archive group stays empty for agents younger than 72 hours.
+    # The Archive group stays empty for agents younger than 24 hours.
     assert history["name"] == "Archive"
     assert history["agents"] == []
     status_by_id = {
@@ -985,7 +985,7 @@ def test_fleet_keeps_recent_inactive_agents_out_of_archive(
     assert ended.fleet_session_id == fleet_id
 
 
-def test_fleet_auto_archives_agents_older_than_72_hours(
+def test_fleet_auto_archives_agents_older_than_24_hours(
     client: TestClient,
     db: Session,
     monkeypatch,
@@ -1001,14 +1001,14 @@ def test_fleet_auto_archives_agents_older_than_72_hours(
         db,
         user=user,
         session_id=_sid("still-recent"),
-        imported_at=now - timedelta(hours=71),
+        imported_at=now - timedelta(hours=23),
         fleet_session_id=fleet_id,
     )
     stale = _create_archive(
         db,
         user=user,
         session_id=_sid("went-stale"),
-        imported_at=now - timedelta(hours=73),
+        imported_at=now - timedelta(hours=25),
         fleet_session_id=fleet_id,
     )
     db.add_all([recent, stale])
@@ -1040,6 +1040,56 @@ def test_fleet_auto_archives_agents_older_than_72_hours(
         .where(TaskforceFleetSession.is_history.is_(True))
     ).one()
     assert stale.fleet_session_id == history_fleet.id
+
+
+def test_fleet_skips_auto_archive_when_session_opted_out(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    fleet = _create_fleet(client, headers, "Long-lived sprint")
+    fleet_id = uuid.UUID(str(fleet["id"]))
+    now = datetime.now(timezone.utc)
+
+    disabled = client.patch(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet/{fleet_id}",
+        headers=headers,
+        json={"auto_archive_disabled": True},
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["auto_archive_disabled"] is True
+
+    stale = _create_archive(
+        db,
+        user=user,
+        session_id=_sid("kept-in-place"),
+        imported_at=now - timedelta(hours=48),
+        fleet_session_id=fleet_id,
+    )
+    db.add(stale)
+    db.commit()
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/taskforce/fleet",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    history = next(item for item in body["fleet_sessions"] if item["is_history"])
+    active_fleet = next(
+        item for item in body["fleet_sessions"] if item["id"] == str(fleet_id)
+    )
+
+    assert history["agents"] == []
+    assert {agent["session_id"] for agent in active_fleet["agents"]} == {
+        _sid("kept-in-place")
+    }
+
+    db.refresh(stale)
+    assert stale.fleet_session_id == fleet_id
 
 
 def test_ended_session_stays_in_place_on_observe(
