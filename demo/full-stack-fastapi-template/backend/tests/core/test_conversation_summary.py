@@ -94,6 +94,28 @@ def test_apply_conversation_summary_upgrades_verbatim_heuristic() -> None:
     assert archive.conversation_summary == "Mobile-friendly landing page for iPhone Pro"
 
 
+def test_apply_conversation_summary_upgrades_weak_greeting_label() -> None:
+    archive = TaskforceSessionArchive(
+        session_id="sess-1",
+        actor_id="00000000-0000-0000-0000-000000000001",
+        organization_id="00000000-0000-0000-0000-000000000002",
+        is_demo=False,
+        conversation_summary="Hi",
+    )
+    summary = _summary(
+        summary_points=["Investigate why Codex session titles stay on greetings"]
+    )
+    apply_conversation_summary_from_summary(
+        archive,
+        summary,
+        prompt="Investigate why Codex session titles stay on greetings",
+    )
+    assert (
+        archive.conversation_summary
+        == "Investigate why Codex session titles stay on greetings"
+    )
+
+
 def test_apply_conversation_summary_respects_user_display_name() -> None:
     archive = TaskforceSessionArchive(
         session_id="sess-1",

@@ -195,8 +195,8 @@ body="$(
             harness: $harness,
             checkpoint_index: (if $checkpoint_index == 0 then null else $checkpoint_index end),
             summary_points: ([
-                (if $last_user != "" then "User asked: " + $last_user else empty end),
-                (if $last_assistant != "" then "Codex reported: " + $last_assistant else empty end)
+                (if $last_user != "" then $last_user else empty end),
+                (if $last_assistant != "" then $last_assistant else empty end)
             ] | map(.[:1200])),
             details_sections: [{anchor_id: "codex-latest-turn", markdown: $details}],
             decisions: [],

@@ -26,7 +26,10 @@ from sqlalchemy import and_, desc, not_
 from sqlmodel import Session, col, select
 
 from app.core.taskforce.archive import _now, _repo_from_cwd
-from app.core.taskforce.conversation_summary import summarize_opening_prompt
+from app.core.taskforce.conversation_summary import (
+    is_weak_opening_label,
+    summarize_opening_prompt,
+)
 from app.core.taskforce.fleet_sessions import (
     get_or_create_default_fleet_session,
     history_fleet_session_for_actor,
@@ -169,6 +172,10 @@ def register_session_heartbeat(
         archive.title = cleaned_prompt[:255]
         if archive.conversation_summary is None:
             archive.conversation_summary = summarize_opening_prompt(cleaned_prompt)
+        elif is_weak_opening_label(archive.conversation_summary):
+            candidate = summarize_opening_prompt(cleaned_prompt)
+            if candidate and not is_weak_opening_label(candidate):
+                archive.conversation_summary = candidate
 
     archive.last_seen_at = now
     archive.updated_at = now

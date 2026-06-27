@@ -46,6 +46,7 @@ _IMPERATIVE_GERUNDS: dict[str, str] = {
 }
 
 _DIGEST_PREFIXES = ("Ran: ", "Touched ")
+_WEAK_OPENING_LABELS = {"hi", "hey", "hello"}
 
 
 def _normalize_label(text: str) -> str:
@@ -129,6 +130,15 @@ def _looks_like_verbatim_prompt(label: str, prompt: str) -> bool:
     return bool(re.match(r"^(hi|hey|hello)[,!]?\s", normalized_label))
 
 
+def is_weak_opening_label(label: str | None) -> bool:
+    """Whether the stored label is just a greeting placeholder."""
+
+    if not label:
+        return False
+    normalized = " ".join(label.split()).strip().lower().rstrip(".,!?:;")
+    return normalized in _WEAK_OPENING_LABELS
+
+
 def apply_conversation_summary_from_summary(
     archive: TaskforceSessionArchive,
     summary: SummarizerResult,
@@ -150,6 +160,12 @@ def apply_conversation_summary_from_summary(
         return
 
     if archive.conversation_summary is None:
+        archive.conversation_summary = label
+        return
+
+    if is_weak_opening_label(archive.conversation_summary) and not is_weak_opening_label(
+        label
+    ):
         archive.conversation_summary = label
         return
 
