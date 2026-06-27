@@ -147,9 +147,9 @@ def apply_conversation_summary_from_summary(
 ) -> None:
     """Refresh ``conversation_summary`` when the summarizer has a better label.
 
-    User-renamed sessions (``display_name`` set) are left alone. Haiku
-    ``session_label`` values replace heuristic first-pass labels; otherwise we
-    only fill in when nothing was captured yet.
+    User-renamed sessions (``display_name`` set) are left alone. Labels are
+    stable once set; Haiku may only fill a blank label or repair weak/verbatim
+    placeholders captured before a meaningful label existed.
     """
 
     if archive.display_name:
@@ -163,9 +163,8 @@ def apply_conversation_summary_from_summary(
         archive.conversation_summary = label
         return
 
-    if summary.session_label:
-        archive.conversation_summary = label
-        return
-
-    if _looks_like_verbatim_prompt(archive.conversation_summary, prompt):
+    if summary.session_label and (
+        is_weak_opening_label(archive.conversation_summary)
+        or _looks_like_verbatim_prompt(archive.conversation_summary, prompt)
+    ):
         archive.conversation_summary = label
