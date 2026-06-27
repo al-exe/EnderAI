@@ -648,7 +648,7 @@ def fleet_route(
 ) -> Any:
     """Group the current actor's active-session roster into session groups."""
 
-    # Auto-archive session agents whose last activity is older than 72 hours.
+    # Auto-archive session agents whose last activity is older than 24 hours.
     history = get_or_create_history_fleet_session(session, current_user)
     sweep_stale_archives_to_history(session, current_user)
 
@@ -691,6 +691,7 @@ def fleet_route(
                 name=fleet_session.name,
                 is_history=fleet_session.is_history,
                 is_default=fleet_session.is_default,
+                auto_archive_disabled=fleet_session.auto_archive_disabled,
                 created_at=fleet_session.created_at,
                 updated_at=fleet_session.updated_at,
                 agents=agents_by_fleet.get(fleet_session.id, []),
@@ -754,6 +755,7 @@ def create_fleet_session_route(
         name=fleet_session.name,
         is_history=fleet_session.is_history,
         is_default=fleet_session.is_default,
+        auto_archive_disabled=fleet_session.auto_archive_disabled,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=[],
@@ -783,6 +785,8 @@ def update_fleet_session_route(
     if body.is_default:
         # Exactly one default: this flips the flag here and clears it elsewhere.
         set_default_fleet_session(session, current_user, fleet_session)
+    if body.auto_archive_disabled is not None:
+        fleet_session.auto_archive_disabled = body.auto_archive_disabled
     fleet_session.updated_at = get_datetime_utc()
     session.add(fleet_session)
     session.commit()
@@ -797,6 +801,7 @@ def update_fleet_session_route(
         name=fleet_session.name,
         is_history=fleet_session.is_history,
         is_default=fleet_session.is_default,
+        auto_archive_disabled=fleet_session.auto_archive_disabled,
         created_at=fleet_session.created_at,
         updated_at=fleet_session.updated_at,
         agents=agents,

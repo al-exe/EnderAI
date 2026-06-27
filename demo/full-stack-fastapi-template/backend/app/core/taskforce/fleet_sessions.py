@@ -29,7 +29,7 @@ _SESSION_NUMBER = re.compile(r"^Session ([1-9][0-9]*)$")
 INACTIVE_WINDOW_MINUTES = 8 * 60
 
 # Stale session agents are auto-archived once their last activity is this old.
-ARCHIVE_AFTER_HOURS = 72
+ARCHIVE_AFTER_HOURS = 24
 ARCHIVE_AFTER_MINUTES = ARCHIVE_AFTER_HOURS * 60
 
 
@@ -217,9 +217,14 @@ def archive_is_archivable(
     *,
     history_fleet_id: uuid.UUID,
     now: datetime,
+    fleet_sessions_by_id: dict[uuid.UUID, TaskforceFleetSession] | None = None,
 ) -> bool:
     if archive.fleet_session_id == history_fleet_id:
         return False
+    if archive.fleet_session_id is not None and fleet_sessions_by_id is not None:
+        fleet_session = fleet_sessions_by_id.get(archive.fleet_session_id)
+        if fleet_session is not None and fleet_session.auto_archive_disabled:
+            return False
     reference = _archive_reference_at(archive)
     if reference is None:
         return False
@@ -240,6 +245,10 @@ def sweep_stale_archives_to_history(
 
     now = now or get_datetime_utc()
     history = get_or_create_history_fleet_session(session, actor)
+    fleet_sessions_by_id = {
+        fleet_session.id: fleet_session
+        for fleet_session in fleet_sessions_for_actor(session, actor)
+    }
     archives = list(
         session.exec(
             select(TaskforceSessionArchive)
@@ -250,7 +259,10 @@ def sweep_stale_archives_to_history(
     moved = 0
     for archive in archives:
         if not archive_is_archivable(
-            archive, history_fleet_id=history.id, now=now
+            archive,
+            history_fleet_id=history.id,
+            now=now,
+            fleet_sessions_by_id=fleet_sessions_by_id,
         ):
             continue
         move_archive_to_history(session, archive, actor, now=now)
