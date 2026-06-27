@@ -636,7 +636,7 @@ fi
     assert discover["prompt"] == "Copy the Fleet behavior"
     assert "Prior decision" in prompt_result.stdout
     assert "Use the existing session archive." in prompt_result.stdout
-    assert "Live sibling agents from Taskforce" in prompt_result.stdout
+    assert "Taskforce live siblings" in prompt_result.stdout
     assert "EnderAI-frontend@feature/fleet" in prompt_result.stdout
     assert "Polishing Sessions grouping." in prompt_result.stdout
 
@@ -735,6 +735,10 @@ if [[ "$url" == *session/turn-ended* ]]; then
     printf '204'
     exit 0
 fi
+if [[ "$url" == *session/inbox/claim* ]]; then
+    printf '{}'
+    exit 0
+fi
 printf '%s' "$data" > "$OBSERVE_FILE"
 printf '%s' "$CURL_RESPONSE" > "$output_file"
 printf '200'
@@ -783,8 +787,8 @@ printf '200'
     assert observe["transcript"] == []
     assert observe["harness"]["model_id"] == "gpt-5.5"
     assert observe["summary_points"] == [
-        "User asked: Fix the Codex Taskforce hooks",
-        "Codex reported: Codex hooks are wired.",
+        "Fix the Codex Taskforce hooks",
+        "Codex hooks are wired.",
     ]
     assert observe["details_sections"][0]["anchor_id"] == "codex-latest-turn"
     assert (

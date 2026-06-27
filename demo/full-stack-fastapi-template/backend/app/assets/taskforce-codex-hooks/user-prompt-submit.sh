@@ -9,6 +9,10 @@ readonly LEGACY_TOKEN_FILE="${HOME}/.enderai_mcp_token"
 readonly STATE_DIR="${HOME}/.taskforce"
 readonly BACKEND_URL="${ENDERAI_BACKEND_URL:-https://enderai-backend.onrender.com}"
 readonly TOKEN_BUDGET="${TASKFORCE_PREAMBLE_BUDGET:-1500}"
+readonly DISCOVER_MAX="${TASKFORCE_DISCOVER_MAX:-2}"
+readonly DISCOVER_SUMMARY_CHARS="${TASKFORCE_DISCOVER_SUMMARY_CHARS:-140}"
+readonly FLEET_MAX="${TASKFORCE_FLEET_MAX:-3}"
+readonly FLEET_SUMMARY_CHARS="${TASKFORCE_FLEET_SUMMARY_CHARS:-120}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/git-context.sh"
@@ -97,25 +101,24 @@ fi
 match_count="$(jq '.matches | length' "$response_file" 2>/dev/null || echo 0)"
 discover_block=""
 if [[ "$match_count" != "0" ]]; then
-    preamble_text="$(jq -r --argjson budget_chars "$((TOKEN_BUDGET * 4))" '
-        .matches as $matches
-        | reduce range(0; ($matches | length)) as $i ([0, ""];
-            .[1] as $acc
-            | .[0] as $used
-            | $matches[$i] as $m
-            | ($m.title + " - score " + ($m.score | tostring) + " - " + ($m.summary_markdown // "")) as $entry
-            | ($used + ($entry | length)) as $next
-            | if $next > $budget_chars then .
-              else [$next, $acc + "\n[" + $m.title + "] (" + $m.confidence_band + ", " + ($m.score | tostring) + ")\n" + ($m.summary_markdown // "(no summary)") + (if $m.outcome then "\nOutcome: " + $m.outcome else "" end) + "\n"]
-              end
+    preamble_text="$(jq -r \
+        --argjson max_items "$DISCOVER_MAX" \
+        --argjson summary_chars "$DISCOVER_SUMMARY_CHARS" \
+        --argjson budget_chars "$((TOKEN_BUDGET * 4))" '
+        .matches[:$max_items]
+        | map(
+            ((.title // "Untitled") | gsub("\n"; " ") | gsub("\\s+"; " ")) as $title
+            | ((.summary_markdown // .outcome // "") | gsub("\n"; " ") | gsub("\\s+"; " ")) as $summary
+            | ("- " + $title + (if $summary != "" then ": " + ($summary[:$summary_chars]) else "" end))
           )
-        | .[1]
+        | join("\n")
+        | .[:$budget_chars]
     ' "$response_file" 2>/dev/null)"
 
     if [[ -n "$preamble_text" ]]; then
-        discover_block="Related prior work from Taskforce:
+        discover_block="Taskforce prior context (${match_count} match(es)):
 ${preamble_text}
-Use this as prior context when it is relevant to the user's request."
+Use only if relevant."
     fi
 fi
 
@@ -136,26 +139,30 @@ if [[ "${TASKFORCE_FLEET_INJECT:-1}" != "0" ]]; then
             | select(.session_id != $self)
             | select((.minutes_ago // 99999) <= $maxmin)
             | select(((.status // "") == "running") or ((.status // "") == "waiting") or ((.status // "") == "active")) ]'
-        sib_text="$(jq -r --arg self "$session_id" --argjson maxmin "${TASKFORCE_FLEET_MAX_MIN:-480}" "
+        sib_text="$(jq -r \
+            --arg self "$session_id" \
+            --argjson maxmin "${TASKFORCE_FLEET_MAX_MIN:-480}" \
+            --argjson max_items "$FLEET_MAX" \
+            --argjson summary_chars "$FLEET_SUMMARY_CHARS" "
             ${sib_filter}
             | map(
-                ((.summary_markdown // \"\") | gsub(\"\n\";\" \")) as \$sum
-                | ((.title // \"\") | gsub(\"\n\";\" \")) as \$title
-                | ((.display_name // \"untitled\") | gsub(\"\n\";\" \")) as \$name
-                | (if \$sum != \"\" then (\$sum | .[0:240])
+                ((.summary_markdown // \"\") | gsub(\"\n\";\" \") | gsub(\"\\\\s+\"; \" \")) as \$sum
+                | ((.title // \"\") | gsub(\"\n\";\" \") | gsub(\"\\\\s+\"; \" \")) as \$title
+                | ((.display_name // \"untitled\") | gsub(\"\n\";\" \") | gsub(\"\\\\s+\"; \" \")) as \$name
+                | (if \$sum != \"\" then (\$sum | .[0:\$summary_chars])
                    elif \$title != \"\" then \$title
-                   else (\$name | .[0:90]) + \"  (just started - no work summary yet)\" end) as \$desc
+                   else (\$name | .[0:90]) + \" (just started)\" end) as \$desc
                 | \"- \" + (.repo // \"?\") + (if .branch then \"@\"+.branch else \"\" end)
-                  + \" (\" + (.status // \"?\") + \", \" + ((.minutes_ago // 0)|tostring) + \"m ago)\"
-                  + \"\n    \" + \$desc )
-            | .[0:6] | join(\"\n\")
+                  + \": \" + (.status // \"?\") + \" \" + ((.minutes_ago // 0)|tostring) + \"m\"
+                  + (if \$desc != \"\" then \" - \" + \$desc else \"\" end) )
+            | .[0:\$max_items] | join(\"\n\")
         " "$fleet_response_file" 2>/dev/null)"
 
         if [[ -n "$sib_text" ]]; then
             sib_count="$(jq -r --arg self "$session_id" --argjson maxmin "${TASKFORCE_FLEET_MAX_MIN:-480}" "${sib_filter} | length" "$fleet_response_file" 2>/dev/null || echo 0)"
-            fleet_block="Live sibling agents from Taskforce:
+            fleet_block="Taskforce live siblings (${sib_count}):
 ${sib_text}
-Use this as current coordination context when it is relevant to the user's request."
+Use only for coordination if relevant."
             log "fleet: ${sib_count} live siblings injected"
         else
             log "fleet: no live siblings"

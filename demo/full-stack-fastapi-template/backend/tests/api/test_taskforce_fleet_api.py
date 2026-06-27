@@ -544,6 +544,64 @@ def test_codex_session_heartbeat_creates_fleet_agent_before_first_prompt(
     assert agent["summary_markdown"] == ""
 
 
+def test_codex_greeting_label_updates_after_meaningful_prompt(
+    client: TestClient,
+    db: Session,
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = _sid("codex-greeting-session")
+
+    heartbeat = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/session/heartbeat",
+        headers=headers,
+        json={
+            "session_id": session_id,
+            "client": "codex",
+            "model_id": "gpt-5.5",
+            "source": "startup",
+        },
+    )
+    assert heartbeat.status_code == 204, heartbeat.text
+
+    greeting = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "hi",
+            "session_id": session_id,
+            "client": "codex",
+            "min_score": 0.0,
+        },
+    )
+    assert greeting.status_code == 200, greeting.text
+    assert _agent_in_fleet(client, headers, session_id)["display_name"] == "Hi"
+
+    meaningful = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/discover",
+        headers=headers,
+        json={
+            "prompt": "Fix Codex session-agent title parity",
+            "session_id": session_id,
+            "client": "codex",
+            "min_score": 0.0,
+        },
+    )
+    assert meaningful.status_code == 200, meaningful.text
+
+    archive = db.exec(
+        select(TaskforceSessionArchive).where(
+            TaskforceSessionArchive.actor_id == user.id,
+            TaskforceSessionArchive.session_id == session_id,
+        )
+    ).one()
+    assert archive.conversation_summary == "Fixing Codex session-agent title parity"
+    assert (
+        _agent_in_fleet(client, headers, session_id)["display_name"]
+        == "Fixing Codex session-agent title parity"
+    )
+
+
 def _agent_in_fleet(
     client: TestClient, headers: dict[str, str], session_id: str
 ) -> dict[str, object]:
