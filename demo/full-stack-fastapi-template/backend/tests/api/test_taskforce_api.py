@@ -982,6 +982,45 @@ def test_session_observe_created_document_stamps_produced_by_client(
     assert document.produced_by_client == "codex"
 
 
+def test_session_observe_document_title_uses_summarized_label(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    _, headers = _signup(client)
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": (
+                "<user_query>\n"
+                "let's batch up a round of fixes for Taskforce. the first one "
+                "is sessions should archive agents in 24 hrs instead of 72.\n"
+                "</user_query>"
+            ),
+            "client": "cursor",
+            "session_id": "title-label-test",
+            "summary_points": [
+                "Reduce session auto-archive window from 72 hours to 24 hours."
+            ],
+            "duration_ms": 500,
+        },
+    )
+    assert response.status_code == 202, response.text
+    document = db.exec(
+        select(V2Document).where(
+            V2Document.id == uuid.UUID(response.json()["document_id"])
+        )
+    ).one()
+    assert document.title == (
+        "Reduce session auto-archive window from 72 hours to 24 hours."
+    )
+    assert "<user_query>" not in document.title
+
+
 def test_session_observe_preserves_cursor_client_over_claude_code(
     client: TestClient,
     db: Session,

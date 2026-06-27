@@ -93,6 +93,7 @@ from app.models import (
     TaskforceSessionStartRequest,
     TaskforceSessionStartResponse,
     TaskforceSessionTurnEndedRequest,
+    User,
     V2Document,
     V2DocumentDetailsSection,
     V2DocumentUpdate,
@@ -1001,7 +1002,26 @@ def _ledger_row_public(row: Any) -> LedgerSessionRowPublic:
         cache_write_tokens=row.cache_write_tokens,
         source=row.source,
         transcript_available=row.transcript_available,
+        document_relationship=row.document_relationship,
+        session_href=f"/v2/sessions/{row.session_id}",
     )
+
+
+def _ledger_org_for_document(
+    document: V2Document,
+    current_user: User,
+) -> uuid.UUID | None:
+    """Resolve which org bucket to query for document session provenance."""
+
+    if document.owner_id != current_user.id:
+        return None
+    if document.organization_id is not None:
+        if current_user.organization_id != document.organization_id:
+            return None
+        return document.organization_id
+    # Private docs have no organization_id on the row, but observe metrics
+    # still land under the owner's org when they belong to one.
+    return current_user.organization_id
 
 
 @router.get("/documents/{document_id}/sessions", response_model=LedgerResponse)
@@ -1024,10 +1044,8 @@ def document_sessions_route(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    if (
-        current_user.organization_id is None
-        or document.organization_id != current_user.organization_id
-    ):
+    ledger_org_id = _ledger_org_for_document(document, current_user)
+    if ledger_org_id is None:
         return LedgerResponse(
             organization_id=current_user.organization_id,
             total=0,
@@ -1038,14 +1056,14 @@ def document_sessions_route(
 
     page = ledger_sessions(
         session,
-        organization_id=current_user.organization_id,
+        organization_id=ledger_org_id,
         is_demo=demo,
         document_id=document.id,
         limit=limit,
         offset=offset,
     )
     return _ledger_response_from_page(
-        organization_id=current_user.organization_id,
+        organization_id=ledger_org_id,
         page=page,
     )
 

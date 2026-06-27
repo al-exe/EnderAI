@@ -2197,6 +2197,8 @@ class LedgerSessionRowPublic(SQLModel):
     cache_write_tokens: int = 0
     source: str | None = None
     transcript_available: bool = False
+    document_relationship: Literal["produced", "reused", "touched"] | None = None
+    session_href: str | None = None
 
 
 class LedgerSessionDetailPublic(LedgerSessionRowPublic):

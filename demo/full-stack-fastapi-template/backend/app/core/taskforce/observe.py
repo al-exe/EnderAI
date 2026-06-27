@@ -49,7 +49,9 @@ from app.core.taskforce.evolution import mark_session_for_evolution
 from app.core.taskforce.materiality import assess_materiality
 from app.core.taskforce.conversation_summary import (
     apply_conversation_summary_from_summary,
+    resolve_session_label,
 )
+from app.core.taskforce.session_activity import prepare_user_prompt
 from app.core.taskforce.summarizer import (
     PROMPT_VERSION,
     SUMMARIZER_MODEL,
@@ -455,17 +457,13 @@ def _is_digest_title(text: str) -> bool:
 
 
 def _document_title(request: TaskforceObserveRequest, summary: SummarizerResult) -> str:
-    """Pick a human-readable title — never a 'Ran: …'/'Touched …' digest line.
+    """Pick a human-readable title — never a raw prompt dump or digest line."""
 
-    Checkpoint turns arrive with an empty prompt and only read-only commands, so
-    the free digest's first point is a raw shell one-liner. Prefer the
-    originating prompt, then the first prose summary point, before the generic
-    fallback.
-    """
-
-    prompt = request.prompt.strip()
-    if prompt:
-        return prompt[:255]
+    cleaned_prompt = prepare_user_prompt(request.prompt, request.client)
+    if cleaned_prompt:
+        label = resolve_session_label(summary, prompt=cleaned_prompt)
+        if label:
+            return label[:255]
     for point in summary.summary_points:
         candidate = point.strip()
         if candidate and not _is_digest_title(candidate):
@@ -498,7 +496,7 @@ def _create_document_from_summary(
         produced_by_client=request.client,
         fleet_session_id=fleet_session_id,
         title=title,
-        description=request.prompt.strip()[:500],
+        description=prepare_user_prompt(request.prompt, request.client)[:500],
         human_summary="",
         ai_generated_summary=" ".join(summary.summary_points)[:600],
         collaborators=[],

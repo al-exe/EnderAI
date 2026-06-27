@@ -145,7 +145,61 @@ def test_document_sessions_lists_document_provenance(
     assert row["actor_id"] == str(bob.id)
     assert row["client"] == "claude-code"
     assert row["cross_boundary"] is True
+    assert row["document_relationship"] == "reused"
     assert "document.consulted" in row["kinds"]
+
+
+def test_document_sessions_lists_private_doc_provenance(
+    client: TestClient,
+    db: Session,
+    monkeypatch,
+) -> None:
+    """Private docs should still back-link to the owner's observe session."""
+
+    monkeypatch.setenv("TASKFORCE_OBSERVE_SHADOW", "0")
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    session_id = str(uuid.uuid4())
+
+    observe = client.post(
+        f"{settings.API_V1_STR}/v2/taskforce/observe",
+        headers=headers,
+        json={
+            "kind": "final",
+            "prompt": (
+                "<user_query>\n"
+                "Batch Taskforce fixes: shorten auto-archive to 24 hours\n"
+                "</user_query>"
+            ),
+            "client": "cursor",
+            "session_id": session_id,
+            "visibility": "private",
+            "summary_points": [
+                "Reduce session auto-archive window from 72 hours to 24 hours."
+            ],
+            "duration_ms": 1000,
+        },
+    )
+    assert observe.status_code == 202, observe.text
+    document_id = observe.json()["document_id"]
+
+    document = db.exec(
+        select(V2Document).where(V2Document.id == uuid.UUID(document_id))
+    ).one()
+    assert document.visibility == "private"
+    assert document.organization_id is None
+
+    resp = client.get(f"{_DOCUMENTS}/{document_id}/sessions", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] >= 1, body
+    row = next(
+        item for item in body["rows"] if item["session_id"] == session_id
+    )
+    assert row["document_relationship"] == "produced"
+    assert row["session_href"] == f"/v2/sessions/{session_id}"
+    assert user.organization_id is not None
+    assert body["organization_id"] == str(user.organization_id)
 
 
 def test_ledger_client_filter(client: TestClient, db: Session) -> None:
