@@ -11,6 +11,13 @@ DEMO_SEED_VERSION = 1
 ALLOWED_CHANGE_KINDS = {"code", "config", "infra", "docs", "test"}
 CHANGE_KIND_ALIASES = {"sql": "config"}
 
+# The demo experience is V2-only (documents, agent profiles, metrics). The
+# legacy V1 demo surfaces (topics / cases / skills) are deprecated and no longer
+# seeded. Flip to True to restore the legacy seeding; the legacy code path is
+# removed entirely in the V1 de-fork follow-up. Annotated as ``bool`` (not
+# ``Literal[False]``) so the retained legacy branch is not flagged unreachable.
+SEED_V1_DEMO: bool = False
+
 
 def _command(cmd: str, purpose: str, result: str) -> dict[str, Any]:
     return {
@@ -1296,6 +1303,16 @@ DEMO_TOPICS: list[dict[str, Any]] = [
 
 
 def ensure_demo_workspace(session: Session, user: User) -> bool:
+    if not SEED_V1_DEMO:
+        # V2-only demo: do not seed deprecated V1 topics/cases/skills. Mark the
+        # account as demo-seeded so login/lazy paths don't retry; V2 documents
+        # are cloned by the v2_documents routes and agents/metrics by the seed
+        # scripts.
+        if user.demo_seeded_at is None:
+            user.demo_seeded_at = get_datetime_utc()
+            session.add(user)
+        return False
+
     if user.demo_seeded_at is not None:
         return ensure_demo_skills_for_owner(session, user.id) > 0
 

@@ -36,8 +36,8 @@ DEMO_SEED: list[dict[str, Any]] = [
             "full timeline, and the operational record used to prevent the "
             "next recurrence."
         ),
-        "created_at": _dt(2026, 5, 10),
-        "updated_at": _dt(2026, 5, 12),
+        "created_at": _dt(2026, 6, 10),
+        "updated_at": _dt(2026, 6, 12),
         "collaborators": ["Alex Lee", "Nia Patel", "Jordan Kim", "Sam Rivera"],
         "ai_generated_summary": (
             "XYZ Corp traffic hit stale bridge routes after a bridge-controller "
@@ -717,8 +717,8 @@ DEMO_SEED: list[dict[str, Any]] = [
             "Details, with the UX research, data model rationale, and "
             "rollout plan that justifies the shape."
         ),
-        "created_at": _dt(2026, 5, 13),
-        "updated_at": _dt(2026, 5, 14),
+        "created_at": _dt(2026, 6, 13),
+        "updated_at": _dt(2026, 6, 14),
         "collaborators": ["Alex Lee", "Jordan Kim", "Riley Chen"],
         "ai_generated_summary": (
             "The V2 document model should keep executive summaries short "
@@ -1311,8 +1311,8 @@ DEMO_SEED: list[dict[str, Any]] = [
             "v2 users and the operational guardrails the team learned "
             "the hard way."
         ),
-        "created_at": _dt(2026, 5, 15),
-        "updated_at": _dt(2026, 5, 17),
+        "created_at": _dt(2026, 6, 15),
+        "updated_at": _dt(2026, 6, 17),
         "collaborators": ["Alex Lee", "Sam Rivera"],
         "ai_generated_summary": (
             "The hosted MCP setup now emphasizes file-backed token "
@@ -1360,7 +1360,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         )
                     },
                     {
-                        "text": ("`~/.enderai_mcp_token` is the canonical location"),
+                        "text": ("`~/.taskforce_mcp_token` is the canonical location"),
                         "evidence_anchor_id": "token-store",
                     },
                     {
@@ -1368,7 +1368,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                             ", and the setup script writes the file with "
                             "0600 permissions so other users on the same "
                             "machine cannot read it. The script also "
-                            "exports `ENDERAI_MCP_TOKEN` for the current "
+                            "exports `TASKFORCE_MCP_TOKEN` for the current "
                             "shell, which is why a *new* shell is what "
                             "you need after rotation."
                         )
@@ -1409,7 +1409,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "text": (
                             ". The rotation command invalidates the old "
                             "token, writes the new one to "
-                            "`~/.enderai_mcp_token`, and prints the "
+                            "`~/.taskforce_mcp_token`, and prints the "
                             "fresh-terminal reminder. Tokens have a "
                             "default 30-day TTL so even tokens that "
                             "are forgotten will eventually rotate "
@@ -1529,7 +1529,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                     },
                     {
                         "text": (
-                            "Do not commit `~/.enderai_mcp_token`, do "
+                            "Do not commit `~/.taskforce_mcp_token`, do "
                             "not paste tokens into chat, and do not "
                             "share a single token across multiple "
                             "operators"
@@ -1591,8 +1591,8 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "The setup flow tells users to start from a "
                         "fresh terminal after creating or rotating an "
                         "MCP credential so the shell reloads "
-                        "`ENDERAI_MCP_TOKEN` from "
-                        "`~/.enderai_mcp_token`.",
+                        "`TASKFORCE_MCP_TOKEN` from "
+                        "`~/.taskforce_mcp_token`.",
                         "",
                         "Reason:",
                         "",
@@ -1614,22 +1614,22 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "<!-- evidence-anchor: token-store -->",
                         "## File-Backed Token Store",
                         "",
-                        "Canonical location: `~/.enderai_mcp_token`.",
+                        "Canonical location: `~/.taskforce_mcp_token`.",
                         "",
                         "Properties:",
                         "",
                         "- written with mode 0600",
                         "- contains exactly one token, no surrounding whitespace",
                         "- read by the MCP client at startup and "
-                        "exported as `ENDERAI_MCP_TOKEN` for the "
+                        "exported as `TASKFORCE_MCP_TOKEN` for the "
                         "current shell by the setup script",
                         "",
                         "Setup script extract:",
                         "",
                         "```bash",
                         "umask 077",
-                        'printf \'%s\' "$TOKEN" > "$HOME/.enderai_mcp_token"',
-                        'export ENDERAI_MCP_TOKEN="$TOKEN"',
+                        'printf \'%s\' "$TOKEN" > "$HOME/.taskforce_mcp_token"',
+                        'export TASKFORCE_MCP_TOKEN="$TOKEN"',
                         "echo 'Open a fresh terminal to use the new token.'",
                         "```",
                         "",
@@ -1652,7 +1652,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "```text",
                         "$ mcp whoami",
                         "email:   alex@example.com",
-                        "tenant:  enderai-internal",
+                        "tenant:  taskforce-internal",
                         "token:   short-id mcp_***xyz",
                         "expires: 2026-06-14T00:00:00Z",
                         "```",
@@ -1681,15 +1681,15 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "```",
                         "",
                         "It invalidates the previous token, writes the "
-                        "new one to `~/.enderai_mcp_token`, and prints "
+                        "new one to `~/.taskforce_mcp_token`, and prints "
                         "the fresh-terminal reminder.",
                         "",
                         "Manual rotation (when the CLI is not available):",
                         "",
-                        "1. log in to the EnderAI dashboard",
+                        "1. log in to the Taskforce dashboard",
                         "2. revoke the existing token",
                         "3. create a new token with the same scope",
-                        "4. paste it into `~/.enderai_mcp_token` (0600 permissions)",
+                        "4. paste it into `~/.taskforce_mcp_token` (0600 permissions)",
                         "5. open a fresh terminal",
                         "6. run `mcp whoami` to confirm",
                         "",
@@ -1723,7 +1723,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "",
                         "- GitHub Actions: store the token in an "
                         "encrypted secret and reference it as "
-                        "`${{ secrets.ENDERAI_MCP_TOKEN }}`",
+                        "`${{ secrets.TASKFORCE_MCP_TOKEN }}`",
                         "- GitLab CI: store the token as a masked protected variable",
                         "- both flows inject the token into the "
                         "environment without writing it to disk",
@@ -1796,8 +1796,8 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "",
                         "- **stale shell** — the environment has an "
                         "older token. Diagnostic: `echo "
-                        "$ENDERAI_MCP_TOKEN` differs from "
-                        "`cat ~/.enderai_mcp_token`. Fix: open a "
+                        "$TASKFORCE_MCP_TOKEN` differs from "
+                        "`cat ~/.taskforce_mcp_token`. Fix: open a "
                         "new terminal.",
                         "- **expired token** — server rejects the "
                         "token. Diagnostic: `mcp whoami` returns "
@@ -1805,7 +1805,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "flow.",
                         "- **network egress** — the client cannot "
                         "reach the MCP endpoint. Diagnostic: "
-                        "`curl -fsS https://mcp.enderai.com/health` "
+                        "`curl -fsS https://mcp.taskforce.tools/health` "
                         "fails. Fix: confirm corporate proxy / "
                         "firewall allows traffic to the MCP host.",
                         "- **clock skew** — the client clock is more "
@@ -1829,7 +1829,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "",
                         "Do not:",
                         "",
-                        "- commit `~/.enderai_mcp_token` to a repo",
+                        "- commit `~/.taskforce_mcp_token` to a repo",
                         "- paste tokens into chat, email, or screenshots",
                         "- share a single token across multiple "
                         "operators (use one token per operator so "
@@ -1856,8 +1856,8 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "```bash",
                         "mcp whoami",
                         "mcp rotate-token",
-                        "ls -l ~/.enderai_mcp_token",
-                        "curl -fsS https://mcp.enderai.com/health",
+                        "ls -l ~/.taskforce_mcp_token",
+                        "curl -fsS https://mcp.taskforce.tools/health",
                         "```",
                         "",
                         "## Open Follow-Up",
@@ -1866,7 +1866,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                         "all four troubleshooting diagnostics in "
                         "one call",
                         "- Add an automatic stale-shell detector "
-                        "that compares `$ENDERAI_MCP_TOKEN` with "
+                        "that compares `$TASKFORCE_MCP_TOKEN` with "
                         "the file content on shell prompt",
                         "- Publish the CI integration recipes as a "
                         "standalone doc once we have one happy "
@@ -1899,8 +1899,8 @@ DEMO_SEED: list[dict[str, Any]] = [
             "How we dedupe Stripe webhook retries so plan upgrades "
             "don't double-fulfill. Decision record + WAL table design."
         ),
-        "created_at": _dt(2026, 4, 12),
-        "updated_at": _dt(2026, 4, 27),
+        "created_at": _dt(2026, 5, 12),
+        "updated_at": _dt(2026, 5, 27),
         "collaborators": ["Alex Lee", "Codex"],
         "ai_generated_summary": (
             "Inbound Stripe webhooks are deduped via a "
@@ -2184,8 +2184,8 @@ DEMO_SEED: list[dict[str, Any]] = [
             "Playbook for replaying webhooks, reading the WAL, and "
             "diagnosing duplicate delivery."
         ),
-        "created_at": _dt(2026, 4, 14),
-        "updated_at": _dt(2026, 5, 2),
+        "created_at": _dt(2026, 5, 14),
+        "updated_at": _dt(2026, 6, 2),
         "collaborators": ["Alex Lee"],
         "ai_generated_summary": (
             "Use Stripe CLI event replay to reproduce delivery flakes. "
@@ -2360,7 +2360,7 @@ DEMO_SEED: list[dict[str, Any]] = [
                     "```bash\n"
                     "stripe events list --limit 10\n"
                     "stripe events resend evt_1OabcD2eZvKYlo2C0X8YzABC\n"
-                    "heroku logs -t -a enderai-backend "
+                    "heroku logs -t -a taskforce-backend "
                     "| grep stripe.webhook\n"
                     "```\n\n"
                     "Expected duplicate behavior on a healthy build: "
@@ -2403,8 +2403,8 @@ DEMO_SEED: list[dict[str, Any]] = [
         "description": (
             "Test strategy for Stripe plan-upgrade side effects under webhook replay."
         ),
-        "created_at": _dt(2026, 5, 3),
-        "updated_at": _dt(2026, 5, 18),
+        "created_at": _dt(2026, 6, 3),
+        "updated_at": _dt(2026, 6, 18),
         "collaborators": ["Alex Lee", "Claude"],
         "ai_generated_summary": (
             "For plan upgrades, duplicate "
@@ -2621,7 +2621,7 @@ def _demo_agent_doc(
         "title": title,
         "description": description,
         "created_at": created_at,
-        "updated_at": _dt(2026, 5, 24),
+        "updated_at": _dt(2026, 6, 24),
         "collaborators": ["Alex Lee", "Codex"],
         "ai_generated_summary": ai_generated_summary,
         "human_summary": human_summary,
@@ -2664,7 +2664,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "index_version. DocumentSource emits one summary chunk plus "
             "details-anchor chunks."
         ),
-        created_at=_dt(2026, 4, 21),
+        created_at=_dt(2026, 5, 21),
         main_body=[
             {
                 "text": (
@@ -2724,7 +2724,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "ACL, organization visibility, explicit shares, and demo "
             "isolation."
         ),
-        created_at=_dt(2026, 4, 22),
+        created_at=_dt(2026, 5, 22),
         main_body=[
             {
                 "text": (
@@ -2775,7 +2775,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "to document detail anchors. Avoid sending users to opaque chunk "
             "ids."
         ),
-        created_at=_dt(2026, 4, 23),
+        created_at=_dt(2026, 5, 23),
         main_body=[
             {
                 "text": (
@@ -2816,7 +2816,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "scripts, and endpoint reachability. Keep UserPromptSubmit fast "
             "because it is on the prompt path."
         ),
-        created_at=_dt(2026, 4, 24),
+        created_at=_dt(2026, 5, 24),
         main_body=[
             {
                 "text": (
@@ -2871,7 +2871,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "reference. The bridge is not a source of truth; it forwards to "
             "FastAPI."
         ),
-        created_at=_dt(2026, 4, 25),
+        created_at=_dt(2026, 5, 25),
         main_body=[
             {
                 "text": (
@@ -2920,7 +2920,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "revoked_at, local config, and whether the token kind is "
             "agent_mcp."
         ),
-        created_at=_dt(2026, 4, 26),
+        created_at=_dt(2026, 5, 26),
         main_body=[
             {
                 "text": (
@@ -2964,7 +2964,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "show the same number in chat and on the session-scoped metrics "
             "page."
         ),
-        created_at=_dt(2026, 4, 27),
+        created_at=_dt(2026, 5, 27),
         main_body=[
             {
                 "text": (
@@ -3009,7 +3009,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "Write raw metric events first, snapshot pricing at write time, "
             "and roll up by day, user, org, and demo flag."
         ),
-        created_at=_dt(2026, 4, 28),
+        created_at=_dt(2026, 5, 28),
         main_body=[
             {
                 "text": (
@@ -3057,7 +3057,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "banner that the page is filtered to one session, with a link "
             "back to all metrics."
         ),
-        created_at=_dt(2026, 4, 29),
+        created_at=_dt(2026, 5, 29),
         main_body=[
             {
                 "text": (
@@ -3096,7 +3096,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "Use stable, human-readable anchor ids. Keep decision sections "
             "separate from incident sections and verification steps."
         ),
-        created_at=_dt(2026, 4, 30),
+        created_at=_dt(2026, 5, 30),
         main_body=[
             {
                 "text": (
@@ -3137,7 +3137,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "Add referenced-by entries after material sessions that "
             "consulted a doc and used it to make a decision, fix, or test."
         ),
-        created_at=_dt(2026, 5, 1),
+        created_at=_dt(2026, 6, 1),
         main_body=[
             {
                 "text": (
@@ -3180,7 +3180,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
             "align without conflicts. Create a new document when "
             "terminal-state, repo, tenant, or error-family conflicts fire."
         ),
-        created_at=_dt(2026, 5, 2),
+        created_at=_dt(2026, 6, 2),
         main_body=[
             {
                 "text": (
@@ -3221,7 +3221,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Stripe webhook tolerance when laptop clocks drift.",
         human_summary="Replay failures from signature tolerance, not payload bugs.",
         ai_generated_summary="Widen tolerance only after verifying server clock sync.",
-        created_at=_dt(2026, 5, 10),
+        created_at=_dt(2026, 6, 10),
         main_body=[
             {
                 "text": "Clock skew breaks signature checks before idempotency runs.",
@@ -3242,7 +3242,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="UserPromptSubmit hook latency budget for discover.",
         human_summary="Four-second curl timeout bounds Python scorer work.",
         ai_generated_summary="Discover ranks at most 200 docs; consult emits per match.",
-        created_at=_dt(2026, 5, 11),
+        created_at=_dt(2026, 6, 11),
         main_body=[
             {
                 "text": "Hook path must stay under four seconds end-to-end.",
@@ -3263,7 +3263,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Bypass Haiku when agents supply structured observe fields.",
         human_summary="Structured observe skips summarizer and daily cap.",
         ai_generated_summary="MCP hookless path depends on this shortcut.",
-        created_at=_dt(2026, 5, 12),
+        created_at=_dt(2026, 6, 12),
         main_body=[
             {
                 "text": "summary_points plus decisions can skip the summarizer.",
@@ -3284,7 +3284,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Why historical USD totals do not move when list prices change.",
         human_summary="Each metrics_event stores pricing_id at write time.",
         ai_generated_summary="USD Offset sums tokens.saved usd_amount snapshots.",
-        created_at=_dt(2026, 5, 13),
+        created_at=_dt(2026, 6, 13),
         main_body=[
             {
                 "text": "Snapshots keep week-over-week deltas honest.",
@@ -3302,10 +3302,10 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         slug="mcp-bearer-session-binding",
         specialist="orin",
         title="MCP bearer session binding",
-        description="Per-session token forwarding through enderaiFetch.",
+        description="Per-session token forwarding through taskforceFetch.",
         human_summary="Streamable HTTP sessions bind bearer on initialize.",
         ai_generated_summary="Token rotation mid-session updates tokenRef.",
-        created_at=_dt(2026, 5, 14),
+        created_at=_dt(2026, 6, 14),
         main_body=[
             {
                 "text": "MCP never persists; backend writes metrics.",
@@ -3315,7 +3315,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         details_markdown_sections=[
             {
                 "anchor_id": "bearer",
-                "markdown": "## Bearer\n\nenderai_request is an authenticated escape hatch.",
+                "markdown": "## Bearer\n\ntaskforce_request is an authenticated escape hatch.",
             }
         ],
     ),
@@ -3326,7 +3326,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Cached summary, details, and rediscovery_cost_tokens.",
         human_summary="refresh_v2_document_token_counts runs on every patch.",
         ai_generated_summary="Discover reads cached rediscovery_cost_tokens.",
-        created_at=_dt(2026, 5, 15),
+        created_at=_dt(2026, 6, 15),
         main_body=[
             {
                 "text": "Rediscovery cost capped at fifty thousand tokens per doc.",
@@ -3347,7 +3347,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Embeddings always use the managed key.",
         human_summary="BYOK affects answer only, not index space.",
         ai_generated_summary="Changing embedding model requires full reindex.",
-        created_at=_dt(2026, 5, 16),
+        created_at=_dt(2026, 6, 16),
         main_body=[
             {
                 "text": "Two embedding spaces would break retrieval.",
@@ -3368,7 +3368,7 @@ DEMO_AGENT_SUPPORTING_SEED: list[dict[str, Any]] = [
         description="Metadata keys checkout and webhooks both read.",
         human_summary="Missing metadata breaks plan upgrade reconciliation.",
         ai_generated_summary="Keep metadata keys stable across Stripe API versions.",
-        created_at=_dt(2026, 5, 17),
+        created_at=_dt(2026, 6, 17),
         main_body=[
             {
                 "text": "Checkout session metadata must mirror subscription metadata.",

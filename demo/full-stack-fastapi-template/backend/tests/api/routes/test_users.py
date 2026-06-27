@@ -105,7 +105,9 @@ def test_create_user_new_email(
         assert user.email == created_user["email"]
 
 
-def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
+def test_signup_marks_demo_seeded_without_v1_seed(
+    client: TestClient, db: Session
+) -> None:
     email = random_email()
     password = random_lower_string()
 
@@ -125,29 +127,27 @@ def test_signup_seeds_demo_workspace(client: TestClient, db: Session) -> None:
     assert user.v2 is False
     assert user.demo_seeded_at is not None
 
+    # Demo is V2-only now: signup marks the account demo-seeded but must not
+    # seed the deprecated V1 surfaces (topics / cases / skills).
     demo_topics = [
         topic
         for topic in db.exec(select(Topic).where(Topic.is_demo.is_(True))).all()
         if str(user.id) in topic.owner_ids
     ]
-    assert len(demo_topics) >= 1
+    assert demo_topics == []
 
-    demo_topic_ids = {topic.id for topic in demo_topics}
     demo_cases = db.exec(select(CaseRecord).where(CaseRecord.actor_id == user.id)).all()
-    assert len(demo_cases) >= 1
-    assert any(case.topic_id in demo_topic_ids for case in demo_cases)
+    assert list(demo_cases) == []
 
     demo_skills = [
         skill
         for skill in db.exec(select(Skill).where(Skill.is_demo.is_(True))).all()
         if str(user.id) in skill.owner_ids
     ]
-    assert len(demo_skills) >= 1
+    assert demo_skills == []
 
 
-def test_signup_user_can_read_and_write(
-    client: TestClient, db: Session
-) -> None:
+def test_signup_user_can_read_and_write(client: TestClient, db: Session) -> None:
     email = random_email()
     password = random_lower_string()
 
