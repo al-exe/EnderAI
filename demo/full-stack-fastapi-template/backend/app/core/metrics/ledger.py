@@ -24,6 +24,11 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlmodel import Session, col, select
 
 from app.models import (
+    METRICS_EVENT_DOC_AUTO_CREATED,
+    METRICS_EVENT_DOCUMENT_CONSULTED,
+    METRICS_EVENT_DOCUMENT_CREATED,
+    METRICS_EVENT_DOCUMENT_REUSED,
+    METRICS_EVENT_TASKFORCE_OBSERVED,
     AgentSpecialist,
     MetricsEvent,
     TaskforceSessionArchive,
@@ -41,7 +46,12 @@ KNOWN_LEDGER_CLIENTS = frozenset({"claude-code", "codex", "cursor"})
 
 
 def _session_id_expr() -> Any:
-    return MetricsEvent.payload["session_id"].astext
+    """Group events by terminal session id, including evolution ``source_session_id``."""
+
+    return func.coalesce(
+        MetricsEvent.payload["session_id"].astext,
+        MetricsEvent.payload["source_session_id"].astext,
+    )
 
 
 def _consumed_client_expr() -> Any:
@@ -124,6 +134,7 @@ class LedgerSessionRow:
     cache_write_tokens: int = 0
     source: str | None = None
     transcript_available: bool = False
+    document_relationship: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,6 +169,27 @@ class LedgerPage:
     total: int
     limit: int
     offset: int
+
+
+def _document_relationship(
+    *,
+    produced_by_kind: bool,
+    produced_by_observe: bool,
+    reused_by_kind: bool,
+) -> str:
+    if produced_by_kind or produced_by_observe:
+        return "produced"
+    if reused_by_kind:
+        return "reused"
+    return "touched"
+
+
+def _archive_display_title(archive: TaskforceSessionArchive | None) -> str | None:
+    if archive is None:
+        return None
+    if archive.display_name:
+        return archive.display_name
+    return archive.conversation_summary or archive.title
 
 
 def ledger_sessions(
@@ -261,6 +293,25 @@ def ledger_sessions(
                 func.max(TaskforceSessionArchive.cache_write_tokens), 0
             ).label("cache_write_tokens"),
             func.bool_or(transcript_exists).label("transcript_available"),
+            func.bool_or(
+                col(MetricsEvent.kind).in_(
+                    [
+                        METRICS_EVENT_DOCUMENT_CREATED,
+                        METRICS_EVENT_DOC_AUTO_CREATED,
+                    ]
+                )
+            ).label("produced_by_kind"),
+            func.bool_or(
+                and_(
+                    MetricsEvent.kind == METRICS_EVENT_TASKFORCE_OBSERVED,
+                    MetricsEvent.payload["action"].astext == "created",
+                )
+            ).label("produced_by_observe"),
+            func.bool_or(
+                col(MetricsEvent.kind).in_(
+                    [METRICS_EVENT_DOCUMENT_CONSULTED, METRICS_EVENT_DOCUMENT_REUSED]
+                )
+            ).label("reused_by_kind"),
         )
         .join(
             TaskforceSessionArchive,
@@ -420,6 +471,13 @@ def ledger_sessions(
             LedgerDocRef(document_id=did, title=doc_titles.get(did, "Untitled"))
             for did in ordered_doc_ids
         ][:_LEDGER_MAX_DOCS_PER_ROW]
+        doc_relationship = None
+        if document_id is not None:
+            doc_relationship = _document_relationship(
+                produced_by_kind=bool(r.produced_by_kind),
+                produced_by_observe=bool(r.produced_by_observe),
+                reused_by_kind=bool(r.reused_by_kind),
+            )
         rows.append(
             LedgerSessionRow(
                 session_id=r.session_id,
@@ -440,7 +498,7 @@ def ledger_sessions(
                 cross_boundary=bool(r.cross_boundary),
                 occurred_at_first=r.first_at,
                 occurred_at_last=r.last_at,
-                title=r.title,
+                title=_archive_display_title(archive) or r.title,
                 actor_handle=actor_names.get(r.actor_id, "Unknown"),
                 harness_label=r.harness_label or r.client,
                 harness_version=r.harness_version,
@@ -461,6 +519,7 @@ def ledger_sessions(
                 cache_write_tokens=int(r.cache_write_tokens or 0),
                 source=r.client,
                 transcript_available=bool(r.transcript_available),
+                document_relationship=doc_relationship,
             )
         )
 
