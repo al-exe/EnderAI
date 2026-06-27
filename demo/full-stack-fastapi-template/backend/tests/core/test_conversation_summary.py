@@ -133,6 +133,23 @@ def test_apply_conversation_summary_upgrades_weak_label_from_session_label() -> 
     assert archive.conversation_summary == "Codex session-agent title parity investigation"
 
 
+def test_apply_conversation_summary_keeps_existing_stable_label() -> None:
+    archive = TaskforceSessionArchive(
+        session_id="sess-1",
+        actor_id="00000000-0000-0000-0000-000000000001",
+        organization_id="00000000-0000-0000-0000-000000000002",
+        is_demo=False,
+        conversation_summary="Codex session-agent title parity investigation",
+    )
+    summary = _summary(session_label="Merged follow-up PR for Codex summarization")
+    apply_conversation_summary_from_summary(
+        archive,
+        summary,
+        prompt="merge this follow-up please",
+    )
+    assert archive.conversation_summary == "Codex session-agent title parity investigation"
+
+
 def test_apply_conversation_summary_respects_user_display_name() -> None:
     archive = TaskforceSessionArchive(
         session_id="sess-1",
