@@ -163,12 +163,6 @@ def apply_conversation_summary_from_summary(
         archive.conversation_summary = label
         return
 
-    if is_weak_opening_label(archive.conversation_summary) and not is_weak_opening_label(
-        label
-    ):
-        archive.conversation_summary = label
-        return
-
     if summary.session_label:
         archive.conversation_summary = label
         return
