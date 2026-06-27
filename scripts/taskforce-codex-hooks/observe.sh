@@ -172,9 +172,7 @@ body="$(
         --arg cwd "$cwd" \
         --arg branch "$branch" \
         --arg prompt "$last_user" \
-        --arg last_user "$last_user" \
-        --arg last_assistant "$last_assistant_message" \
-        --arg details "$details_markdown" \
+        --argjson transcript "$recent_turns" \
         --argjson active "$active_doc_id" \
         --argjson commands "$commands_run" \
         --argjson duration_ms "${duration_ms:-0}" \
@@ -183,7 +181,7 @@ body="$(
         '{
             kind: "checkpoint",
             prompt: $prompt[:8000],
-            transcript: [],
+            transcript: $transcript,
             active_document_id: $active,
             session_id: $session_id,
             cwd: (if $cwd == "" then null else $cwd end),
@@ -194,11 +192,8 @@ body="$(
             duration_ms: $duration_ms,
             harness: $harness,
             checkpoint_index: (if $checkpoint_index == 0 then null else $checkpoint_index end),
-            summary_points: ([
-                (if $last_user != "" then $last_user else empty end),
-                (if $last_assistant != "" then $last_assistant else empty end)
-            ] | map(.[:1200])),
-            details_sections: [{anchor_id: "codex-latest-turn", markdown: $details}],
+            summary_points: [],
+            details_sections: [],
             decisions: [],
             outcome: null
         }' 2>>"$LOG_FILE"

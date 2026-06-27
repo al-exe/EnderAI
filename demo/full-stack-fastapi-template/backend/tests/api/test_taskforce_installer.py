@@ -784,17 +784,13 @@ printf '200'
     assert observe["session_id"] == "codex-session-1"
     assert observe["client"] == "codex"
     assert observe["active_document_id"] is None
-    assert observe["transcript"] == []
-    assert observe["harness"]["model_id"] == "gpt-5.5"
-    assert observe["summary_points"] == [
-        "Fix the Codex Taskforce hooks",
-        "Codex hooks are wired.",
+    assert observe["transcript"] == [
+        {"role": "user", "content": "Fix the Codex Taskforce hooks"},
+        {"role": "assistant", "content": "Codex hooks are wired."},
     ]
-    assert observe["details_sections"][0]["anchor_id"] == "codex-latest-turn"
-    assert (
-        "Latest user prompt: Fix the Codex Taskforce hooks"
-        in observe["details_sections"][0]["markdown"]
-    )
+    assert observe["harness"]["model_id"] == "gpt-5.5"
+    assert observe["summary_points"] == []
+    assert observe["details_sections"] == []
     assert observe["commands_run"] == [
         {
             "cmd": "codex --strict-config doctor --json --all",
