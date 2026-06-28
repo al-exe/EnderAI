@@ -1,9 +1,6 @@
 from fastapi.testclient import TestClient
-from sqlmodel import Session
 
-from app import crud
 from app.core.config import settings
-from app.models import UserCreate
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -30,31 +27,12 @@ def _signup_and_login(client: TestClient) -> tuple[str, dict[str, str]]:
     return email, headers
 
 
-def test_demo_mode_keeps_v1_surfaces_empty(
-    client: TestClient,
-    db: Session,
-) -> None:
-    """The demo is V2-only: toggling demo mode must not seed V1 topics/cases."""
-    email, headers = _signup_and_login(client)
-    user = crud.get_user_by_email(session=db, email=email)
-    assert user is not None
-    assert user.demo_seeded_at is not None
-
-    for path in ("/api/v1/topics/", "/api/v1/cases/"):
-        live = client.get(path, headers=headers)
-        assert live.status_code == 200, live.text
-        assert live.json()["count"] == 0
-
-        demo = client.get(path, headers=headers, params={"demo": True})
-        assert demo.status_code == 200, demo.text
-        assert demo.json()["count"] == 0
-
-
 def test_demo_mode_seeds_and_filters_v2_documents(
     client: TestClient,
 ) -> None:
     """Demo mode lazily clones the V2 document catalog and isolates it from
-    the live workspace (and vice versa)."""
+    the live workspace (and vice versa). Demo is V2-only — there is no V1
+    (topics/cases/skills) surface anymore."""
     _email, headers = _signup_and_login(client)
 
     # No live documents yet.
@@ -107,37 +85,3 @@ def test_demo_mode_seeds_and_filters_v2_documents(
     live_again = client.get(f"/api/v1/v2/documents/{live_doc_id}", headers=headers)
     assert live_again.status_code == 200, live_again.text
     assert live_again.json()["is_demo"] is False
-
-
-def test_demo_mode_marks_existing_users_without_v1_seed(
-    client: TestClient,
-    db: Session,
-) -> None:
-    email = random_email()
-    password = random_lower_string()
-    crud.create_user(
-        session=db,
-        user_create=UserCreate(email=email, password=password),
-    )
-    headers = user_authentication_headers(
-        client=client,
-        email=email,
-        password=password,
-    )
-
-    user = crud.get_user_by_email(session=db, email=email)
-    assert user is not None
-    assert user.demo_seeded_at is None
-
-    # Hitting a V1 route with demo=True marks the account demo-seeded but seeds
-    # no V1 rows (V2-only demo).
-    response = client.get(
-        "/api/v1/topics/",
-        headers=headers,
-        params={"demo": True},
-    )
-    assert response.status_code == 200, response.text
-    assert response.json()["count"] == 0
-
-    db.refresh(user)
-    assert user.demo_seeded_at is not None

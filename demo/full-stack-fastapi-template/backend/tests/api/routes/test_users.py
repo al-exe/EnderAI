@@ -8,7 +8,7 @@ from app import crud
 from app.core.config import settings
 from app.core.db import is_v2_enabled_identity
 from app.core.security import verify_password
-from app.models import CaseRecord, Skill, Topic, User, UserCreate
+from app.models import User, UserCreate
 from tests.utils.user import create_random_user, user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -32,8 +32,9 @@ def test_get_users_normal_user_me(
     assert current_user
     assert current_user["is_superuser"] is False
     assert current_user["email"] == settings.EMAIL_TEST_USER
-    assert current_user["v2"] is False
-    assert current_user["subscription_tier"] == "free"
+    assert current_user["v2"] is True
+    # New accounts are auto-granted the MAX comp tier (new-user promo).
+    assert current_user["subscription_tier"] == "max"
 
 
 def test_get_users_me_sanitizes_admin_tier(
@@ -105,48 +106,6 @@ def test_create_user_new_email(
         assert user.email == created_user["email"]
 
 
-def test_signup_marks_demo_seeded_without_v1_seed(
-    client: TestClient, db: Session
-) -> None:
-    email = random_email()
-    password = random_lower_string()
-
-    response = client.post(
-        f"{settings.API_V1_STR}/users/signup",
-        json={
-            "email": email,
-            "password": password,
-            "full_name": "Demo Seeded User",
-        },
-    )
-    assert 200 <= response.status_code < 300, response.text
-
-    db.expire_all()
-    user = crud.get_user_by_email(session=db, email=email)
-    assert user is not None
-    assert user.v2 is False
-    assert user.demo_seeded_at is not None
-
-    # Demo is V2-only now: signup marks the account demo-seeded but must not
-    # seed the deprecated V1 surfaces (topics / cases / skills).
-    demo_topics = [
-        topic
-        for topic in db.exec(select(Topic).where(Topic.is_demo.is_(True))).all()
-        if str(user.id) in topic.owner_ids
-    ]
-    assert demo_topics == []
-
-    demo_cases = db.exec(select(CaseRecord).where(CaseRecord.actor_id == user.id)).all()
-    assert list(demo_cases) == []
-
-    demo_skills = [
-        skill
-        for skill in db.exec(select(Skill).where(Skill.is_demo.is_(True))).all()
-        if str(user.id) in skill.owner_ids
-    ]
-    assert demo_skills == []
-
-
 def test_signup_user_can_read_and_write(client: TestClient, db: Session) -> None:
     email = random_email()
     password = random_lower_string()
@@ -176,13 +135,13 @@ def test_signup_user_can_read_and_write(client: TestClient, db: Session) -> None
     assert update_res.status_code == 200, update_res.text
     assert update_res.json()["full_name"] == "Updated User"
 
-    topic_res = client.post(
-        f"{settings.API_V1_STR}/topics/",
+    doc_res = client.post(
+        f"{settings.API_V1_STR}/v2/documents/",
         headers=headers,
-        json={"title": "Signed up user topic"},
+        json={"title": "Signed up user document"},
     )
-    assert topic_res.status_code == 201, topic_res.text
-    assert topic_res.json()["title"] == "Signed up user topic"
+    assert doc_res.status_code == 201, doc_res.text
+    assert doc_res.json()["title"] == "Signed up user document"
 
     user = crud.get_user_by_email(session=db, email=email)
     assert user is not None

@@ -14,12 +14,8 @@ from app.models import (
     AgentCredential,
     AgentSpecialist,
     AgentSpecialistDocumentLink,
-    CaseEvent,
-    CaseRecord,
     Organization,
     OrganizationInvitation,
-    Skill,
-    Topic,
     User,
     V2Document,
     V2DocumentFavorite,
@@ -44,10 +40,6 @@ def db() -> Generator[Session, None, None]:
     with Session(engine) as session:
         init_db(session)
         yield session
-        session.execute(delete(CaseEvent))
-        session.execute(delete(Skill))
-        session.execute(delete(CaseRecord))
-        session.execute(delete(Topic))
         session.execute(delete(AgentSpecialistDocumentLink))
         session.execute(delete(AgentSpecialist))
         session.execute(delete(V2DocumentFavorite))

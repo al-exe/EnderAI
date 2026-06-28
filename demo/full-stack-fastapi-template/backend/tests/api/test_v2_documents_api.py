@@ -3,7 +3,7 @@ from sqlmodel import Session
 
 from app import crud
 from app.core.config import settings
-from app.core.v2_documents import DEMO_SEED
+from app.core.v2_documents import DEMO_SEED, iter_demo_seed_catalog
 from tests.utils.user import user_authentication_headers
 from tests.utils.utils import random_email, random_lower_string
 
@@ -40,14 +40,14 @@ def test_v2_documents_list_seeds_demo_lazily(client: TestClient) -> None:
     # First demo call lazily seeds the catalog.
     first = client.get("/api/v1/v2/documents/?demo=true", headers=headers)
     assert first.status_code == 200, first.text
-    assert first.json()["count"] == len(DEMO_SEED)
+    assert first.json()["count"] == len(list(iter_demo_seed_catalog()))
     titles = {doc["title"] for doc in first.json()["data"]}
     assert {seed["title"] for seed in DEMO_SEED} <= titles
 
     # Repeat call is idempotent — no duplicates.
     second = client.get("/api/v1/v2/documents/?demo=true", headers=headers)
     assert second.status_code == 200, second.text
-    assert second.json()["count"] == len(DEMO_SEED)
+    assert second.json()["count"] == len(list(iter_demo_seed_catalog()))
 
 
 def test_v2_documents_create_update_get(client: TestClient) -> None:

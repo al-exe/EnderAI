@@ -69,19 +69,18 @@ def test_create_user_no_comp_tier_when_promo_off(
     assert resolve_tier(user) == Tier.FREE
 
 
-def test_create_user_defaults_to_v2_disabled(db: Session) -> None:
+def test_create_user_defaults_to_v2_enabled(db: Session) -> None:
     email = random_email()
     password = random_lower_string()
     user_in = UserCreate(email=email, password=password)
     user = crud.create_user(session=db, user_create=user_in)
-    assert user.v2 is False
+    assert user.v2 is True
 
 
-def test_v2_enabled_identity_only_matches_alexlee4190() -> None:
-    assert is_v2_enabled_identity("alexlee4190") is True
-    assert is_v2_enabled_identity("alexlee4190@example.com") is True
-    assert is_v2_enabled_identity("notalexlee4190@example.com") is False
-    assert is_v2_enabled_identity("alex@example.com") is False
+def test_v2_enabled_identity_is_universal() -> None:
+    # V1 was removed; every account is on V2.
+    assert is_v2_enabled_identity("anyone@example.com") is True
+    assert is_v2_enabled_identity("someone-else") is True
 
 
 def test_check_if_user_is_superuser(db: Session) -> None:
