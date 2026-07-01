@@ -1,12 +1,11 @@
 """Wipe ALL demo (``is_demo``) data and reset ``User.demo_seeded_at``.
 
-The demo experience is V2-only (documents, agent profiles, metrics, sessions),
-but historically the database may also hold deprecated V1 demo rows (topics /
-cases / skills). This script removes every ``is_demo`` row across the schema,
-plus the child rows that hang off demo parents but have no ``is_demo`` column of
-their own (document shares/favorites/changelogs, specialist↔document links, and
-V1 case records/events). It then clears ``User.demo_seeded_at`` for every user so
-each account re-clones the refreshed catalog the next time demo mode is toggled.
+The demo experience is V2-only (documents, agent profiles, metrics, sessions).
+This script removes every ``is_demo`` row across the schema, plus the child rows
+that hang off demo parents but have no ``is_demo`` column of their own (document
+shares / favorites / changelogs and specialist↔document links). It then clears
+``User.demo_seeded_at`` for every user so each account re-clones the refreshed
+catalog the next time demo mode is toggled.
 
 Destructive, but reversible: every row removed is regenerable seed data. Re-run
 ``app.scripts.seed_demo_metrics_alex`` (or toggle demo mode) to repopulate.
@@ -49,16 +48,10 @@ def wipe_demo_data(session: Session, *, apply: bool) -> dict[str, int]:
     tables = {t.name: t for t in md.sorted_tables}
 
     doc = tables["v2_document"]
-    topic = tables["topic"]
     specialist = tables["agent_specialist"]
-    case_record = tables["case_record"]
 
     demo_doc_ids = select(doc.c.id).where(doc.c.is_demo.is_(True))
-    demo_topic_ids = select(topic.c.id).where(topic.c.is_demo.is_(True))
     demo_specialist_ids = select(specialist.c.id).where(specialist.c.is_demo.is_(True))
-    demo_case_ids = select(case_record.c.id).where(
-        case_record.c.topic_id.in_(demo_topic_ids)
-    )
 
     # (table, whereclause) for child rows that lack an is_demo column but belong
     # to a demo parent. Ordered children-first so FK constraints hold.
@@ -82,8 +75,6 @@ def wipe_demo_data(session: Session, *, apply: bool) -> dict[str, int]:
             "v2_document_evolution_changelog",
             tables["v2_document_evolution_changelog"].c.document_id.in_(demo_doc_ids),
         ),
-        ("case_event", tables["case_event"].c.case_id.in_(demo_case_ids)),
-        ("case_record", case_record.c.topic_id.in_(demo_topic_ids)),
     ]
 
     counts: dict[str, int] = {}

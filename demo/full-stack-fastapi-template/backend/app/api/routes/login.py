@@ -10,7 +10,6 @@ from app.api.deps import CurrentUser, SessionDep, get_current_superuser
 from app.core import firebase_auth, security
 from app.core.config import settings
 from app.core.db import is_v2_enabled_identity
-from app.core.demo import ensure_demo_workspace
 from app.core.tiering import default_comp_tier_for_new_user, resolve_public_tier
 from app.models import (
     FirebaseTokenExchange,
@@ -100,7 +99,6 @@ def _exchange_firebase_identity_for_user(
     )
     session.add(user)
     session.flush()
-    ensure_demo_workspace(session, user)
     session.commit()
     session.refresh(user)
     return user

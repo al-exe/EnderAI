@@ -6,18 +6,12 @@ def test_openapi_exposes_critical_mcp_hook_routes(client: TestClient) -> None:
     assert response.status_code == 200, response.text
 
     paths = response.json()["paths"]
+    # V1 (topics/cases/skills/context-packs) was removed; the MCP tools now
+    # operate over V2 documents. Guard that those routes stay exposed.
     required_paths = {
         "/api/v1/utils/health-check/",
-        "/api/v1/topics/",
-        "/api/v1/topics/{topic_id}",
-        "/api/v1/topics/match",
-        "/api/v1/topics/{topic_id}/rollup",
-        "/api/v1/context-packs/build",
-        "/api/v1/cases/",
-        "/api/v1/cases/{case_id}",
-        "/api/v1/cases/{case_id}/events",
-        "/api/v1/cases/{case_id}/memo",
-        "/api/v1/cases/{case_id}/hydration",
+        "/api/v1/v2/documents/",
+        "/api/v1/v2/documents/{document_id}",
     }
 
     missing_paths = sorted(required_paths.difference(paths))

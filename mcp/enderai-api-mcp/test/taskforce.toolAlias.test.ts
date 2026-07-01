@@ -5,10 +5,6 @@ import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/mcpServer.js";
 
 const ENDERAI_TOOLS_WITH_ALIASES = [
-  "enderai_begin_case",
-  "enderai_update_case",
-  "enderai_use_skill",
-  "enderai_finish_case",
   "enderai_request",
   "enderai_begin_document",
   "enderai_update_document",

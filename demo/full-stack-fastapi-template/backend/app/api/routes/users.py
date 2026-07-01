@@ -13,7 +13,6 @@ from app.api.deps import (
 )
 from app.core import firebase_auth
 from app.core.config import settings
-from app.core.demo import ensure_demo_workspace
 from app.core.security import get_password_hash, verify_password
 from app.core.tiering import resolve_public_tier
 from app.models import (
@@ -193,7 +192,6 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
         )
     user_create = UserCreate.model_validate(user_in)
     user = crud.create_user(session=session, user_create=user_create, commit=False)
-    ensure_demo_workspace(session, user)
     session.commit()
     session.refresh(user)
     return _to_user_public(user)

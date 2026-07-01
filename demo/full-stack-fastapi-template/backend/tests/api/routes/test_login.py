@@ -74,7 +74,6 @@ def test_exchange_firebase_token_creates_local_user(
     assert user.full_name == "Firebase User"
     assert user.firebase_uid == "firebase-new-user"
     assert user.hashed_password is None
-    assert user.demo_seeded_at is not None
 
 
 def test_exchange_firebase_token_links_verified_existing_user(

@@ -5,12 +5,11 @@ from app.core.config import settings
 from app.models import User, UserCreate
 
 engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
-V2_ENABLED_USER = "alexlee4190"
 
 
-def is_v2_enabled_identity(identity: str) -> bool:
-    normalized = identity.strip().lower()
-    return normalized == V2_ENABLED_USER or normalized.startswith(f"{V2_ENABLED_USER}@")
+def is_v2_enabled_identity(identity: str) -> bool:  # noqa: ARG001
+    """Every account is on V2; the legacy V1 experience has been removed."""
+    return True
 
 
 # make sure all SQLModel models are imported (app.models) before initializing DB
