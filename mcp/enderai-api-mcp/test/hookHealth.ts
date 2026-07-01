@@ -1,33 +1,17 @@
 export const REQUIRED_HOOK_TOOLS = [
-  "enderai_begin_case",
-  "enderai_finish_case",
+  "enderai_begin_document",
+  "enderai_finish_document",
   "enderai_health_check",
   "enderai_openapi",
   "enderai_request",
   "enderai_session_info",
-  "enderai_update_case",
-  "enderai_use_skill",
+  "enderai_update_document",
 ];
 
 export const REQUIRED_HOOK_ROUTE_PATHS = [
   "/api/v1/utils/health-check/",
-  "/api/v1/topics/",
-  "/api/v1/topics/{topic_id}",
-  "/api/v1/topics/match",
-  "/api/v1/topics/{topic_id}/rollup",
-  "/api/v1/context-packs/build",
-  "/api/v1/skills/",
-  "/api/v1/skills/generate",
-  "/api/v1/skills/match",
-  "/api/v1/skills/use",
-  "/api/v1/skills/{skill_id}",
-  "/api/v1/skills/{skill_id}/refresh",
-  "/api/v1/skills/{skill_id}/use",
-  "/api/v1/cases/",
-  "/api/v1/cases/{case_id}",
-  "/api/v1/cases/{case_id}/events",
-  "/api/v1/cases/{case_id}/memo",
-  "/api/v1/cases/{case_id}/hydration",
+  "/api/v1/v2/documents/",
+  "/api/v1/v2/documents/{document_id}",
 ];
 
 export function summarizeToolText(content: unknown): string {
