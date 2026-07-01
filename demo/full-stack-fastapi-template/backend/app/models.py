@@ -708,6 +708,12 @@ class AgentSpecialist(SQLModel, table=True):
     negative_triggers: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     instructions: list[str] = Field(default_factory=list, sa_type=JSONB)  # type: ignore[arg-type]
     created_from: str = Field(default="seeded", max_length=32)
+    # Harness export hints (WS1a / TF-250): what model an emitted native
+    # subagent file binds to, and how much filesystem access it is granted.
+    # Plain str on the table model — Literal is applied on the non-table
+    # AgentSpecialistUpdate shape instead.
+    model_hint: str = Field(default="inherit", max_length=64)
+    permission_scope: str = Field(default="readonly", max_length=16)
     evolution_provenance: dict[str, Any] = Field(
         default_factory=dict,
         sa_type=JSONB,  # type: ignore[arg-type]
@@ -792,6 +798,11 @@ class AgentSpecialistUpdate(SQLModel):
     short_description: str | None = Field(default=None, max_length=240)
     domain_tags: list[str] | None = None
     status: Literal["active", "draft", "archived", "proposed"] | None = None
+    model_hint: str | None = Field(default=None, max_length=64)
+    permission_scope: Literal["readonly", "full"] | None = None
+    instructions: list[str] | None = None
+    routing_triggers: list[str] | None = None
+    negative_triggers: list[str] | None = None
 
 
 class AgentSpecialistLinkedDoc(SQLModel):
@@ -831,6 +842,8 @@ class AgentSpecialistDetail(SQLModel):
     short_description: str = ""
     description: str
     created_from: str = "seeded"
+    model_hint: str = "inherit"
+    permission_scope: str = "readonly"
     domain_tags: list[str] = Field(default_factory=list)
     routing_triggers: list[str] = Field(default_factory=list)
     negative_triggers: list[str] = Field(default_factory=list)

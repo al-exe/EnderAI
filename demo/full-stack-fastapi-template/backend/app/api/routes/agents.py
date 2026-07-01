@@ -300,6 +300,8 @@ def _detail_for(
         short_description=specialist.short_description,
         description=specialist.description,
         created_from=specialist.created_from,
+        model_hint=specialist.model_hint,
+        permission_scope=specialist.permission_scope,
         domain_tags=list(specialist.domain_tags or []),
         routing_triggers=list(specialist.routing_triggers or []),
         negative_triggers=list(specialist.negative_triggers or []),
@@ -414,6 +416,8 @@ def create_agent(
         short_description=specialist.short_description,
         description=specialist.description,
         created_from=specialist.created_from,
+        model_hint=specialist.model_hint,
+        permission_scope=specialist.permission_scope,
         domain_tags=list(specialist.domain_tags or []),
         routing_triggers=list(specialist.routing_triggers or []),
         negative_triggers=list(specialist.negative_triggers or []),
@@ -488,6 +492,22 @@ def update_agent(
         ]
     if payload.status is not None:
         specialist.status = payload.status
+    if payload.model_hint is not None:
+        specialist.model_hint = payload.model_hint.strip()[:64] or "inherit"
+    if payload.permission_scope is not None:
+        specialist.permission_scope = payload.permission_scope
+    if payload.instructions is not None:
+        specialist.instructions = [
+            line.strip() for line in payload.instructions if line.strip()
+        ]
+    if payload.routing_triggers is not None:
+        specialist.routing_triggers = [
+            trigger.strip() for trigger in payload.routing_triggers if trigger.strip()
+        ]
+    if payload.negative_triggers is not None:
+        specialist.negative_triggers = [
+            trigger.strip() for trigger in payload.negative_triggers if trigger.strip()
+        ]
 
     specialist.updated_at = datetime.now(timezone.utc)
     session.add(specialist)

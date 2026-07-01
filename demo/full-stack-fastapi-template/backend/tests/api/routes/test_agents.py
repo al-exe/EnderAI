@@ -485,3 +485,73 @@ def test_delete_agent_403_for_non_owner(client: TestClient, db: Session) -> None
     )
 
     assert response.status_code == 403
+
+
+def test_create_agent_defaults_model_hint_and_permission_scope(
+    client: TestClient,
+) -> None:
+    _, headers = _signup(client)
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents",
+        headers=headers,
+        json={"name": "Export Ready", "role": "Harness export"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["model_hint"] == "inherit"
+    assert body["permission_scope"] == "readonly"
+
+
+def test_update_agent_edits_export_and_context_fields(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=headers,
+        json={
+            "model_hint": "sonnet",
+            "permission_scope": "full",
+            "instructions": ["Verify webhook signatures.", "  ", "Never trust events."],
+            "routing_triggers": ["stripe", " ", "webhook"],
+            "negative_triggers": ["refunds ui"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_hint"] == "sonnet"
+    assert body["permission_scope"] == "full"
+    # Blank entries are dropped.
+    assert body["instructions"] == [
+        "Verify webhook signatures.",
+        "Never trust events.",
+    ]
+    assert body["routing_triggers"] == ["stripe", "webhook"]
+    assert body["negative_triggers"] == ["refunds ui"]
+
+    stored = db.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == specialist.slug)
+    ).one()
+    db.refresh(stored)
+    assert stored.model_hint == "sonnet"
+    assert stored.permission_scope == "full"
+
+
+def test_update_agent_rejects_invalid_permission_scope(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    response = client.patch(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}",
+        headers=headers,
+        json={"permission_scope": "root"},
+    )
+
+    assert response.status_code == 422
