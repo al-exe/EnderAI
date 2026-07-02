@@ -176,9 +176,9 @@ def test_route_specialist_reads_earned_profile_without_special_case(
     )
 
     assert matched is not None
-    assert matched.specialist_id == specialist.id
-    assert matched.slug == specialist.slug
-    assert matched.linked_documents
+    assert matched.specialist.id == specialist.id
+    assert matched.specialist.slug == specialist.slug
+    assert matched.matched_docs
 
 
 def test_compound_specialists_prunes_lowest_weight_and_keeps_pinned(
