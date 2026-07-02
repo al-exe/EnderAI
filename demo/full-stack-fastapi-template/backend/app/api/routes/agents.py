@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -11,7 +12,11 @@ from sqlmodel import Session, col, select
 
 from app.api.deps import CurrentUser, SessionDep
 from app.core.agents.access import build_agent_specialist_acl_filter
-from app.core.v2_documents import build_v2_document_acl_filter
+from app.core.agents.compounding import MAX_LINKS_PER_SPECIALIST
+from app.core.v2_documents import (
+    build_v2_document_acl_filter,
+    get_v2_document_for_actor,
+)
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
     AgentsListResponse,
@@ -19,6 +24,7 @@ from app.models import (
     AgentSpecialistCreate,
     AgentSpecialistDetail,
     AgentSpecialistDocumentLink,
+    AgentSpecialistDocumentLinkCreate,
     AgentSpecialistInvocationSummary,
     AgentSpecialistLinkedDoc,
     AgentSpecialistStats,
@@ -348,6 +354,57 @@ def _writable_specialist(
     return specialist
 
 
+def _manual_link_reason(
+    current_user: CurrentUser,
+    payload: AgentSpecialistDocumentLinkCreate,
+) -> str:
+    reason = (payload.reason or "").strip()
+    if reason:
+        return reason[:240]
+    actor = (current_user.full_name or current_user.email or "user").strip()
+    return f"added by {actor}"[:240]
+
+
+def _link_count(session: Session, specialist_id: Any) -> int:
+    return int(
+        session.exec(
+            select(func.count()).select_from(AgentSpecialistDocumentLink).where(
+                AgentSpecialistDocumentLink.specialist_id == specialist_id
+            )
+        ).one()
+        or 0
+    )
+
+
+def _pinned_link_count(session: Session, specialist_id: Any) -> int:
+    return int(
+        session.exec(
+            select(func.count()).select_from(AgentSpecialistDocumentLink).where(
+                AgentSpecialistDocumentLink.specialist_id == specialist_id,
+                col(AgentSpecialistDocumentLink.is_pinned).is_(True),
+            )
+        ).one()
+        or 0
+    )
+
+
+def _prune_one_unpinned_link(session: Session, specialist_id: Any) -> bool:
+    link = session.exec(
+        select(AgentSpecialistDocumentLink)
+        .where(AgentSpecialistDocumentLink.specialist_id == specialist_id)
+        .where(col(AgentSpecialistDocumentLink.is_pinned).is_(False))
+        .order_by(
+            col(AgentSpecialistDocumentLink.weight).asc(),
+            col(AgentSpecialistDocumentLink.created_at).asc(),
+            col(AgentSpecialistDocumentLink.id).asc(),
+        )
+    ).first()
+    if link is None:
+        return False
+    session.delete(link)
+    return True
+
+
 @router.get("", response_model=AgentsListResponse)
 def list_agents(
     session: SessionDep,
@@ -520,6 +577,104 @@ def update_agent(
         current_user=current_user,
         demo=demo,
     )
+
+
+@router.post("/{slug}/documents", response_model=AgentSpecialistDetail)
+def link_agent_document(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    payload: AgentSpecialistDocumentLinkCreate,
+    demo: bool = Query(default=False),
+) -> Any:
+    specialist = _writable_specialist(
+        session, current_user=current_user, slug=slug, demo=demo
+    )
+    document = get_v2_document_for_actor(
+        session,
+        current_user,
+        payload.document_id,
+        demo=demo,
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    existing = session.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id,
+            AgentSpecialistDocumentLink.document_id == document.id,
+        )
+    ).first()
+
+    if existing is None or not existing.is_pinned:
+        if _pinned_link_count(session, specialist.id) >= MAX_LINKS_PER_SPECIALIST:
+            raise HTTPException(
+                status_code=409,
+                detail="Agent profile already has the maximum pinned documents",
+            )
+
+    if existing is None:
+        if _link_count(session, specialist.id) >= MAX_LINKS_PER_SPECIALIST:
+            pruned = _prune_one_unpinned_link(session, specialist.id)
+            if not pruned:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Agent profile already has the maximum linked documents",
+                )
+        session.add(
+            AgentSpecialistDocumentLink(
+                specialist_id=specialist.id,
+                document_id=document.id,
+                anchor_id=None,
+                reason=_manual_link_reason(current_user, payload),
+                weight=1.0,
+                is_pinned=True,
+            )
+        )
+    else:
+        existing.anchor_id = None
+        existing.reason = _manual_link_reason(current_user, payload)
+        existing.weight = max(existing.weight, 1.0)
+        existing.is_pinned = True
+        session.add(existing)
+
+    specialist.updated_at = datetime.now(timezone.utc)
+    session.add(specialist)
+    session.commit()
+    session.refresh(specialist)
+
+    return _detail_for(
+        session,
+        specialist=specialist,
+        current_user=current_user,
+        demo=demo,
+    )
+
+
+@router.delete("/{slug}/documents/{document_id}", status_code=204, response_model=None)
+def unlink_agent_document(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    document_id: uuid.UUID,
+    demo: bool = Query(default=False),
+) -> None:
+    specialist = _writable_specialist(
+        session, current_user=current_user, slug=slug, demo=demo
+    )
+    link = session.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id,
+            AgentSpecialistDocumentLink.document_id == document_id,
+        )
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Document link not found")
+
+    session.delete(link)
+    specialist.updated_at = datetime.now(timezone.utc)
+    session.add(specialist)
+    session.commit()
 
 
 @router.delete("/{slug}", status_code=204, response_model=None)

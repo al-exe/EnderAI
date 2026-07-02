@@ -8,6 +8,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.core.agents.compounding import MAX_LINKS_PER_SPECIALIST
 from app.core.config import settings
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
@@ -64,13 +65,23 @@ def _agent(db: Session, user: User, **kwargs: Any) -> AgentSpecialist:
     return specialist
 
 
-def _document(db: Session, user: User, *, title: str = "Linked doc") -> V2Document:
+def _document(
+    db: Session,
+    user: User,
+    *,
+    title: str = "Linked doc",
+    **kwargs: Any,
+) -> V2Document:
     document = V2Document(
-        owner_id=user.id,
-        organization_id=user.organization_id,
-        visibility="private",
+        owner_id=kwargs.pop("owner_id", user.id),
+        organization_id=kwargs.pop("organization_id", user.organization_id),
+        visibility=kwargs.pop("visibility", "private"),
         title=title,
-        description="Decision record for route-boundary WAL dedupe.",
+        description=kwargs.pop(
+            "description",
+            "Decision record for route-boundary WAL dedupe.",
+        ),
+        **kwargs,
     )
     db.add(document)
     db.commit()
@@ -429,6 +440,164 @@ def test_update_agent_status_403_for_non_owner(
     )
 
     assert response.status_code == 403
+
+
+def test_link_agent_document_upserts_pinned_manual_link(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+    document = _document(db, user, title="Webhook replay notes")
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/documents",
+        headers=headers,
+        json={"document_id": str(document.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["linked_knowledge"][0]["document_id"] == str(document.id)
+    assert body["linked_knowledge"][0]["reason"] == "added by Agents Tester"
+
+    link = db.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id,
+            AgentSpecialistDocumentLink.document_id == document.id,
+        )
+    ).one()
+    assert link.is_pinned is True
+    assert link.anchor_id is None
+    assert link.reason == "added by Agents Tester"
+
+    second = client.post(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/documents",
+        headers=headers,
+        json={"document_id": str(document.id), "reason": "added for exporter"},
+    )
+
+    assert second.status_code == 200, second.text
+    db.expire_all()
+    links = db.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id,
+            AgentSpecialistDocumentLink.document_id == document.id,
+        )
+    ).all()
+    assert len(links) == 1
+    assert links[0].reason == "added for exporter"
+    assert links[0].is_pinned is True
+
+
+def test_unlink_agent_document_removes_link(client: TestClient, db: Session) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+    document = _document(db, user)
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=document.id,
+            reason="added by Agents Tester",
+            is_pinned=True,
+        )
+    )
+    db.commit()
+
+    response = client.delete(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/documents/{document.id}",
+        headers=headers,
+    )
+
+    assert response.status_code == 204, response.text
+    assert (
+        db.exec(
+            select(AgentSpecialistDocumentLink).where(
+                AgentSpecialistDocumentLink.specialist_id == specialist.id,
+                AgentSpecialistDocumentLink.document_id == document.id,
+            )
+        ).first()
+        is None
+    )
+
+
+def test_link_agent_document_requires_readable_document(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+    other_email, _ = _signup(client)
+    other_user = _user_by_email(db, other_email)
+    document = _document(db, other_user, title="Private external doc")
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/documents",
+        headers=headers,
+        json={"document_id": str(document.id)},
+    )
+
+    assert response.status_code == 404
+    assert (
+        db.exec(
+            select(AgentSpecialistDocumentLink).where(
+                AgentSpecialistDocumentLink.specialist_id == specialist.id,
+                AgentSpecialistDocumentLink.document_id == document.id,
+            )
+        ).first()
+        is None
+    )
+
+
+def test_link_agent_document_prunes_unpinned_overflow(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(db, user, slug=f"jensen-{random_lower_string()}")
+
+    for index in range(MAX_LINKS_PER_SPECIALIST - 1):
+        document = _document(db, user, title=f"Pinned doc {index}")
+        db.add(
+            AgentSpecialistDocumentLink(
+                specialist_id=specialist.id,
+                document_id=document.id,
+                reason="added by Agents Tester",
+                is_pinned=True,
+            )
+        )
+
+    stale = _document(db, user, title="Earned overflow")
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=stale.id,
+            reason="earned: old",
+            weight=0.1,
+            is_pinned=False,
+        )
+    )
+    target = _document(db, user, title="New pinned doc")
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/documents",
+        headers=headers,
+        json={"document_id": str(target.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    links = db.exec(
+        select(AgentSpecialistDocumentLink).where(
+            AgentSpecialistDocumentLink.specialist_id == specialist.id
+        )
+    ).all()
+    assert len(links) == MAX_LINKS_PER_SPECIALIST
+    assert all(link.is_pinned for link in links)
+    linked_ids = {link.document_id for link in links}
+    assert target.id in linked_ids
+    assert stale.id not in linked_ids
 
 
 def test_delete_agent_removes_profile(client: TestClient, db: Session) -> None:

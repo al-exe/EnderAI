@@ -805,6 +805,11 @@ class AgentSpecialistUpdate(SQLModel):
     negative_triggers: list[str] | None = None
 
 
+class AgentSpecialistDocumentLinkCreate(SQLModel):
+    document_id: uuid.UUID
+    reason: str | None = Field(default=None, max_length=240)
+
+
 class AgentSpecialistLinkedDoc(SQLModel):
     document_id: uuid.UUID
     title: str
