@@ -48,6 +48,53 @@ log() {
     fi
 }
 
+sync_taskforce_agents() {
+    local harness="$1"
+    local repo_dir="$2"
+    [[ "${TASKFORCE_AGENT_SYNC:-1}" == "0" ]] && { log "agent-sync: disabled"; return; }
+    [[ -z "$repo_dir" || ! -d "$repo_dir" ]] && { log "agent-sync: no cwd"; return; }
+
+    local sync_file status
+    sync_file="$(mktemp)"
+    status="$(
+        curl -sS \
+            -o "$sync_file" \
+            -w '%{http_code}' \
+            --max-time 4 \
+            -H "Authorization: Bearer ${token}" \
+            "${BACKEND_URL}/api/v1/v2/agents/sync-harness?target=${harness}" 2>>"$LOG_FILE"
+    )" || { rm -f "$sync_file"; log "agent-sync: curl failed"; return; }
+
+    if [[ "$status" != "200" ]]; then
+        rm -f "$sync_file"
+        log "agent-sync: status ${status}"
+        return
+    fi
+
+    local entries entry path target_file tmp_file
+    entries="$(jq -r '.files[]? | @base64' "$sync_file" 2>/dev/null || true)"
+    rm -f "$sync_file"
+    [[ -z "$entries" ]] && { log "agent-sync: no files"; return; }
+
+    while IFS= read -r entry; do
+        [[ -z "$entry" ]] && continue
+        path="$(printf '%s' "$entry" | { base64 --decode 2>/dev/null || base64 -D 2>/dev/null; } | jq -r '.path // empty' 2>/dev/null)"
+        case "$path" in
+            ""|/*|*..*) log "agent-sync: skip unsafe path ${path:-empty}"; continue ;;
+        esac
+        target_file="${repo_dir}/${path}"
+        mkdir -p "$(dirname "$target_file")"
+        tmp_file="$(mktemp)"
+        printf '%s' "$entry" | { base64 --decode 2>/dev/null || base64 -D 2>/dev/null; } | jq -r '.content // ""' > "$tmp_file"
+        if [[ -f "$target_file" ]] && cmp -s "$tmp_file" "$target_file"; then
+            rm -f "$tmp_file"
+            continue
+        fi
+        mv "$tmp_file" "$target_file"
+        log "agent-sync: wrote ${path}"
+    done <<< "$entries"
+}
+
 # Never block the user's session.
 trap 'exit 0' EXIT
 
@@ -89,6 +136,8 @@ session_id="$(jq -r '.session_id // empty' <<<"$payload" 2>/dev/null)"
 cwd="$(taskforce_resolve_cwd_from_payload "$payload")"
 
 git_branch="$(taskforce_resolve_git_branch_from_payload "$payload" 2>/dev/null || true)"
+
+sync_taskforce_agents "claude" "$cwd"
 
 # Build the request body.
 body="$(jq -cn \

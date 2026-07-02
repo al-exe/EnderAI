@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func
@@ -13,12 +13,21 @@ from sqlmodel import Session, col, select
 from app.api.deps import CurrentUser, SessionDep
 from app.core.agents.access import build_agent_specialist_acl_filter
 from app.core.agents.compounding import MAX_LINKS_PER_SPECIALIST
+from app.core.agents.subagent_export import (
+    ExportDocument,
+    ExportSpecialist,
+    render_claude_subagent,
+    subagent_content_hash,
+    subagent_filename,
+)
 from app.core.v2_documents import (
     build_v2_document_acl_filter,
     get_v2_document_for_actor,
 )
 from app.models import (
     METRICS_EVENT_DOCUMENT_CONSULTED,
+    AgentHarnessSyncFile,
+    AgentHarnessSyncResponse,
     AgentsListResponse,
     AgentSpecialist,
     AgentSpecialistCreate,
@@ -36,6 +45,14 @@ from app.models import (
 
 # Leave headroom inside the 64-char slug column for a uniqueness suffix.
 _SLUG_BASE_MAX = 56
+HarnessTarget = Literal["claude", "codex", "cursor"]
+HarnessTargetOrAll = Literal["claude", "codex", "cursor", "all"]
+_HARNESS_PRIORITY: tuple[HarnessTarget, ...] = ("claude", "codex", "cursor")
+_HARNESS_TARGET_DIRS = {
+    "claude": ".claude/agents",
+    "codex": ".codex/agents",
+    "cursor": ".cursor/agents",
+}
 
 
 def _slugify(value: str) -> str:
@@ -323,6 +340,87 @@ def _detail_for(
     )
 
 
+def _details_markdown(document: V2Document) -> str:
+    sections = document.details_markdown_sections or []
+    markdown: list[str] = []
+    for section in sections:
+        if isinstance(section, dict):
+            value = str(section.get("markdown") or "").strip()
+        else:
+            value = str(getattr(section, "markdown", "") or "").strip()
+        if value:
+            markdown.append(value)
+    return "\n\n".join(markdown)
+
+
+def _export_specialist_for(
+    session: Session,
+    *,
+    specialist: AgentSpecialist,
+    current_user: CurrentUser,
+    demo: bool,
+) -> ExportSpecialist:
+    statement = (
+        select(AgentSpecialistDocumentLink, V2Document)
+        .join(V2Document, V2Document.id == AgentSpecialistDocumentLink.document_id)
+        .where(AgentSpecialistDocumentLink.specialist_id == specialist.id)
+        .where(build_v2_document_acl_filter(current_user, demo=demo))
+        .order_by(
+            col(AgentSpecialistDocumentLink.is_pinned).desc(),
+            col(AgentSpecialistDocumentLink.weight).desc(),
+            col(AgentSpecialistDocumentLink.created_at).asc(),
+        )
+    )
+    documents: list[ExportDocument] = []
+    for link, document in session.exec(statement).all():
+        documents.append(
+            ExportDocument(
+                title=document.title,
+                purpose=document.human_summary or document.description,
+                details=_details_markdown(document),
+                backlink=f"/v2/library/{document.id}",
+                weight=link.weight,
+                is_pinned=link.is_pinned,
+            )
+        )
+
+    return ExportSpecialist(
+        slug=specialist.slug,
+        short_description=specialist.short_description,
+        routing_triggers=list(specialist.routing_triggers or []),
+        negative_triggers=list(specialist.negative_triggers or []),
+        instructions=list(specialist.instructions or []),
+        model_hint=specialist.model_hint,
+        permission_scope=specialist.permission_scope,
+        documents=documents,
+    )
+
+
+def _render_sync_files(
+    specs: list[ExportSpecialist],
+    *,
+    target: HarnessTargetOrAll,
+) -> AgentHarnessSyncResponse:
+    targets = list(_HARNESS_PRIORITY if target == "all" else (target,))
+    files: list[AgentHarnessSyncFile] = []
+    for harness in targets:
+        target_dir = _HARNESS_TARGET_DIRS[harness]
+        for spec in specs:
+            content = render_claude_subagent(spec)
+            files.append(
+                AgentHarnessSyncFile(
+                    target=harness,
+                    path=f"{target_dir}/{subagent_filename(spec.slug)}",
+                    content=content,
+                    sha256=subagent_content_hash(content),
+                )
+            )
+    return AgentHarnessSyncResponse(
+        priority=list(_HARNESS_PRIORITY),
+        files=files,
+    )
+
+
 def _writable_specialist(
     session: Session,
     *,
@@ -490,6 +588,31 @@ def create_agent(
     )
 
 
+@router.get("/sync-harness", response_model=AgentHarnessSyncResponse)
+def sync_harness_agents(
+    session: SessionDep,
+    current_user: CurrentUser,
+    target: HarnessTargetOrAll = Query(default="all"),
+    demo: bool = Query(default=False),
+) -> Any:
+    specialists = session.exec(
+        select(AgentSpecialist)
+        .where(build_agent_specialist_acl_filter(current_user, demo=demo))
+        .where(AgentSpecialist.status == "active")
+        .order_by(col(AgentSpecialist.slug).asc())
+    ).all()
+    specs = [
+        _export_specialist_for(
+            session,
+            specialist=specialist,
+            current_user=current_user,
+            demo=demo,
+        )
+        for specialist in specialists
+    ]
+    return _render_sync_files(specs, target=target)
+
+
 @router.get("/{slug}", response_model=AgentSpecialistDetail)
 def get_agent(
     session: SessionDep,
@@ -517,6 +640,37 @@ def get_agent(
         current_user=current_user,
         demo=demo,
     )
+
+
+@router.post("/{slug}/sync-harness", response_model=AgentHarnessSyncResponse)
+def sync_harness_agent(
+    session: SessionDep,
+    current_user: CurrentUser,
+    slug: str,
+    target: HarnessTargetOrAll = Query(default="all"),
+    demo: bool = Query(default=False),
+) -> Any:
+    specialist = session.exec(
+        select(AgentSpecialist).where(AgentSpecialist.slug == slug)
+    ).first()
+    if specialist is None:
+        raise HTTPException(status_code=404, detail="Agent specialist not found")
+
+    accessible = session.exec(
+        select(AgentSpecialist)
+        .where(AgentSpecialist.id == specialist.id)
+        .where(build_agent_specialist_acl_filter(current_user, demo=demo))
+    ).first()
+    if accessible is None:
+        raise HTTPException(status_code=403, detail="Agent specialist access denied")
+
+    spec = _export_specialist_for(
+        session,
+        specialist=specialist,
+        current_user=current_user,
+        demo=demo,
+    )
+    return _render_sync_files([spec], target=target)
 
 
 @router.patch("/{slug}", response_model=AgentSpecialistDetail)

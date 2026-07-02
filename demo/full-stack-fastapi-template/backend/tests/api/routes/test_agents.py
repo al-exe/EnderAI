@@ -600,6 +600,88 @@ def test_link_agent_document_prunes_unpinned_overflow(
     assert stale.id not in linked_ids
 
 
+def test_sync_harness_agent_returns_targets_in_priority_order(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    specialist = _agent(
+        db,
+        user,
+        slug=f"billing-{random_lower_string()}",
+        model_hint="sonnet",
+        permission_scope="readonly",
+    )
+    document = _document(
+        db,
+        user,
+        title="Webhook signature verification",
+        human_summary="Verify every webhook before parsing.",
+        details_markdown_sections=[
+            {
+                "anchor_id": "signature",
+                "markdown": "Verify with STRIPE_WEBHOOK_SECRET.",
+            }
+        ],
+    )
+    db.add(
+        AgentSpecialistDocumentLink(
+            specialist_id=specialist.id,
+            document_id=document.id,
+            reason="added by Agents Tester",
+            is_pinned=True,
+        )
+    )
+    db.commit()
+
+    response = client.post(
+        f"{settings.API_V1_STR}/v2/agents/{specialist.slug}/sync-harness",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["priority"] == ["claude", "codex", "cursor"]
+    assert [item["target"] for item in body["files"]] == [
+        "claude",
+        "codex",
+        "cursor",
+    ]
+    assert [item["path"] for item in body["files"]] == [
+        f".claude/agents/{specialist.slug}.md",
+        f".codex/agents/{specialist.slug}.md",
+        f".cursor/agents/{specialist.slug}.md",
+    ]
+    content = body["files"][0]["content"]
+    assert "model: sonnet" in content
+    assert "tools: Read, Grep, Glob, WebFetch" in content
+    assert "## Documents" in content
+    assert "Verify with STRIPE_WEBHOOK_SECRET." in content
+    assert len(body["files"][0]["sha256"]) == 64
+
+
+def test_sync_harness_collection_exports_active_profiles_only(
+    client: TestClient, db: Session
+) -> None:
+    email, headers = _signup(client)
+    user = _user_by_email(db, email)
+    active = _agent(db, user, slug=f"active-{random_lower_string()}")
+    _agent(db, user, slug=f"draft-{random_lower_string()}", status="draft")
+
+    response = client.get(
+        f"{settings.API_V1_STR}/v2/agents/sync-harness",
+        headers=headers,
+        params={"target": "claude"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["priority"] == ["claude", "codex", "cursor"]
+    assert [item["path"] for item in body["files"]] == [
+        f".claude/agents/{active.slug}.md"
+    ]
+
+
 def test_delete_agent_removes_profile(client: TestClient, db: Session) -> None:
     email, headers = _signup(client)
     user = _user_by_email(db, email)

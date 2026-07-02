@@ -860,6 +860,18 @@ class AgentSpecialistDetail(SQLModel):
     stats: AgentSpecialistStats
 
 
+class AgentHarnessSyncFile(SQLModel):
+    target: Literal["claude", "codex", "cursor"]
+    path: str
+    content: str
+    sha256: str
+
+
+class AgentHarnessSyncResponse(SQLModel):
+    priority: list[Literal["claude", "codex", "cursor"]]
+    files: list[AgentHarnessSyncFile] = Field(default_factory=list)
+
+
 class EvolutionReviewSpecialist(SQLModel):
     id: str
     slug: str
