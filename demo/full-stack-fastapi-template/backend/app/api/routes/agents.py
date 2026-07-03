@@ -20,6 +20,7 @@ from app.core.agents.subagent_export import (
     subagent_content_hash,
     subagent_filename,
 )
+from app.core.config import settings
 from app.core.v2_documents import (
     build_v2_document_acl_filter,
     get_v2_document_for_actor,
@@ -353,6 +354,20 @@ def _details_markdown(document: V2Document) -> str:
     return "\n\n".join(markdown)
 
 
+def _absolute_document_backlink(document_id: uuid.UUID) -> str:
+    """Absolute, harness-portable backlink to a library document.
+
+    Exported subagent files are read by harnesses with no base-URL context, so
+    the ``↳`` backlink must be a full URL rather than a bare ``/v2/library/{id}``
+    path (which only resolves inside the web app). Derive the origin from
+    ``FRONTEND_HOST`` — the same setting the CORS/frontend links use.
+    """
+
+    base = (settings.FRONTEND_HOST or "").rstrip("/")
+    path = f"/v2/library/{document_id}"
+    return f"{base}{path}" if base else path
+
+
 def _export_specialist_for(
     session: Session,
     *,
@@ -378,7 +393,7 @@ def _export_specialist_for(
                 title=document.title,
                 purpose=document.human_summary or document.description,
                 details=_details_markdown(document),
-                backlink=f"/v2/library/{document.id}",
+                backlink=_absolute_document_backlink(document.id),
                 weight=link.weight,
                 is_pinned=link.is_pinned,
             )
