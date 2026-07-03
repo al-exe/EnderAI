@@ -652,7 +652,8 @@ def test_sync_harness_agent_returns_targets_in_priority_order(
         f".codex/agents/{specialist.slug}.md",
         f".cursor/agents/{specialist.slug}.md",
     ]
-    content = body["files"][0]["content"]
+    files_by_target = {item["target"]: item for item in body["files"]}
+    content = files_by_target["claude"]["content"]
     assert "model: sonnet" in content
     assert "tools: Read, Grep, Glob, WebFetch" in content
     assert "## Documents" in content
@@ -663,6 +664,15 @@ def test_sync_harness_agent_returns_targets_in_priority_order(
     assert f"↳ {base}/v2/library/{document.id}" in content
     assert "↳ /v2/library/" not in content
     assert len(body["files"][0]["sha256"]) == 64
+
+    # Cursor gets its native readonly: frontmatter, never Claude's tools: line
+    # (TF-258); Codex reuses the canonical Claude render for now.
+    cursor_content = files_by_target["cursor"]["content"]
+    assert "readonly: true" in cursor_content
+    assert "tools:" not in cursor_content
+    codex_content = files_by_target["codex"]["content"]
+    assert "tools: Read, Grep, Glob, WebFetch" in codex_content
+    assert "readonly:" not in codex_content
 
 
 def test_sync_harness_collection_exports_active_profiles_only(

@@ -4,6 +4,7 @@ from app.core.agents.subagent_export import (
     ExportDocument,
     ExportSpecialist,
     render_claude_subagent,
+    render_cursor_subagent,
     subagent_content_hash,
     subagent_filename,
 )
@@ -121,6 +122,62 @@ def test_long_details_truncated_to_doc_budget() -> None:
     )
     assert len(body_line) <= 50
     assert body_line.endswith("…")
+
+
+_BILLING_CURSOR_GOLDEN = """\
+---
+name: billing-specialist
+description: |-
+  Stripe billing & webhooks.
+  Use when: stripe, webhook.
+  Do NOT use when: refunds ui.
+model: sonnet
+readonly: true
+---
+You own Stripe billing & webhooks.
+Prefer idempotent handlers; never trust unverified events.
+
+## Documents
+
+### Webhook signature verification
+Verify every event with STRIPE_WEBHOOK_SECRET before parsing; reject on skew > 5m.
+↳ taskforce.tools/v2/library/abc
+"""
+
+
+def test_render_cursor_readonly_golden() -> None:
+    # Cursor expresses permission via `readonly:`, never Claude's `tools:` line;
+    # the body is byte-identical to the Claude render.
+    rendered = render_cursor_subagent(_BILLING)
+    assert rendered == _BILLING_CURSOR_GOLDEN
+    assert "tools:" not in rendered
+    assert "readonly: true" in rendered
+
+
+def test_render_cursor_full_scope_is_not_readonly() -> None:
+    spec = ExportSpecialist(
+        slug="refactor-agent",
+        short_description="Big refactors.",
+        model_hint="opus",
+        permission_scope="full",
+        instructions=["Move fast, keep tests green."],
+    )
+    rendered = render_cursor_subagent(spec)
+
+    assert "readonly: false" in rendered
+    assert "tools:" not in rendered
+    assert "model: opus" in rendered
+
+
+def test_cursor_and_claude_share_body_but_differ_in_permission_frontmatter() -> None:
+    claude = render_claude_subagent(_BILLING)
+    cursor = render_cursor_subagent(_BILLING)
+
+    # Same body after the frontmatter fence.
+    assert claude.split("---\n", 2)[-1] == cursor.split("---\n", 2)[-1]
+    assert "tools: Read, Grep, Glob, WebFetch" in claude
+    assert "readonly: true" in cursor
+    assert subagent_content_hash(claude) != subagent_content_hash(cursor)
 
 
 def test_subagent_filename() -> None:
