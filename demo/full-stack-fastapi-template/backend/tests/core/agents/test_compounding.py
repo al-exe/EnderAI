@@ -203,6 +203,14 @@ def test_compound_specialists_prunes_lowest_weight_and_keeps_pinned(
             is_pinned=True,
         )
     )
+    # Three earnable docs with intentionally different match strength: the
+    # full-default doc matches the "Stripe webhook"/"Billing" signals most
+    # strongly, the two title-overridden docs progressively less. Their natural
+    # scores (~0.48 / ~0.33 / ~0.24) are well separated but two of them fall
+    # under the default MIN_LINK_SCORE (0.45), so we lower min_link_score below
+    # for this run to earn all three links and actually exercise overflow
+    # pruning — pruning must drop the two lowest-weight earned links and keep
+    # the strongest (kept_doc) plus the pinned link.
     kept_doc = _document(db, user)
     _document(db, user, title="Stripe webhook retry")
     _document(db, user, title="Billing event idempotency")
@@ -211,6 +219,7 @@ def test_compound_specialists_prunes_lowest_weight_and_keeps_pinned(
     report = compound_specialists(
         db,
         organization_id=org.id,
+        min_link_score=0.2,
         max_links_per_specialist=2,
         dry_run=False,
     )
