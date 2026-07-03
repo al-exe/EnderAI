@@ -76,10 +76,49 @@ def render_claude_subagent(
 ) -> str:
     """Render ``spec`` as a Claude Code subagent markdown file.
 
-    Deterministic: same input → byte-identical output.
+    Canonical format (Cursor also reads ``.claude/agents/``). Deterministic:
+    same input → byte-identical output.
     """
 
-    front = _frontmatter(spec)
+    return _render_subagent(
+        spec,
+        _claude_frontmatter(spec),
+        max_doc_chars=max_doc_chars,
+        max_docs_chars=max_docs_chars,
+    )
+
+
+def render_cursor_subagent(
+    spec: ExportSpecialist,
+    *,
+    max_doc_chars: int = DEFAULT_MAX_DOC_CHARS,
+    max_docs_chars: int = DEFAULT_MAX_DOCS_CHARS,
+) -> str:
+    """Render ``spec`` as a Cursor subagent markdown file.
+
+    Same body as the Claude format, but permission is expressed with Cursor's
+    native ``readonly:`` frontmatter key rather than Claude's ``tools:`` list —
+    so a read-only profile actually carries Cursor's read-only guarantee instead
+    of a tools line Cursor ignores. Only emitted to ``.cursor/agents/`` because
+    this is the one Cursor-specific field; everything else is covered by the
+    canonical ``.claude/agents/`` file Cursor also reads.
+    """
+
+    return _render_subagent(
+        spec,
+        _cursor_frontmatter(spec),
+        max_doc_chars=max_doc_chars,
+        max_docs_chars=max_docs_chars,
+    )
+
+
+def _render_subagent(
+    spec: ExportSpecialist,
+    frontmatter: str,
+    *,
+    max_doc_chars: int,
+    max_docs_chars: int,
+) -> str:
     instructions_block = "\n".join(_clean(spec.instructions))
     documents_block = _documents_block(
         spec.documents,
@@ -87,10 +126,10 @@ def render_claude_subagent(
         max_docs_chars=max_docs_chars,
     )
     body = "\n\n".join(part for part in (instructions_block, documents_block) if part)
-    return f"{front}\n{body}\n" if body else f"{front}\n"
+    return f"{frontmatter}\n{body}\n" if body else f"{frontmatter}\n"
 
 
-def _frontmatter(spec: ExportSpecialist) -> str:
+def _claude_frontmatter(spec: ExportSpecialist) -> str:
     lines = ["---", f"name: {spec.slug}", "description: |-"]
     lines.extend(f"  {line}" for line in _description_lines(spec))
     lines.append(f"model: {(spec.model_hint or 'inherit').strip() or 'inherit'}")
@@ -99,6 +138,21 @@ def _frontmatter(spec: ExportSpecialist) -> str:
         lines.append(f"tools: {', '.join(tools)}")
     lines.append("---")
     return "\n".join(lines)
+
+
+def _cursor_frontmatter(spec: ExportSpecialist) -> str:
+    lines = ["---", f"name: {spec.slug}", "description: |-"]
+    lines.extend(f"  {line}" for line in _description_lines(spec))
+    lines.append(f"model: {(spec.model_hint or 'inherit').strip() or 'inherit'}")
+    lines.append(f"readonly: {_readonly_for_scope(spec.permission_scope)}")
+    lines.append("---")
+    return "\n".join(lines)
+
+
+def _readonly_for_scope(permission_scope: str) -> str:
+    # "full" inherits everything → not read-only; anything else stays safe.
+    is_full = (permission_scope or "readonly").strip().lower() == "full"
+    return "false" if is_full else "true"
 
 
 def _description_lines(spec: ExportSpecialist) -> list[str]:

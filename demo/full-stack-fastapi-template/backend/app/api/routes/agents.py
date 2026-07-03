@@ -17,6 +17,7 @@ from app.core.agents.subagent_export import (
     ExportDocument,
     ExportSpecialist,
     render_claude_subagent,
+    render_cursor_subagent,
     subagent_content_hash,
     subagent_filename,
 )
@@ -420,8 +421,11 @@ def _render_sync_files(
     files: list[AgentHarnessSyncFile] = []
     for harness in targets:
         target_dir = _HARNESS_TARGET_DIRS[harness]
+        # Cursor gets its native `readonly:` frontmatter; Claude stays canonical
+        # and Codex reuses it (Codex's own target is a separate follow-up).
+        render = render_cursor_subagent if harness == "cursor" else render_claude_subagent
         for spec in specs:
-            content = render_claude_subagent(spec)
+            content = render(spec)
             files.append(
                 AgentHarnessSyncFile(
                     target=harness,
