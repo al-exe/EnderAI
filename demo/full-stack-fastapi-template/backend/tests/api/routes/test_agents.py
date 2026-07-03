@@ -657,6 +657,11 @@ def test_sync_harness_agent_returns_targets_in_priority_order(
     assert "tools: Read, Grep, Glob, WebFetch" in content
     assert "## Documents" in content
     assert "Verify with STRIPE_WEBHOOK_SECRET." in content
+    # Backlinks are absolute so a harness with no base-URL context can follow
+    # them (TF-259): full FRONTEND_HOST origin, not a bare /v2/library path.
+    base = settings.FRONTEND_HOST.rstrip("/")
+    assert f"↳ {base}/v2/library/{document.id}" in content
+    assert "↳ /v2/library/" not in content
     assert len(body["files"][0]["sha256"]) == 64
 
 
