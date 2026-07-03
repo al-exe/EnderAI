@@ -172,13 +172,24 @@ body="$(
         --arg cwd "$cwd" \
         --arg branch "$branch" \
         --arg prompt "$last_user" \
+        --arg details_md "$details_markdown" \
         --argjson transcript "$recent_turns" \
         --argjson active "$active_doc_id" \
         --argjson commands "$commands_run" \
         --argjson duration_ms "${duration_ms:-0}" \
         --argjson harness "$harness_payload" \
         --argjson checkpoint_index "$checkpoint_index" \
-        '{
+        '
+        # TF-264: populate structured fields (summary_points from the prompt +
+        # commands, details_sections from the activity markdown we already
+        # built) so the backend takes the free structured path and skips the
+        # paid Haiku summarizer instead of summarizing the raw transcript.
+        ([ ($prompt // "") | select(. != "") | .[:280] ]
+         + (if ($commands | length) > 0
+            then ["Ran: " + ([$commands[:5][] | (.cmd // "")]
+                  | map(select(. != "")) | join("; ") | .[:280])]
+            else [] end)) as $summary_points
+        | {
             kind: "checkpoint",
             prompt: $prompt[:8000],
             transcript: $transcript,
@@ -192,8 +203,10 @@ body="$(
             duration_ms: $duration_ms,
             harness: $harness,
             checkpoint_index: (if $checkpoint_index == 0 then null else $checkpoint_index end),
-            summary_points: [],
-            details_sections: [],
+            summary_points: $summary_points,
+            details_sections: (if ($details_md // "") != ""
+                               then [{anchor_id: "activity", markdown: $details_md}]
+                               else [] end),
             decisions: [],
             outcome: null
         }' 2>>"$LOG_FILE"

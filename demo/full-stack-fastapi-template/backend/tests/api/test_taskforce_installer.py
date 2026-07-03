@@ -789,8 +789,19 @@ printf '200'
         {"role": "assistant", "content": "Codex hooks are wired."},
     ]
     assert observe["harness"]["model_id"] == "gpt-5.5"
-    assert observe["summary_points"] == []
-    assert observe["details_sections"] == []
+    # TF-264: the hook now emits lightweight structured fields (prompt + commands
+    # → summary_points, the activity markdown → details_sections) so the backend
+    # takes the free structured path and skips the paid Haiku summarizer.
+    assert observe["summary_points"] == [
+        "Fix the Codex Taskforce hooks",
+        "Ran: codex --strict-config doctor --json --all",
+    ]
+    assert len(observe["details_sections"]) == 1
+    assert observe["details_sections"][0]["anchor_id"] == "activity"
+    assert (
+        "Latest user prompt: Fix the Codex Taskforce hooks"
+        in observe["details_sections"][0]["markdown"]
+    )
     assert observe["commands_run"] == [
         {
             "cmd": "codex --strict-config doctor --json --all",

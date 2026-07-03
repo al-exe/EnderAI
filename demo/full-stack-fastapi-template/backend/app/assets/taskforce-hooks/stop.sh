@@ -151,6 +151,12 @@ if [[ -n "$session_id" && -f "${STATE_DIR}/${session_id}.active" ]]; then
     active_doc_id="\"$(cat "${STATE_DIR}/${session_id}.active" | tr -d '\r\n')\""
 fi
 
+# TF-264: emit lightweight *structured* fields (summary_points + an activity
+# details section) built from data the hook already has — the user prompt, the
+# files touched, and the commands run. A non-empty summary_points flips the
+# backend onto the free structured path (_has_structured_payload), so it writes
+# the document deterministically and SKIPS the paid Haiku summarizer. Mirrors
+# the backend's own zero-cost digest; the summarizer is no longer the default.
 body="$(jq -cn \
     --arg session_id "$session_id" \
     --arg cwd "$cwd" \
@@ -162,7 +168,24 @@ body="$(jq -cn \
     --argjson harness "$harness_payload" \
     --argjson active "$active_doc_id" \
     --argjson duration_ms "${duration_ms:-0}" \
-    '{
+    '
+    ([ ($prompt // "") | select(. != "") | .[:280] ]
+     + (if ($files | length) > 0
+        then ["Touched \($files | length) file(s): " + ($files[:6] | join(", "))]
+        else [] end)
+     + (if ($commands | length) > 0
+        then ["Ran: " + ([$commands[:5][] | (.cmd // "")]
+              | map(select(. != "")) | join("; ") | .[:280])]
+        else [] end)) as $summary_points
+    | (((if ($files | length) > 0
+         then ["**Files touched**"] + [$files[:20][] | "- `\(.)`"]
+         else [] end)
+       + (if ($commands | length) > 0
+          then (if ($files | length) > 0 then [""] else [] end)
+               + ["**Commands run**"]
+               + [$commands[:20][] | "- `\((.cmd // "")[:200])`"]
+          else [] end)) | join("\n")) as $activity_md
+    | {
         kind: "checkpoint",
         prompt: $prompt,
         transcript: $transcript,
@@ -173,6 +196,10 @@ body="$(jq -cn \
         client: "claude-code",
         files_touched: $files,
         commands_run: $commands,
+        summary_points: $summary_points,
+        details_sections: (if ($activity_md | length) > 0
+                           then [{anchor_id: "activity", markdown: $activity_md}]
+                           else [] end),
         duration_ms: $duration_ms,
         harness: $harness
     }' 2>>"$LOG_FILE")"
