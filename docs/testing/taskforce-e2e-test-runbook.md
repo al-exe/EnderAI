@@ -27,6 +27,20 @@ These are the env switches the loop depends on — confirm before testing:
   terminal loop authenticates fine without it).
 - Each test machine has `bash`, `curl`, `jq`.
 
+### Managed Anthropic spend controls (observe summarizer)
+
+The hook path (raw transcript → Haiku summarizer) is the only material consumer
+of the managed `ANTHROPIC_API_KEY` (the TF-262 audit found it was ~100% of
+managed spend). Two backend env knobs bound it:
+
+- **`TASKFORCE_OBSERVE_SHADOW`** — kill switch. `=1` disables the *paid*
+  summarizer entirely; deterministic free digests still write, so capture keeps
+  working. Set `=0` to allow Haiku enrichment (needed for the hook path above).
+- **`TASKFORCE_OBSERVE_DAILY_USD_CAP`** — per-user daily USD ceiling on the paid
+  summarizer, reset at UTC midnight. Default `1.00`. Lower it (e.g. `0.25`) to
+  shrink the blast radius without a code deploy; once a user hits the cap for the
+  day, observe falls back to the free digest. Ignored while shadow mode is on.
+
 ---
 
 ## Part A — Fresh onboarding

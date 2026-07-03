@@ -86,6 +86,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_DAILY_USD_CAP = Decimal("1.00")
 
 
+def _daily_usd_cap() -> Decimal:
+    """Per-user daily USD ceiling on the paid summarizer (TF-265).
+
+    Env-configurable via ``TASKFORCE_OBSERVE_DAILY_USD_CAP`` so the blast radius
+    can be lowered (e.g. to 0.25) without a code deploy. Falls back to
+    ``DEFAULT_DAILY_USD_CAP`` if the setting is missing, unparseable, or
+    negative.
+    """
+
+    try:
+        cap = Decimal(str(settings.TASKFORCE_OBSERVE_DAILY_USD_CAP))
+    except (TypeError, ArithmeticError, ValueError):
+        return DEFAULT_DAILY_USD_CAP
+    return cap if cap >= 0 else DEFAULT_DAILY_USD_CAP
+
+
 def _paid_summarizer_enabled() -> bool:
     """Whether the paid haiku enrichment may run this turn.
 
@@ -247,7 +263,7 @@ async def _resolve_summary(
         api_key = settings.ANTHROPIC_API_KEY
         if (
             api_key
-            and _summarizer_cost_today(session, actor=actor) < DEFAULT_DAILY_USD_CAP
+            and _summarizer_cost_today(session, actor=actor) < _daily_usd_cap()
         ):
             summary = await summarize(
                 transcript=request.transcript,

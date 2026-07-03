@@ -157,6 +157,13 @@ class Settings(BaseSettings):
     TF_SELF_EVOLVE: bool = False
     EVOLUTION_SWEEP_INTERVAL_SECONDS: int = 60
     EVOLUTION_SWEEP_BATCH_SIZE: int = 20
+    # Taskforce observe — per-user daily USD ceiling on the paid haiku
+    # summarizer, reset at UTC midnight (TF-265). The TF-262 audit confirmed
+    # this cap is enforced (managed spend pins at exactly this value on heavy
+    # multi-agent days). Env-configurable so the blast radius can be lowered
+    # without a redeploy (e.g. 0.25). The separate TASKFORCE_OBSERVE_SHADOW=1
+    # kill switch disables the paid summarizer entirely.
+    TASKFORCE_OBSERVE_DAILY_USD_CAP: float = 1.00
 
     @model_validator(mode="after")
     def _set_default_emails_from(self) -> Self:
