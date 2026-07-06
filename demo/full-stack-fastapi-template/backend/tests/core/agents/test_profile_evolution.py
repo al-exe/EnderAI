@@ -4,17 +4,19 @@ from sqlmodel import Session, func, select
 
 from app.core.agents.profile_evolution import (
     CLUSTER_N,
+    DEMO_CLUSTER_N,
     evolve_profile_from_session,
     propose_specialists_from_orphans,
 )
-from app.core.taskforce.evolution_summary import EVOLUTION_SUMMARY_KEY, StoredEvolutionSummary
+from app.core.taskforce.evolution_summary import (
+    EVOLUTION_SUMMARY_KEY,
+    StoredEvolutionSummary,
+)
 from app.models import (
     AgentSpecialist,
     AgentSpecialistDocumentLink,
-    Organization,
     TaskforceSessionArchive,
     User,
-    V2Document,
 )
 from tests.core.agents.test_compounding import _document, _org, _org_user, _specialist
 from tests.utils.utils import random_lower_string
@@ -27,12 +29,13 @@ def _archive(
     summary_points: list[str],
     specialist_slug: str | None = None,
     active_document_id=None,
+    demo: bool = False,
 ) -> TaskforceSessionArchive:
     archive = TaskforceSessionArchive(
         session_id=f"prof-{random_lower_string()}",
         actor_id=user.id,
         organization_id=user.organization_id,
-        is_demo=False,
+        is_demo=demo,
         title=summary_points[0] if summary_points else "Session",
         specialist_slug=specialist_slug,
         active_document_id=active_document_id,
@@ -108,6 +111,51 @@ def test_propose_specialist_from_orphan_cluster(db: Session) -> None:
     assert len(proposed) == 1
     assert proposed[0].created_from == "earned"
     assert proposed[0].visibility == "organization"
+
+
+def test_propose_demo_specialist_from_single_orphan(db: Session) -> None:
+    # DEMO_CLUSTER_N == 1: a single demo orphan session births a proposal so a
+    # one-off demo run is visible immediately.
+    assert DEMO_CLUSTER_N == 1
+    org = _org(db)
+    user = _org_user(db, org)
+    _archive(
+        db,
+        user,
+        summary_points=["Kafka consumer lag demo orphan topic"],
+        specialist_slug=None,
+        demo=True,
+    )
+
+    report = propose_specialists_from_orphans(db, organization_id=org.id)
+    assert report["specialists_proposed"] == 1
+    proposed = db.exec(
+        select(AgentSpecialist).where(AgentSpecialist.status == "proposed")
+    ).all()
+    assert len(proposed) == 1
+    # Born into the demo dataset so the frontend demo-mode toggle governs it.
+    assert proposed[0].is_demo is True
+    assert proposed[0].created_from == "earned"
+
+
+def test_single_live_orphan_does_not_propose(db: Session) -> None:
+    # Live work still needs CLUSTER_N sessions — the lowered demo threshold must
+    # not leak into real traffic.
+    org = _org(db)
+    user = _org_user(db, org)
+    _archive(
+        db,
+        user,
+        summary_points=["Postgres vacuum live orphan topic"],
+        specialist_slug=None,
+        demo=False,
+    )
+
+    report = propose_specialists_from_orphans(db, organization_id=org.id)
+    assert report["specialists_proposed"] == 0
+    assert (
+        db.exec(select(func.count()).select_from(AgentSpecialist)).one() == 0
+    )
 
 
 def test_proposed_specialist_does_not_route(db: Session) -> None:

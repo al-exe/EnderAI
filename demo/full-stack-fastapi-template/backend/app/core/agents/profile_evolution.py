@@ -35,8 +35,11 @@ from app.models import (
     get_datetime_utc,
 )
 
-# Orphan sessions sharing this domain signature propose one specialist.
+# Live orphan sessions sharing this domain signature propose one specialist.
 CLUSTER_N = 3
+# Demo orphans birth after a single session — a one-off demo run should produce a
+# visible proposal (demo mode = the is_demo dataset the frontend toggle reveals).
+DEMO_CLUSTER_N = 1
 
 _SLUG_SPLIT = re.compile(r"[^a-z0-9]+")
 
@@ -222,13 +225,13 @@ def evolve_profile_from_session(
 
 
 def _orphan_archives(
-    session: Session, organization_id: uuid.UUID
+    session: Session, organization_id: uuid.UUID, *, demo: bool
 ) -> list[TaskforceSessionArchive]:
     return list(
         session.exec(
             select(TaskforceSessionArchive)
             .where(TaskforceSessionArchive.organization_id == organization_id)
-            .where(col(TaskforceSessionArchive.is_demo).is_(False))
+            .where(col(TaskforceSessionArchive.is_demo).is_(demo))
             .where(col(TaskforceSessionArchive.specialist_slug).is_(None))
             .order_by(col(TaskforceSessionArchive.updated_at).desc())
             .limit(200)
@@ -241,12 +244,13 @@ def _specialist_covers_cluster(
     *,
     organization_id: uuid.UUID,
     cluster_key: str,
+    demo: bool,
 ) -> bool:
     tokens = set(cluster_key.split("-"))
     specialists = session.exec(
         select(AgentSpecialist)
         .where(AgentSpecialist.organization_id == organization_id)
-        .where(col(AgentSpecialist.is_demo).is_(False))
+        .where(col(AgentSpecialist.is_demo).is_(demo))
         .where(col(AgentSpecialist.status).in_(("active", "proposed")))
     ).all()
     for specialist in specialists:
@@ -263,7 +267,15 @@ def propose_specialists_from_orphans(
     *,
     organization_id: uuid.UUID | None,
 ) -> dict[str, Any]:
-    """Birth proposed specialists from orphan session clusters (status=proposed)."""
+    """Birth proposed specialists from orphan session clusters (status=proposed).
+
+    Runs two isolated ``is_demo`` scopes so demo and live never cross-contaminate:
+    live orphans (``is_demo=False``) need ``CLUSTER_N`` sessions to birth a
+    profile, while demo orphans (``is_demo=True``) birth after a single session
+    (``DEMO_CLUSTER_N``) so a one-off demo run yields a visible proposal. Each born
+    specialist inherits its scope's ``is_demo`` flag, keeping it inside the dataset
+    the frontend demo-mode toggle shows or hides.
+    """
 
     report: dict[str, Any] = {
         "clusters_seen": 0,
@@ -273,10 +285,31 @@ def propose_specialists_from_orphans(
     if organization_id is None:
         return report
 
+    for demo, threshold in ((False, CLUSTER_N), (True, DEMO_CLUSTER_N)):
+        _propose_scope(
+            session,
+            organization_id=organization_id,
+            demo=demo,
+            threshold=threshold,
+            report=report,
+        )
+    return report
+
+
+def _propose_scope(
+    session: Session,
+    *,
+    organization_id: uuid.UUID,
+    demo: bool,
+    threshold: int,
+    report: dict[str, Any],
+) -> None:
+    """Birth proposals for one ``is_demo`` scope; mutates ``report`` in place."""
+
     clusters: dict[str, list[tuple[TaskforceSessionArchive, StoredEvolutionSummary]]] = (
         defaultdict(list)
     )
-    for archive in _orphan_archives(session, organization_id):
+    for archive in _orphan_archives(session, organization_id, demo=demo):
         stored = stored_summary_from_metadata(archive.source_metadata)
         if stored is None:
             continue
@@ -286,11 +319,14 @@ def propose_specialists_from_orphans(
         clusters[_cluster_key(stored, archive)].append((archive, stored))
 
     for cluster_key, members in clusters.items():
-        if len(members) < CLUSTER_N:
+        if len(members) < threshold:
             continue
         report["clusters_seen"] += 1
         if _specialist_covers_cluster(
-            session, organization_id=organization_id, cluster_key=cluster_key
+            session,
+            organization_id=organization_id,
+            cluster_key=cluster_key,
+            demo=demo,
         ):
             continue
 
@@ -300,6 +336,7 @@ def propose_specialists_from_orphans(
                 for row in session.exec(
                     select(AgentSpecialist)
                     .where(AgentSpecialist.organization_id == organization_id)
+                    .where(col(AgentSpecialist.is_demo).is_(demo))
                     .where(AgentSpecialist.status == "proposed")
                 ).all()
                 if (row.evolution_provenance or {}).get("cluster_key") == cluster_key
@@ -347,7 +384,7 @@ def propose_specialists_from_orphans(
                 "Review and confirm before routing — earned from orphan session cluster."
             ],
             created_from="earned",
-            is_demo=False,
+            is_demo=demo,
             evolution_provenance={
                 "cluster_key": cluster_key,
                 "source_session_ids": [archive.session_id for archive, _ in members],
@@ -359,5 +396,3 @@ def propose_specialists_from_orphans(
         session.flush()
         report["specialists_proposed"] += 1
         report["proposed_ids"].append(str(specialist.id))
-
-    return report
