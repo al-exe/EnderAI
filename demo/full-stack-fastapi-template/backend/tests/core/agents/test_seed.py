@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
 
 from app.core.agents.seed import (
     DOCUMENT_SLUG_TITLES,
@@ -21,6 +21,8 @@ from app.models import (
     AgentSpecialist,
     AgentSpecialistDocumentLink,
     MetricsEvent,
+    TaskforceSessionArchive,
+    TaskforceSessionEvent,
     TaskforceSessionStartRequest,
     User,
     V2Document,
@@ -135,6 +137,85 @@ def test_seed_demo_metrics_is_idempotent_and_surfaces_agent_api(
     assert len(detail["linked_knowledge"]) >= 3
     assert all("Stripe" in doc["title"] for doc in detail["linked_knowledge"])
     assert detail["recent_invocations"]
+
+
+def test_seed_demo_metrics_writes_rich_ledger_archives(
+    client: TestClient, db: Session
+) -> None:
+    """Seeded sessions get a full archive + transcript, not the empty state."""
+
+    signed_up, _ = _signup(client)
+    user = _db_user(db, signed_up)
+
+    seed_demo_metrics_for_user(db, user)
+    db.commit()
+
+    archives = db.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == user.id)
+        .where(TaskforceSessionArchive.is_demo.is_(True))  # type: ignore[union-attr]
+        .where(
+            TaskforceSessionArchive.source_metadata["seeded"].astext == "true"  # type: ignore[index]
+        )
+    ).all()
+    assert len(archives) >= 40
+
+    # Every archive is fully populated — no "Unknown" harness or zeroed counts.
+    for archive in archives:
+        assert archive.harness_label in {"claude-code", "codex", "cursor"}
+        assert archive.model_id
+        assert archive.title
+        assert archive.display_name
+        assert archive.duration_ms > 0
+        assert archive.message_count >= 2
+        assert archive.command_count >= 1
+        assert archive.edit_count >= 1
+        assert archive.input_tokens > 0
+        assert archive.output_tokens > 0
+        assert archive.started_at is not None
+        assert archive.ended_at is not None
+
+    # Harness rotation gives all three clients representative traffic.
+    assert {a.harness_label for a in archives} == {"claude-code", "codex", "cursor"}
+
+    # Each archived session has a real transcript (prompt + reply drive the
+    # "raw transcript available" flag, command/edit render the work).
+    sample = archives[0]
+    events = db.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.session_id == sample.session_id)
+        .where(TaskforceSessionEvent.is_demo.is_(True))  # type: ignore[union-attr]
+    ).all()
+    kinds = {event.kind for event in events}
+    assert {"prompt", "reply", "command", "edit"}.issubset(kinds)
+    assert any(event.kind == "prompt" and event.text for event in events)
+    assert any(
+        event.kind == "command" and event.cmd and event.output for event in events
+    )
+
+    # Re-seeding is idempotent: no duplicate archives or orphaned events.
+    seed_demo_metrics_for_user(db, user)
+    db.commit()
+    archive_count = db.exec(
+        select(func.count())
+        .select_from(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == user.id)
+        .where(TaskforceSessionArchive.is_demo.is_(True))  # type: ignore[union-attr]
+        .where(
+            TaskforceSessionArchive.source_metadata["seeded"].astext == "true"  # type: ignore[index]
+        )
+    ).one()
+    assert archive_count == len(archives)
+    seeded_event_count = db.exec(
+        select(func.count())
+        .select_from(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.actor_id == user.id)
+        .where(TaskforceSessionEvent.is_demo.is_(True))  # type: ignore[union-attr]
+        .where(col(TaskforceSessionEvent.source_event_id).like("tf198seed-%"))
+    ).one()
+    # Each session emits at least 7 events (prompt + 2 replies + note + 2
+    # commands + 1-2 edits); the reseed must not have doubled them.
+    assert seeded_event_count >= len(archives) * 7
 
 
 def test_seeded_jensen_routes_demo_session_start(
