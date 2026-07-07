@@ -29,6 +29,8 @@ from app.models import (
     AgentSpecialistDocumentLink,
     MetricsEvent,
     Organization,
+    TaskforceSessionArchive,
+    TaskforceSessionEvent,
     User,
     V2Document,
 )
@@ -920,6 +922,491 @@ ALEX_DEMO_INVOCATIONS: list[dict[str, Any]] = [
 ]
 
 
+# --- Ledger transcript content (TF-208) ------------------------------------
+# The metrics seeder above materializes ``metrics_event`` rows, which is enough
+# for the dashboards but leaves the Ledger *detail* view empty: harness shows
+# "Unknown", token/message/command/edit counts are 0, and the transcript panel
+# renders "Transcript archive is not available for this older session." The
+# ledger detail reads from ``taskforce_session_archive`` (provenance + counts)
+# and ``taskforce_session_event`` (the transcript). The content below lets the
+# seeder write a rich, domain-coherent archive + transcript per session so a
+# demo click lands on a full, readable session.
+
+_SPECIALIST_NAMES: dict[str, str] = {
+    spec["slug"]: spec["name"] for spec in SEEDED_SPECIALISTS
+}
+
+# Rotated across seeded sessions so the harness filter (Claude Code / Codex /
+# Cursor) has representative traffic. Values must match KNOWN_LEDGER_CLIENTS so
+# the frontend renders a real label instead of "Other".
+_HARNESS_ROTATION: tuple[str, ...] = ("claude-code", "codex", "cursor")
+_HARNESS_VERSIONS: dict[str, str] = {
+    "claude-code": "1.0.44",
+    "codex": "0.31.0",
+    "cursor": "0.45.2",
+}
+_HARNESS_MODELS: dict[str, str] = {
+    "claude-code": "claude-opus-4-7",
+    "codex": "gpt-5",
+    "cursor": "claude-sonnet-4-7",
+}
+
+
+@dataclass(frozen=True)
+class _Cmd:
+    cmd: str
+    output: str
+    exit_code: int = 0
+
+
+@dataclass(frozen=True)
+class _Edit:
+    file: str
+    added: int
+    removed: int
+
+
+# Per-specialist building blocks. Each session draws a couple of commands, one
+# or two edits, and a closing reply line from its specialist's bank so the
+# transcript reads like real domain work rather than lorem filler.
+_SESSION_CONTENT_BANK: dict[str, dict[str, Any]] = {
+    "jensen": {
+        "opening": (
+            "On it. Pulling the Stripe billing playbooks before touching the "
+            "handler — duplicate fulfillment almost always lives at the route "
+            "boundary, not inside the handler."
+        ),
+        "commands": [
+            _Cmd(
+                "stripe listen --forward-to localhost:8000/api/v1/stripe/webhook",
+                "Ready! Your webhook signing secret is whsec_… (^C to quit)\n"
+                "2026-06-28 10:29:04  --> invoice.payment_succeeded [evt_1Pk…]\n"
+                "2026-06-28 10:29:04  --> invoice.payment_succeeded [evt_1Pk…]  (retry)",
+            ),
+            _Cmd(
+                'rg -n "idempotency_key" app/api/routes/stripe_webhooks.py',
+                "41:    key = event.request.idempotency_key or event.id\n"
+                "58:    if already_fulfilled(session, key):\n"
+                "59:        return Response(status_code=200)",
+            ),
+            _Cmd(
+                "pytest tests/billing/test_webhook_idempotency.py -q",
+                "........                                              [100%]\n"
+                "8 passed in 3.42s",
+            ),
+            _Cmd(
+                "stripe trigger invoice.payment_succeeded",
+                "Setting up fixture for: invoice\nTrigger succeeded! "
+                "Check dashboard for evt_1Pk…",
+            ),
+        ],
+        "edits": [
+            _Edit("app/api/routes/stripe_webhooks.py", 27, 6),
+            _Edit("app/core/billing/idempotency.py", 19, 3),
+            _Edit("tests/billing/test_webhook_idempotency.py", 44, 0),
+        ],
+        "closing": (
+            "The second delivery now short-circuits on the idempotency key "
+            "before fulfillment runs, and the regression test asserts the "
+            "downstream credit is granted exactly once."
+        ),
+    },
+    "mira": {
+        "opening": (
+            "Looking at this as a retrieval problem first. Before re-scoring or "
+            "re-embedding I want to confirm whether the index is simply stale "
+            "after the details edit."
+        ),
+        "commands": [
+            _Cmd(
+                'rg -n "source_item_embedding" app/core/search/retrieval.py',
+                "22:    .join(SourceItemEmbedding, ...)\n"
+                "88:    # ACL filter applied AFTER vector search — see gotchas doc",
+            ),
+            _Cmd(
+                "uv run python -m app.scripts.reindex_documents --demo --dry-run",
+                "scanned 214 documents · 6 stale (index_marker < updated_at)\n"
+                "would re-embed 6 · dry-run, no writes",
+            ),
+            _Cmd(
+                "pytest tests/search/test_retrieval_acl.py -q",
+                "......                                                [100%]\n"
+                "6 passed in 2.11s",
+            ),
+        ],
+        "edits": [
+            _Edit("app/core/search/retrieval.py", 14, 4),
+            _Edit("app/core/search/indexer.py", 21, 5),
+        ],
+        "closing": (
+            "Root cause was a stale index marker, not scoring — the ACL filter "
+            "was already correct. Re-embedding the 6 drifted docs restores the "
+            "updated sections without touching retrieval ranking."
+        ),
+    },
+    "orin": {
+        "opening": (
+            "Splitting this into two independent failure domains: hook auth on "
+            "the client side and the hosted-MCP session binding on the server "
+            "side. Observe drops are almost always the second one."
+        ),
+        "commands": [
+            _Cmd(
+                'curl -sS -H "Authorization: Bearer $TF_TOKEN" '
+                '"$BACKEND/api/v1/v2/taskforce/observe" -d @observe.json',
+                '{"detail":"Mcp-Session-Id header missing"}',
+                exit_code=22,
+            ),
+            _Cmd(
+                "codex mcp get taskforce",
+                "taskforce  https://mcp.taskforce.tools/v1/mcp  (connected)\n"
+                "  session: bound  ·  last observe: 3s ago",
+            ),
+            _Cmd(
+                "jq '.hooks.PostToolUse' ~/.claude/settings.json",
+                '[{"matcher":"*","hooks":[{"command":".claude/hooks/observe.sh"}]}]',
+            ),
+        ],
+        "edits": [
+            _Edit(".claude/hooks/observe.sh", 12, 3),
+            _Edit("app/api/routes/taskforce.py", 9, 2),
+        ],
+        "closing": (
+            "The hook auth was fine — observe was dropping because the hosted "
+            "MCP session id wasn't threaded onto the retry path. Binding it on "
+            "the outbox retry closes the gap."
+        ),
+    },
+    "vega": {
+        "opening": (
+            "Let me reconcile the session-scoped number against the event "
+            "rollup. The gap is usually gross-vs-net: the dashboard nets out "
+            "the consult cost and the session view sometimes shows gross."
+        ),
+        "commands": [
+            _Cmd(
+                "uv run python -m app.scripts.seed_demo_metrics_alex",
+                "seed_demo_metrics_alex complete: sessions=61 events=214",
+            ),
+            _Cmd(
+                'psql "$DATABASE_URL" -c "select kind, sum(input_tokens) '
+                'from metrics_event where is_demo group by 1 order by 2 desc;"',
+                "       kind         |   sum\n"
+                "--------------------+---------\n"
+                " document.consulted | 1410000\n"
+                " tokens.saved.summary_only | 468900\n"
+                " tokens.saved.cache | 278300",
+            ),
+        ],
+        "edits": [
+            _Edit("app/core/metrics/ledger.py", 16, 6),
+        ],
+        "closing": (
+            "Confirmed: the session view was showing avoided-rediscovery gross "
+            "while the dashboard subtracts consult cost for net. Both agree "
+            "once you compare the same column."
+        ),
+    },
+    "nia": {
+        "opening": (
+            "Before writing anything I'll check whether an existing document "
+            "already covers this — reuse beats a near-duplicate every time the "
+            "repo, files, and intent line up."
+        ),
+        "commands": [
+            _Cmd(
+                'rg -n "referenced_by" app/core/v2_documents.py',
+                "612:    def append_referenced_by(...):\n"
+                "640:        # only on material reuse, not preview-only touches",
+            ),
+            _Cmd(
+                "git log --oneline -5 -- docs/",
+                "a1c2d3e docs: patch canonical incident doc\n"
+                "9f8e7d6 docs: add evidence anchors\n"
+                "4b5a6c7 docs: reuse-vs-create criteria",
+            ),
+        ],
+        "edits": [
+            _Edit("app/core/v2_documents.py", 22, 4),
+            _Edit("docs/planning/referenced-by-update-policy.md", 31, 8),
+        ],
+        "closing": (
+            "Patched the canonical doc rather than forking it, pinned the "
+            "evidence anchors to click-target nouns, and added a referenced-by "
+            "row only because this was material reuse."
+        ),
+    },
+}
+
+_DEFAULT_CONTENT = _SESSION_CONTENT_BANK["nia"]
+
+
+def _referenced_slugs_for_spec(spec: dict[str, Any]) -> list[str]:
+    """Ordered, de-duplicated doc slugs this session consulted."""
+
+    slugs: list[str] = [str(item["slug"]) for item in (spec.get("consultations") or [])]
+    anchor = spec.get("anchor_slug")
+    if anchor:
+        slugs.append(str(anchor))
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for slug in slugs:
+        if slug and slug not in seen:
+            ordered.append(slug)
+            seen.add(slug)
+    return ordered
+
+
+def _session_title_for_spec(spec: dict[str, Any], ref_slugs: list[str]) -> str:
+    """Concise session title derived from the user's ask (the prompt).
+
+    The prompt is always coherent with the session's specialist, whereas the
+    consulted documents are distributed across domains by the metrics targets
+    and would otherwise title (say) a metrics session with a Stripe doc. Falls
+    back to a consulted-doc title only when the prompt is empty.
+    """
+
+    prompt = " ".join(str(spec.get("prompt") or "").split()).rstrip(".")
+    if prompt:
+        return (prompt[:117] + "…") if len(prompt) > 118 else prompt
+    for slug in ref_slugs:
+        title = DOCUMENT_SLUG_TITLES.get(slug)
+        if title:
+            return title[:120]
+    return "Taskforce session"
+
+
+def _build_session_transcript(
+    spec: dict[str, Any],
+    *,
+    index: int,
+    ref_slugs: list[str],
+) -> list[dict[str, Any]]:
+    """A full prompt→reply→work→reply transcript for one seeded session."""
+
+    slug = str(spec.get("specialist_slug") or "")
+    name = _SPECIALIST_NAMES.get(slug, "Taskforce")
+    bank = _SESSION_CONTENT_BANK.get(slug, _DEFAULT_CONTENT)
+    commands: list[_Cmd] = bank["commands"]
+    edits: list[_Edit] = bank["edits"]
+
+    events: list[dict[str, Any]] = []
+    events.append(
+        {
+            "kind": "prompt",
+            "role": "user",
+            "who": "Alex Lee",
+            "text": str(spec["prompt"]),
+        }
+    )
+    events.append(
+        {
+            "kind": "reply",
+            "role": "assistant",
+            "who": name,
+            "text": str(bank["opening"]),
+        }
+    )
+
+    consult_titles = [DOCUMENT_SLUG_TITLES.get(slug, slug) for slug in ref_slugs][:4]
+    if consult_titles:
+        joined = "; ".join(consult_titles)
+        note = (
+            f"Taskforce routed to {name} and surfaced "
+            f"{len(consult_titles)} prior document(s): {joined}."
+        )
+    else:
+        note = f"Taskforce routed this session to {name}."
+    events.append({"kind": "note", "who": "Taskforce", "note": note[:4000]})
+
+    # Two commands + a reply + one or two edits, rotated by index for variety.
+    picked_cmds = [
+        commands[index % len(commands)],
+        commands[(index + 1) % len(commands)],
+    ]
+    for cmd in picked_cmds:
+        events.append(
+            {
+                "kind": "command",
+                "who": name,
+                "cmd": cmd.cmd[:2000],
+                "output": cmd.output[:4000],
+                "exit_code": cmd.exit_code,
+            }
+        )
+
+    edit_count = 2 if index % 2 == 0 and len(edits) > 1 else 1
+    for offset in range(edit_count):
+        edit = edits[(index + offset) % len(edits)]
+        events.append(
+            {
+                "kind": "edit",
+                "who": name,
+                "file": edit.file[:1024],
+                "added": edit.added,
+                "removed": edit.removed,
+            }
+        )
+
+    closing = f"{spec.get('summary', '').rstrip('.')}. {bank['closing']}".strip()
+    events.append(
+        {
+            "kind": "reply",
+            "role": "assistant",
+            "who": name,
+            "text": closing[:4000],
+        }
+    )
+    return events
+
+
+def _seed_session_archive(
+    session: Session,
+    user: User,
+    *,
+    session_id: str,
+    spec: dict[str, Any],
+    base_occurred_at: datetime,
+    index: int,
+    docs_by_slug: dict[str, V2Document],
+) -> None:
+    """Write a rich archive + transcript so the Ledger detail view is full."""
+
+    ref_slugs = _referenced_slugs_for_spec(spec)
+    ref_ids = [str(docs_by_slug[slug].id) for slug in ref_slugs if slug in docs_by_slug]
+    events = _build_session_transcript(spec, index=index, ref_slugs=ref_slugs)
+
+    harness = _HARNESS_ROTATION[index % len(_HARNESS_ROTATION)]
+    model_id = _HARNESS_MODELS[harness]
+    repo = str(spec.get("repo") or "al-exe/Taskforce")
+    cwd = f"/home/alexlee/dev/{repo.split('/')[-1]}"
+
+    message_count = 0
+    command_count = 0
+    edit_count = 0
+    last_occurred = base_occurred_at
+    for order, event in enumerate(events):
+        occurred = base_occurred_at + timedelta(seconds=45 + order * 95)
+        last_occurred = occurred
+        kind = event["kind"]
+        if kind in ("prompt", "reply"):
+            message_count += 1
+        elif kind == "command":
+            command_count += 1
+        elif kind == "edit":
+            edit_count += 1
+        session.add(
+            TaskforceSessionEvent(
+                session_id=session_id,
+                actor_id=user.id,
+                organization_id=user.organization_id,
+                is_demo=True,
+                source_event_id=f"tf198seed-{session_id}-{order}",
+                source_order=order,
+                kind=kind,
+                role=event.get("role"),
+                who=event.get("who"),
+                text=event.get("text"),
+                cmd=event.get("cmd"),
+                exit_code=event.get("exit_code"),
+                output=event.get("output"),
+                file=event.get("file"),
+                added=event.get("added"),
+                removed=event.get("removed"),
+                note=event.get("note"),
+                repo=repo,
+                occurred_at=occurred,
+                created_at=occurred,
+            )
+        )
+
+    ended_at = last_occurred + timedelta(seconds=75)
+    duration_ms = int((ended_at - base_occurred_at).total_seconds() * 1000)
+    base_tokens = int(
+        spec.get("cache_tokens", 0)
+        + spec.get("summary_only_tokens", 0)
+        + spec.get("reuse_tokens", 0)
+    )
+    if base_tokens <= 0:
+        base_tokens = sum(
+            int(item.get("avoided_tokens") or 0)
+            for item in (spec.get("consultations") or [])
+        )
+    input_tokens = max(6200, base_tokens)
+    output_tokens = int(input_tokens * 0.18)
+    cache_read_tokens = int(spec.get("cache_tokens", 0)) or int(input_tokens * 0.42)
+    cache_write_tokens = int(input_tokens * 0.09)
+
+    title = _session_title_for_spec(spec, ref_slugs)
+    archive = TaskforceSessionArchive(
+        session_id=session_id,
+        actor_id=user.id,
+        organization_id=user.organization_id,
+        is_demo=True,
+        client=harness,
+        specialist_slug=spec.get("specialist_slug"),
+        harness_label=harness,
+        harness_version=_HARNESS_VERSIONS[harness],
+        model_id=model_id,
+        repo=repo,
+        branch=spec.get("branch"),
+        cwd=cwd,
+        title=str(spec["prompt"])[:255],
+        conversation_summary=str(spec.get("summary") or "")[:255] or None,
+        display_name=title,
+        started_at=base_occurred_at,
+        ended_at=ended_at,
+        last_seen_at=ended_at,
+        last_turn_ended_at=ended_at,
+        duration_ms=duration_ms,
+        imported_at=base_occurred_at,
+        message_count=message_count,
+        command_count=command_count,
+        edit_count=edit_count,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        referenced_document_ids=ref_ids,
+        source_metadata={
+            "seeded": True,
+            "source": "tf-198-demo-agent-seed",
+            "kind": "final",
+            "outcome": "completed",
+            "documents_consulted_count": len(ref_ids),
+            "summary_points_count": 3,
+            "details_sections_count": 2,
+            "decisions_count": 1,
+            "has_structured_payload": True,
+        },
+        created_at=base_occurred_at,
+        updated_at=ended_at,
+    )
+    session.add(archive)
+
+
+def _delete_existing_seeded_archives(session: Session, user: User) -> None:
+    """Drop prior seeded archives + transcript events for an idempotent reseed."""
+
+    events = session.exec(
+        select(TaskforceSessionEvent)
+        .where(TaskforceSessionEvent.actor_id == user.id)
+        .where(col(TaskforceSessionEvent.is_demo).is_(True))
+        .where(col(TaskforceSessionEvent.source_event_id).like("tf198seed-%"))
+    ).all()
+    for event in events:
+        session.delete(event)
+    archives = session.exec(
+        select(TaskforceSessionArchive)
+        .where(TaskforceSessionArchive.actor_id == user.id)
+        .where(col(TaskforceSessionArchive.is_demo).is_(True))
+        .where(TaskforceSessionArchive.source_metadata["seeded"].astext == "true")
+    ).all()
+    for archive in archives:
+        session.delete(archive)
+    session.flush()
+
+
 def _usd_for_tokens(
     model_id: str, *, input_tokens: int, output_tokens: int = 0
 ) -> Decimal:
@@ -1181,6 +1668,7 @@ def seed_demo_metrics_for_user(session: Session, user: User) -> MetricsSeedResul
     seed_agents(session, user)
     session.flush()
     _delete_existing_seeded_metrics(session, user)
+    _delete_existing_seeded_archives(session, user)
 
     docs_by_slug = _document_by_slug(session, user)
     session_specs = _build_metrics_session_specs()
@@ -1365,6 +1853,18 @@ def seed_demo_metrics_for_user(session: Session, user: User) -> MetricsSeedResul
                     payload=base_payload,
                 )
             )
+
+        # This session materialized metrics events, so give it a rich archive
+        # + transcript for the Ledger detail view (harness, counts, transcript).
+        _seed_session_archive(
+            session,
+            user,
+            session_id=session_id,
+            spec=spec,
+            base_occurred_at=base_occurred_at,
+            index=index,
+            docs_by_slug=docs_by_slug,
+        )
 
     return MetricsSeedResult(
         sessions_created=len(session_specs),
