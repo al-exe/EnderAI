@@ -129,8 +129,12 @@ def test_propose_demo_specialist_from_single_orphan(db: Session) -> None:
 
     report = propose_specialists_from_orphans(db, organization_id=org.id)
     assert report["specialists_proposed"] == 1
+    # Scope to this test's org: the session-scoped db fixture accumulates rows
+    # across tests in the module.
     proposed = db.exec(
-        select(AgentSpecialist).where(AgentSpecialist.status == "proposed")
+        select(AgentSpecialist)
+        .where(AgentSpecialist.organization_id == org.id)
+        .where(AgentSpecialist.status == "proposed")
     ).all()
     assert len(proposed) == 1
     # Born into the demo dataset so the frontend demo-mode toggle governs it.
@@ -153,8 +157,14 @@ def test_single_live_orphan_does_not_propose(db: Session) -> None:
 
     report = propose_specialists_from_orphans(db, organization_id=org.id)
     assert report["specialists_proposed"] == 0
+    # Scope the count to this test's org (session-scoped db accumulates rows).
     assert (
-        db.exec(select(func.count()).select_from(AgentSpecialist)).one() == 0
+        db.exec(
+            select(func.count())
+            .select_from(AgentSpecialist)
+            .where(AgentSpecialist.organization_id == org.id)
+        ).one()
+        == 0
     )
 
 
