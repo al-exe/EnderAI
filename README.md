@@ -2,6 +2,8 @@
 
 **Mission control for your AI coding agents.**
 
+[![Watch the 60-second Taskforce demo](docs/media/taskforce-video.jpg)](https://youtu.be/zbJ9Badkvpk)
+
 Your team runs AI agents in Claude Code, Codex and Cursor. Taskforce puts them all in one place, lets you steer them, and keeps what they learn so the next agent starts ahead.
 
 ### See every agent your team is running
